@@ -119,3 +119,20 @@
 - `frontend/src/components/TaskDrawer.tsx` — unified chat log, collapse toggle, all new card renderers
 - `frontend/src/pages/ProjectBoardPage.tsx` — matching Copilot panel header with top-right collapse
 
+
+## 2026-04-18 — Multi-action refinement renderer
+
+### What was built
+- **Backend refinement protocol** (`tasks.py`): When user asks to "refine/clarify/improve description", AI follows a 4-step protocol:
+  1. Emit `update_description` with clear markdown desc + acceptance criteria
+  2. Emit `update_details` for all inferable facts (skipping already-captured keys)
+  3. Ask remaining open questions as numbered plain-text list
+  4. On each answer: emit `update_details`, emit `mark_ready` when all answered
+- **Context injection**: `task_details` JSONB rendered as `key: value` lines in system prompt so AI never re-asks captured facts
+- **Persistence**: Every user + assistant message saved to `task_interactions` table
+
+### Frontend changes (`TaskDrawer.tsx`)
+- `parseAllTaskActions(content)` — extracts all fenced JSON blocks from one message
+- `stripActionBlocks(content)` — removes JSON blocks, returns trailing prose/questions
+- Assistant renderer replaced: each message now renders N action cards (one per JSON block) with compound confirmed-state key `i*1000+j`, followed by prose section
+- Old single-action renderer fully removed
