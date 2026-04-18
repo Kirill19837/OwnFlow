@@ -2,6 +2,24 @@
 
 ---
 
+## 2026-04-18 | `fc7d941` — GitHub per-project PAT integration with auto PR creation
+
+Each project owner enters their own GitHub Personal Access Token + target repo in project settings. No shared GitHub App credentials required.
+
+**Backend**
+- `migrations/003_github_integration.sql` — new `github_connections` table + `tasks.github_pr_url` column
+- `app/services/github_service.py` — PAT-based: `verify_token`, `create_branch`, `commit_file`, `open_pull_request`, `create_pr_for_task`
+- `app/api/github.py` — `POST /github/connect` (validates token against repo), `GET /status`, `PATCH /repo`, `DELETE /disconnect`
+- `actor_executor.py` — calls `create_pr_for_task` after deliverable saved (both sync and stream), silently skips if not connected
+- Removed shared GitHub App config fields and PyJWT/cryptography dependencies
+
+**Frontend**
+- Project settings panel: GitHub section with PAT + repo form, connected state with repo display, change repo input, disconnect button
+- `TaskCard`: PR badge icon linking to GitHub when `github_pr_url` is set
+- `TaskDrawer`: Pull Request section with clickable PR link
+
+---
+
 ## 2026-04-18 | `145a911` — Board chat minimize + agent-aware task drawer chat
 - Board: minimize/restore toggle collapses prompt bar to a compact pill; history preserved while minimized
 - Task drawer: agent-aware Q&A chat panel
