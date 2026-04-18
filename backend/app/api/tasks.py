@@ -77,8 +77,12 @@ async def update_task_description(task_id: str, body: dict):
     content = (body.get("content") or "").strip()
     if not content:
         raise HTTPException(400, "content is required")
-    db.table("tasks").update({"description": content}).eq("id", task_id).execute()
-    return {"task_id": task_id, "description": content}
+    update: dict = {"description": content}
+    title = (body.get("title") or "").strip()
+    if title:
+        update["title"] = title
+    db.table("tasks").update(update).eq("id", task_id).execute()
+    return {"task_id": task_id, **update}
 
 
 @router.patch("/{task_id}/details")
@@ -240,9 +244,11 @@ async def prompt_task_stream(task_id: str, body: dict):
                 "When the user asks you to refine, clarify, or improve this task "
                 "(phrases like 'refine', 'clarify', 'improve description', 'what do you need', "
                 "'ask me questions', 'fill in details', etc.), follow this exact process:\n\n"
-                "STEP 1 — Rewrite description.\n"
-                "  Emit one update_description action with a clear, actionable markdown description. "
-                "  It must include: goal, acceptance criteria, and any technical notes you can infer.\n\n"
+                "STEP 1 — Rewrite title and description.\n"
+                "  Emit one update_description action. Include a concise `title` (≤ 10 words, plain text, no "
+                "  markdown symbols) AND a full `content` description in markdown with: goal, acceptance "
+                "  criteria, and any technical notes you can infer. The title should clearly name what "
+                "  this task does.\n\n"
                 "STEP 2 — Capture known structured decisions.\n"
                 "  Emit one update_details action for every fact you can already infer from the "
                 "  description, project context, or prior conversation. "
@@ -261,7 +267,7 @@ async def prompt_task_stream(task_id: str, body: dict):
                 "────────────────────────────────────\n\n"
                 "STRUCTURED ACTIONS (respond with ONLY a fenced JSON block — no prose before/after):\n\n"
                 "```json\n"
-                '{"intent":"update_description","content":"<full markdown description>"}\n'
+                '{"intent":"update_description","title":"<concise task name>","content":"<full markdown description>"}\n'
                 "```\n"
                 "```json\n"
                 '{"intent":"update_details","details":{"<key>":"<value>",...}}\n'

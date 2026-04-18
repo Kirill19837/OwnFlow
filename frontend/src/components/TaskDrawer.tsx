@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
+import { type TaskAction, parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 
@@ -20,14 +21,6 @@ const PRIORITY_COLOR: Record<string, string> = {
   high: 'text-orange-400',
   critical: 'text-red-400',
 }
-
-type TaskAction =
-  | { intent: 'assign_actor'; actor_id: string; actor_name: string }
-  | { intent: 'update_status'; status: string }
-  | { intent: 'execute_task'; confirm: boolean }
-  | { intent: 'update_description'; content: string }
-  | { intent: 'update_details'; details: Record<string, string> }
-  | { intent: 'mark_ready'; summary: string }
 
 // Chat message types
 type ChatMsg =
@@ -114,7 +107,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   })
 
   const updateDescription = useMutation({
-    mutationFn: (content: string) => api.patch(`/tasks/${task.id}/description`, { content }),
+    mutationFn: ({ content, title }: { content: string; title?: string }) =>
+      api.patch(`/tasks/${task.id}/description`, { content, title }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
   })
 
@@ -134,38 +128,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       : (task.assignments as any)
     return a.id === a0?.actor_id
   })
-
-  function parseTaskAction(content: string): TaskAction | null {
-    const m = content.match(/```json\s*([\s\S]*?)```/)
-    if (!m) return null
-    try {
-      const parsed = JSON.parse(m[1].trim())
-      if (['assign_actor', 'update_status', 'execute_task', 'update_description', 'update_details', 'mark_ready'].includes(parsed.intent)) {
-        return parsed as TaskAction
-      }
-    } catch {}
-    return null
-  }
-
-  // Extract ALL action blocks from a single assistant message (refinement can emit several)
-  function parseAllTaskActions(content: string): TaskAction[] {
-    const SUPPORTED = ['assign_actor', 'update_status', 'execute_task', 'update_description', 'update_details', 'mark_ready']
-    const re = /```json\s*([\s\S]*?)```/g
-    const actions: TaskAction[] = []
-    let m: RegExpExecArray | null
-    while ((m = re.exec(content)) !== null) {
-      try {
-        const parsed = JSON.parse(m[1].trim())
-        if (SUPPORTED.includes(parsed.intent)) actions.push(parsed as TaskAction)
-      } catch {}
-    }
-    return actions
-  }
-
-  // Prose text with all JSON blocks stripped out
-  function stripActionBlocks(content: string): string {
-    return content.replace(/```json[\s\S]*?```/g, '').trim()
-  }
 
   const handlePrompt = async () => {
     const msg = promptInput.trim()
@@ -293,7 +255,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     } else if (action.intent === 'update_status') {
       updateStatus.mutate(action.status, { onSuccess: markDone })
     } else if (action.intent === 'update_description') {
-      updateDescription.mutate(action.content, { onSuccess: markDone })
+      updateDescription.mutate({ content: action.content, title: action.title }, { onSuccess: markDone })
     } else if (action.intent === 'update_details') {
       updateDetails.mutate(action.details, { onSuccess: markDone })
     } else if (action.intent === 'mark_ready') {
@@ -449,11 +411,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               className="flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg transition-colors"
             >
               <Zap size={14} />
-              {task.status === 'todo' && 'Start Work'}
-              {task.status === 'in_progress' && 'Submit for Review'}
-              {task.status === 'review' && 'Mark Done'}
+              {task.status === 'todo' && 'Move to In Progress'}
+              {task.status === 'in_progress' && 'Move to Review'}
+              {task.status === 'review' && 'Move to Done'}
               {task.status === 'done' && 'Done ✓'}
-              {task.status === 'rework' && 'Resume Work'}
+              {task.status === 'rework' && 'Move to In Progress'}
             </button>
           </div>
 
@@ -591,13 +553,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         return (
                           <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
                             <p className="text-xs text-teal-400 font-semibold uppercase tracking-wide">Update task documentation</p>
+                            {action.title && (
+                              <p className="text-xs font-semibold text-white bg-gray-950 rounded px-2 py-1">
+                                📝 {action.title}
+                              </p>
+                            )}
                             <div className="text-xs text-gray-300 bg-gray-950 rounded-lg px-2 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
                               {action.content.slice(0, 300)}{action.content.length > 300 ? '…' : ''}
                             </div>
-                            <button onClick={() => { updateDescription.mutate(action.content, { onSuccess: markCardDone }) }} disabled={confirmed || updateDescription.isPending}
+                            <button onClick={() => { updateDescription.mutate({ content: action.content, title: action.title }, { onSuccess: markCardDone }) }} disabled={confirmed || updateDescription.isPending}
                               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
                               style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(20,184,166,0.15)', color: '#2dd4bf' }}>
-                              {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDescription.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><FileText size={11} /> Save to task</>}
+                              {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDescription.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><FileText size={11} /> Save title &amp; description</>}
                             </button>
                           </div>
                         )

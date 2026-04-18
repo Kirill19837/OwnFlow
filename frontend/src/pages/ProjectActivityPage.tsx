@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import api from '../lib/api'
 import { ChevronLeft, MessageSquare, ListChecks, Bot, User, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
+import AssistantMessage from '../components/AssistantMessage'
 
 interface Interaction {
   id: string
@@ -208,15 +209,13 @@ export default function ProjectActivityPage() {
                         </div>
 
                         <div className={`flex flex-col gap-1 max-w-[75%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                          <div
-                            className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
-                              msg.role === 'assistant'
-                                ? 'bg-gray-900 text-gray-200'
-                                : 'bg-gray-800 text-gray-100'
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
+                          {msg.role === 'assistant' ? (
+                            <AssistantMessage content={msg.content} />
+                          ) : (
+                            <div className="bg-gray-800 text-gray-100 rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words">
+                              {msg.content}
+                            </div>
+                          )}
                           <span className="text-[10px] text-gray-600">
                             {format(new Date(msg.created_at), 'MMM d, HH:mm')}
                           </span>
