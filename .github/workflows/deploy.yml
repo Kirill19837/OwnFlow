@@ -21,10 +21,10 @@ jobs:
             set -e
 
             # ── Clone or update repo ────────────────────────────
-            if [ ! -d "/opt/ownflow/.git" ]; then
-              git clone https://github.com/Kirill19837/OwnFlow.git /opt/ownflow
+            if [ ! -d "/home/kirill/ownflow/.git" ]; then
+              git clone https://github.com/Kirill19837/OwnFlow.git /home/kirill/ownflow
             fi
-            cd /opt/ownflow
+            cd /home/kirill/ownflow
             git fetch origin main
             git reset --hard origin/main
 
