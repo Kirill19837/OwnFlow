@@ -5,7 +5,15 @@ import api from '../lib/api'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 
-const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done'] as const
+const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
+
+const WORKFLOW: Record<string, string> = {
+  todo: 'in_progress',
+  in_progress: 'review',
+  review: 'done',
+  done: 'done',
+  rework: 'in_progress',
+}
 const PRIORITY_COLOR: Record<string, string> = {
   low: 'text-gray-400',
   medium: 'text-yellow-400',
@@ -163,11 +171,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           {/* Start Work */}
           <div>
             <button
-              onClick={() => {}}
-              className="flex items-center gap-2 bg-green-700 hover:bg-green-600 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+              onClick={() => {
+                const next = WORKFLOW[task.status]
+                if (next && next !== task.status) updateStatus.mutate(next)
+              }}
+              disabled={task.status === 'done' || updateStatus.isPending}
+              className="flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg transition-colors"
             >
               <Zap size={14} />
-              Start Work
+              {task.status === 'todo' && 'Start Work'}
+              {task.status === 'in_progress' && 'Submit for Review'}
+              {task.status === 'review' && 'Mark Done'}
+              {task.status === 'done' && 'Done ✓'}
+              {task.status === 'rework' && 'Resume Work'}
             </button>
           </div>
 

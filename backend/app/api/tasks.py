@@ -43,7 +43,7 @@ async def assign_task(task_id: str, body: TaskAssign):
 @router.patch("/{task_id}/status")
 async def update_task_status(task_id: str, body: dict):
     db = get_supabase()
-    allowed = {"todo", "in_progress", "review", "done"}
+    allowed = {"todo", "in_progress", "review", "done", "rework"}
     status = body.get("status")
     if status not in allowed:
         raise HTTPException(400, f"status must be one of {allowed}")
