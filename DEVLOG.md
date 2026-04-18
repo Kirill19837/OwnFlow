@@ -2,6 +2,23 @@
 
 ---
 
+## 2026-04-18 | `145a911` — Board chat minimize + agent-aware task drawer chat
+- Board: minimize/restore toggle collapses prompt bar to a compact pill; history preserved while minimized
+- Task drawer: agent-aware Q&A chat panel
+  - Agent name and role shown in chat header
+  - Placeholder reads "Ask Alice…" when an actor is assigned
+  - Silent buffering while thinking — shows "Alice is thinking…" spinner, no raw JSON exposed
+  - Three structured action cards from agent responses:
+    - **assign_actor** (blue) — shows target actor, confirm assigns them
+    - **update_status** (yellow) — shows `old → new` status, apply button
+    - **execute_task** (purple) — one-click AI execution trigger
+  - Each confirm button turns green "Done" after acting; disables to prevent double-fire
+  - Clear button in agent header resets the conversation
+- Backend: task prompt endpoint now speaks as the assigned actor by name,
+  lists all project actors with IDs so AI can produce real `assign_actor` intents
+
+---
+
 ## 2026-04-18 | `0b9cfe3` — AI prompt chat on kanban + structured task actions
 - Task drawer: pinned chat panel at bottom with streaming AI responses, task/project context in system prompt
 - Board: floating prompt bar (fixed bottom-center) with project-level AI chat
