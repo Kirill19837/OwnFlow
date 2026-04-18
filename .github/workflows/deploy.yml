@@ -1,0 +1,53 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'pitch/**'
+      - '*.md'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ vars.HOST_DEPLOY_IP }}
+          username: ${{ vars.HOST_USER }}
+          key: ${{ secrets.HOST_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+
+            # ── Clone or update repo ────────────────────────────
+            if [ ! -d "/opt/ownflow/.git" ]; then
+              git clone https://github.com/Kirill19837/OwnFlow.git /opt/ownflow
+            fi
+            cd /opt/ownflow
+            git fetch origin main
+            git reset --hard origin/main
+
+            # ── Write backend .env ──────────────────────────────
+            cat > backend/.env <<'ENVEOF'
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            CORS_ORIGINS=http://ownflow.21century.tech
+            ENVEOF
+
+            # ── Write frontend build args env ───────────────────
+            cat > .env.prod <<'ENVEOF'
+            VITE_API_URL=http://ownflow.21century.tech/api
+            VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
+            ENVEOF
+
+            # ── Build and restart ───────────────────────────────
+            docker compose -f docker-compose.prod.yml --env-file .env.prod \
+              up -d --build --remove-orphans
+
+            # ── Cleanup ─────────────────────────────────────────
+            docker image prune -f
+            rm -f .env.prod
