@@ -92,6 +92,7 @@ export default function NewProjectPage() {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [aiModel, setAiModel] = useState(activeOrg?.default_ai_model ?? 'gpt-4o')
+  const [sprintDays, setSprintDays] = useState(3)
   const defaultActorModel = activeOrg?.default_ai_model ?? 'gpt-4o'
   const [actors, setActors] = useState<ActorDraft[]>(() => {
     _usedNames = []
@@ -121,6 +122,7 @@ export default function NewProjectPage() {
         owner_id: session!.user.id,
         org_id: activeOrg?.id ?? null,
         ai_model: aiModel,
+        sprint_days: sprintDays,
         auto_plan: false,
       })
       await Promise.all(
@@ -422,6 +424,33 @@ export default function NewProjectPage() {
               <option key={m.value} value={m.value}>{m.label} ({m.provider})</option>
             ))}
           </select>
+        </div>
+
+        {/* Sprint length */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1">Sprint length</label>
+          <p className="text-xs text-gray-500 mb-2">
+            How many calendar days per sprint. Affects task capacity (8 h/day).
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {[1, 2, 3, 5, 7, 10, 14].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setSprintDays(d)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  sprintDays === d
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+            <span className="text-xs text-gray-500 self-center ml-1">
+              {sprintDays} day{sprintDays !== 1 ? 's' : ''} · {sprintDays * 8}h capacity
+            </span>
+          </div>
         </div>
 
         {createProject.isError && (

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import api from '../lib/api'
 import { useProjectStore } from '../store/projectStore'
@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, Loader2, AlertCircle, Bot, User } from 'lucide-react'
+import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X } from 'lucide-react'
 import { format } from 'date-fns'
 
 const COLUMNS = [
@@ -24,12 +24,24 @@ export default function ProjectBoardPage() {
   const { currentProject, setCurrentProject } = useProjectStore()
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => api.get<Project>(`/projects/${projectId}`).then((r) => r.data),
     enabled: !!projectId,
     refetchInterval: (query) => (query.state.data?.status === 'planning' ? 3000 : false),
+  })
+
+  const qc = useQueryClient()
+  const saveSettings = useMutation({
+    mutationFn: () =>
+      api.patch(`/projects/${projectId}/settings`, { sprint_days: settingsSprintDays }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] })
+      setShowSettings(false)
+    },
   })
 
   useRealtimeProject(projectId)
@@ -40,6 +52,7 @@ export default function ProjectBoardPage() {
       if (!activeSprint && data.sprints?.length) {
         setActiveSprint(data.sprints[0].id)
       }
+      setSettingsSprintDays(data.sprint_days ?? 3)
     }
   }, [data])
 
@@ -83,6 +96,13 @@ export default function ProjectBoardPage() {
   const actors = project.actors ?? []
   const sprintTasks = (project.tasks ?? []).filter((t) => t.sprint_id === activeSprint)
 
+  // Show "Plan Next Sprint" when roadmap has more sprints than currently exist
+  const roadmap = project.roadmap ?? []
+  const maxRoadmapSprint = roadmap.length > 0 ? Math.max(...roadmap.map((r) => r.sprint_number)) : 0
+  const currentSprintCount = sprints.length
+  const canPlanNextSprint = project.status === 'active' && currentSprintCount < maxRoadmapSprint
+  const nextSprintTheme = roadmap.find((r) => r.sprint_number === currentSprintCount + 1)
+
 
 
   return (
@@ -100,7 +120,73 @@ export default function ProjectBoardPage() {
           <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded capitalize">
             {project.status}
           </span>
+          <div className="ml-auto flex items-center gap-2">
+            {canPlanNextSprint && (
+              <button
+                onClick={() => planNextSprint.mutate(project.roadmap?.[0] ? 'gpt-4o' : 'gpt-4o')}
+                disabled={planNextSprint.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {planNextSprint.isPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Sparkles size={13} />
+                )}
+                Plan Sprint {currentSprintCount + 1}
+                {nextSprintTheme && (
+                  <span className="text-purple-200 text-xs">— {nextSprintTheme.theme}</span>
+                )}
+              </button>
+            )}
+            <button
+              onClick={() => setShowSettings((v) => !v)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+              title="Project settings"
+            >
+              <Settings2 size={16} />
+            </button>
+          </div>
         </div>
+
+        {/* Settings panel */}
+        {showSettings && (
+          <div className="mb-3 p-4 bg-gray-900 border border-gray-700 rounded-xl">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-white">Project Settings</span>
+              <button onClick={() => setShowSettings(false)} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-sm text-gray-400 whitespace-nowrap">Sprint length (days)</label>
+              <div className="flex items-center gap-2">
+                {[1, 2, 3, 5, 7, 10, 14].map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setSettingsSprintDays(d)}
+                    className={`w-9 h-8 rounded-lg text-sm font-medium transition-colors ${
+                      settingsSprintDays === d
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => saveSettings.mutate()}
+                disabled={saveSettings.isPending || settingsSprintDays === (project.sprint_days ?? 3)}
+                className="ml-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+              >
+                {saveSettings.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 mt-2">
+              Applies to future sprints. Existing sprints are not affected.
+            </p>
+          </div>
+        )}
 
         {/* Sprint tabs */}
         <div className="flex gap-1 overflow-x-auto">

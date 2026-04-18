@@ -29,6 +29,7 @@ class ProjectCreate(BaseModel):
     org_id: Optional[str] = None
     ai_model: Optional[str] = None  # override org default
     auto_plan: bool = True  # set False to stream planning manually
+    sprint_days: int = 3  # sprint length in calendar days
 
 
 class Project(BaseModel):
@@ -38,6 +39,8 @@ class Project(BaseModel):
     owner_id: str
     org_id: Optional[str]
     status: str
+    sprint_days: int = 3
+    roadmap: Optional[List] = None
     created_at: datetime
 
 
@@ -59,6 +62,13 @@ class Actor(BaseModel):
     model: Optional[str]
     capabilities: List[str]
     avatar_url: Optional[str]
+
+
+# ── Sprints / Roadmap ────────────────────────────────────
+class SprintTheme(BaseModel):
+    sprint_number: int
+    theme: str
+    goal: str
 
 
 # ── Tasks ─────────────────────────────────────────────────

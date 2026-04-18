@@ -8,7 +8,7 @@ import uuid
 
 SPRINT_DAYS = 3
 HOURS_PER_DAY = 8
-CAPACITY_PER_SPRINT = SPRINT_DAYS * HOURS_PER_DAY  # 24 h
+CAPACITY_PER_SPRINT = SPRINT_DAYS * HOURS_PER_DAY  # 24 h default
 
 
 def _topo_sort(tasks: List[TaskDraft]) -> List[int]:
@@ -34,10 +34,13 @@ async def plan_and_persist(
     project_id: str,
     tasks: List[TaskDraft],
     start_date: Optional[date] = None,
+    start_sprint_number: int = 0,
+    sprint_days: int = SPRINT_DAYS,
 ) -> dict:
-    """Pack tasks into 3-day sprints and write sprints + tasks to Supabase."""
+    """Pack tasks into sprints and write sprints + tasks to Supabase."""
+    capacity = sprint_days * HOURS_PER_DAY
     if start_date is None:
-        start_date = date.today()
+        start_date = date.today() + timedelta(days=start_sprint_number * sprint_days)
 
     db = get_supabase()
     sorted_indices = _topo_sort(tasks)
@@ -53,8 +56,8 @@ async def plan_and_persist(
     sprint_num = 0
 
     def flush_sprint(task_indices: List[int], snum: int):
-        sprint_start = start_date + timedelta(days=snum * SPRINT_DAYS)
-        sprint_end = sprint_start + timedelta(days=SPRINT_DAYS - 1)
+        sprint_start = start_date + timedelta(days=(snum - start_sprint_number) * sprint_days)
+        sprint_end = sprint_start + timedelta(days=sprint_days - 1)
         sprint_id = str(uuid.uuid4())
         sprints.append(
             {
@@ -90,7 +93,7 @@ async def plan_and_persist(
 
     for idx in sorted_indices:
         h = tasks[idx].estimated_hours
-        if current_hours + h > CAPACITY_PER_SPRINT and current_sprint_tasks:
+        if current_hours + h > capacity and current_sprint_tasks:
             sprint_task_buckets.append(current_sprint_tasks)
             current_sprint_tasks = []
             current_hours = 0.0
@@ -102,7 +105,7 @@ async def plan_and_persist(
 
     sprint_ids: List[str] = []
     for snum, bucket in enumerate(sprint_task_buckets):
-        sid = flush_sprint(bucket, snum)
+        sid = flush_sprint(bucket, start_sprint_number + snum)
         sprint_ids.append(sid)
 
     # Resolve depends_on indices → UUIDs

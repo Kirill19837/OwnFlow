@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from app.models import ProjectCreate, ActorCreate
 from app.db import get_supabase
-from app.services.ai_orchestrator import breakdown_project
+from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, generate_next_sprint
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
 import uuid
@@ -31,20 +31,21 @@ async def create_project(body: ProjectCreate, background_tasks: BackgroundTasks)
         "prompt": body.prompt,
         "owner_id": body.owner_id,
         "org_id": body.org_id,
+        "sprint_days": body.sprint_days,
         "status": "planning",
     }
     db.table("projects").insert(row).execute()
 
     if body.auto_plan:
-        background_tasks.add_task(_run_planning, project_id, body.prompt, ai_model)
+        background_tasks.add_task(_run_planning, project_id, body.prompt, ai_model, body.sprint_days)
     return {"id": project_id, "status": "planning", "ai_model": ai_model}
 
 
-async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o"):
+async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", sprint_days: int = 3):
     db = get_supabase()
     try:
         tasks = await breakdown_project(prompt, model=ai_model)
-        result = await plan_and_persist(project_id, tasks)
+        result = await plan_and_persist(project_id, tasks, sprint_days=sprint_days)
 
         # Auto-assign all sprints
         sprints_resp = (
@@ -62,10 +63,11 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o"):
 @router.get("/{project_id}/plan/stream")
 async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
     db = get_supabase()
-    project_resp = db.table("projects").select("name,prompt").eq("id", project_id).single().execute()
+    project_resp = db.table("projects").select("name,prompt,sprint_days").eq("id", project_id).single().execute()
     if not project_resp.data:
         raise HTTPException(404, "Project not found")
     project = project_resp.data
+    sprint_days: int = project.get("sprint_days") or 3
 
     async def event_stream():
         def _persist_log(msg: str, level: str = "info") -> None:
@@ -86,17 +88,18 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
 
         try:
             yield _log(f"🔍 Analyzing project: {project['name']!r}")
-            yield _log(f"⚙️  Calling {ai_model} to generate task breakdown…")
+            yield _log(f"⚙️  Calling {ai_model} to generate roadmap + Sprint 1 breakdown…")
 
-            task_drafts = await breakdown_project(project["prompt"], model=ai_model, project_id=project_id)
-            yield _log(f"📋 Generated {len(task_drafts)} tasks")
+            sprint1_tasks, roadmap = await plan_sprint_one(project["prompt"], model=ai_model, project_id=project_id)
+            yield _log(f"🗺️  Roadmap: {len(roadmap)} sprints planned")
+            yield _log(f"📋 Sprint 1: {len(sprint1_tasks)} tasks generated")
 
-            yield _log("📅 Organizing tasks into sprints…")
-            await plan_and_persist(project_id, task_drafts)
+            yield _log("📅 Organizing Sprint 1 tasks…")
+            await plan_and_persist(project_id, sprint1_tasks, start_sprint_number=0, sprint_days=sprint_days)
 
             sprints_resp = db.table("sprints").select("id").eq("project_id", project_id).execute()
             sprint_count = len(sprints_resp.data or [])
-            yield _log(f"🗂️  Created {sprint_count} sprints")
+            yield _log(f"🗂️  Created {sprint_count} sprint(s) — more sprints planned on-demand")
 
             yield _log("🤖 Auto-assigning tasks to actors…")
             for sprint in sprints_resp.data or []:
@@ -191,16 +194,89 @@ async def delete_project(project_id: str):
     db.table("projects").delete().eq("id", project_id).execute()
 
 
+@router.patch("/{project_id}/settings", status_code=200)
+async def update_project_settings(project_id: str, body: dict):
+    """Update editable project settings: name, sprint_days."""
+    db = get_supabase()
+    project = db.table("projects").select("id").eq("id", project_id).single().execute()
+    if not project.data:
+        raise HTTPException(404, "Project not found")
+    allowed = {"name", "sprint_days"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        raise HTTPException(400, "No valid settings to update")
+    if "sprint_days" in update:
+        if not isinstance(update["sprint_days"], int) or update["sprint_days"] < 1 or update["sprint_days"] > 30:
+            raise HTTPException(400, "sprint_days must be an integer between 1 and 30")
+    db.table("projects").update(update).eq("id", project_id).execute()
+    return {"id": project_id, **update}
+
+
 @router.post("/{project_id}/regenerate", status_code=200)
 async def regenerate_plan(project_id: str):
     """Wipe all sprints/tasks/assignments for a project and re-run planning via the stream endpoint."""
     db = get_supabase()
-    project = db.table("projects").select("id,prompt,ai_model").eq("id", project_id).single().execute()
+    project = db.table("projects").select("id,prompt").eq("id", project_id).single().execute()
     if not project.data:
         raise HTTPException(404, "Project not found")
 
     # Delete existing sprints (cascade deletes tasks + assignments)
     db.table("sprints").delete().eq("project_id", project_id).execute()
     # Reset status back to planning
-    db.table("projects").update({"status": "planning"}).eq("id", project_id).execute()
+    db.table("projects").update({"status": "planning", "roadmap": None}).eq("id", project_id).execute()
     return {"id": project_id, "status": "planning"}
+
+
+@router.post("/{project_id}/sprints/next", status_code=201)
+async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
+    """Generate tasks for the next sprint using stored roadmap + completed sprint context."""
+    db = get_supabase()
+
+    project = db.table("projects").select("id,roadmap,sprint_days").eq("id", project_id).single().execute()
+    if not project.data:
+        raise HTTPException(404, "Project not found")
+    if not project.data.get("roadmap"):
+        raise HTTPException(400, "No roadmap found. Run initial planning first.")
+    sprint_days: int = project.data.get("sprint_days") or 3
+
+    # Find the highest existing sprint number
+    existing = (
+        db.table("sprints")
+        .select("sprint_number")
+        .eq("project_id", project_id)
+        .order("sprint_number", desc=True)
+        .limit(1)
+        .execute()
+    )
+    last_sprint_num = existing.data[0]["sprint_number"] if existing.data else 0
+    next_sprint_num = last_sprint_num + 1
+
+    # Check the roadmap has a theme for this sprint
+    roadmap = project.data["roadmap"]
+    max_sprint = max((r.get("sprint_number", 0) for r in roadmap), default=0)
+    if next_sprint_num > max_sprint:
+        raise HTTPException(400, f"All {max_sprint} planned sprints already exist. Roadmap is complete.")
+
+    # Generate tasks for next sprint
+    tasks = await generate_next_sprint(project_id, next_sprint_num, model=ai_model)
+    if not tasks:
+        raise HTTPException(500, "AI returned no tasks for the next sprint")
+
+    # Persist sprint with correct number offset
+    result = await plan_and_persist(project_id, tasks, start_sprint_number=last_sprint_num, sprint_days=sprint_days)
+
+    # Auto-assign
+    new_sprints = (
+        db.table("sprints")
+        .select("id")
+        .eq("project_id", project_id)
+        .eq("sprint_number", next_sprint_num)
+        .execute()
+    )
+    for sprint in new_sprints.data or []:
+        await auto_assign(sprint["id"])
+
+    return {
+        "sprint_number": next_sprint_num,
+        "task_count": result["task_count"],
+    }

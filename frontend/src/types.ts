@@ -64,6 +64,12 @@ export interface Sprint {
   status: string
 }
 
+export interface SprintTheme {
+  sprint_number: number
+  theme: string
+  goal: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -72,6 +78,8 @@ export interface Project {
   org_id?: string
   status: 'planning' | 'active' | 'error'
   created_at: string
+  sprint_days?: number
+  roadmap?: SprintTheme[]
   sprints?: Sprint[]
   tasks?: Task[]
   actors?: Actor[]
