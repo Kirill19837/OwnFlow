@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -327,6 +327,13 @@ export default function ProjectBoardPage() {
                 )}
               </button>
             )}
+            <button
+              onClick={() => navigate(`/projects/${projectId}/activity`)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+              title="Project activity"
+            >
+              <Activity size={16} />
+            </button>
             <button
               onClick={() => setShowSettings((v) => !v)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"

@@ -470,3 +470,56 @@ async def run_ready_tasks(project_id: str, background_tasks: BackgroundTasks):
                 break
 
     return {"queued": len(queued), "task_ids": queued}
+
+
+@router.get("/{project_id}/activity")
+async def get_project_activity(project_id: str):
+    """Return all task interactions + task_details decisions for the project."""
+    db = get_supabase()
+
+    # Get all sprint IDs then all tasks for project
+    sprints = db.table("sprints").select("id").eq("project_id", project_id).execute()
+    sprint_ids = [s["id"] for s in (sprints.data or [])]
+
+    if not sprint_ids:
+        return {"interactions": [], "decisions": []}
+
+    tasks_resp = (
+        db.table("tasks")
+        .select("id,title,task_details,sprint_id")
+        .in_("sprint_id", sprint_ids)
+        .order("title")
+        .execute()
+    )
+    tasks = tasks_resp.data or []
+    task_ids = [t["id"] for t in tasks]
+    task_map = {t["id"]: t["title"] for t in tasks}
+
+    # Fetch all interactions across all tasks
+    interactions: list[dict] = []
+    if task_ids:
+        inter_resp = (
+            db.table("task_interactions")
+            .select("id,task_id,role,content,created_at")
+            .in_("task_id", task_ids)
+            .order("created_at")
+            .execute()
+        )
+        for row in (inter_resp.data or []):
+            interactions.append({
+                **row,
+                "task_title": task_map.get(row["task_id"], "Unknown task"),
+            })
+
+    # Gather decisions (only tasks that have task_details)
+    decisions = [
+        {
+            "task_id": t["id"],
+            "task_title": t["title"],
+            "details": t.get("task_details") or {},
+        }
+        for t in tasks
+        if t.get("task_details")
+    ]
+
+    return {"interactions": interactions, "decisions": decisions}

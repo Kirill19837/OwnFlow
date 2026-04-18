@@ -9,6 +9,7 @@ import NewProjectPage from './pages/NewProjectPage'
 import ProjectBoardPage from './pages/ProjectBoardPage'
 import NewOrgPage from './pages/NewOrgPage'
 import OrgSettingsPage from './pages/OrgSettingsPage'
+import ProjectActivityPage from './pages/ProjectActivityPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -26,6 +27,7 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="/new" element={<NewProjectPage />} />
                 <Route path="/projects/:projectId" element={<ProjectBoardPage />} />
+                <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
                 <Route path="/orgs/new" element={<NewOrgPage />} />
                 <Route path="/orgs/:orgId/settings" element={<OrgSettingsPage />} />
               </Route>
