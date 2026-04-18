@@ -45,6 +45,10 @@ jobs:
               "$SECRET_SUPABASE_URL" "$SECRET_VITE_SUPABASE_ANON_KEY" \
               > .env.prod
 
+            # ── Force-kill any containers we can't stop normally ──
+            docker ps -q | xargs -r docker kill 2>/dev/null || true
+            docker ps -aq | xargs -r docker rm -f 2>/dev/null || true
+
             # ── Build and restart ───────────────────────────────
             docker compose -f docker-compose.prod.yml --env-file .env.prod \
               down --remove-orphans 2>/dev/null || true
