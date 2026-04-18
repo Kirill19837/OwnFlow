@@ -24,3 +24,12 @@ async def update_actor(actor_id: str, body: dict):
         raise HTTPException(400, "No valid fields to update")
     db.table("actors").update(update).eq("id", actor_id).execute()
     return {"actor_id": actor_id, **update}
+
+
+@router.delete("/{actor_id}", status_code=204)
+async def delete_actor(actor_id: str):
+    db = get_supabase()
+    actor = db.table("actors").select("id").eq("id", actor_id).single().execute()
+    if not actor.data:
+        raise HTTPException(404, "Actor not found")
+    db.table("actors").delete().eq("id", actor_id).execute()

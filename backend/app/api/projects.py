@@ -201,7 +201,7 @@ async def update_project_settings(project_id: str, body: dict):
     project = db.table("projects").select("id").eq("id", project_id).single().execute()
     if not project.data:
         raise HTTPException(404, "Project not found")
-    allowed = {"name", "sprint_days"}
+    allowed = {"name", "prompt", "sprint_days"}
     update = {k: v for k, v in body.items() if k in allowed}
     if not update:
         raise HTTPException(400, "No valid settings to update")

@@ -8,8 +8,16 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X } from 'lucide-react'
+import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
+
+const AI_MODELS = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'o3-mini', label: 'o3-mini' },
+  { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+]
 
 const COLUMNS = [
   { id: 'todo', label: 'To Do' },
@@ -25,7 +33,13 @@ export default function ProjectBoardPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
+  // New actor form state
+  const [newActorName, setNewActorName] = useState('')
+  const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
+  const [newActorModel, setNewActorModel] = useState('gpt-4o')
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -37,11 +51,38 @@ export default function ProjectBoardPage() {
   const qc = useQueryClient()
   const saveSettings = useMutation({
     mutationFn: () =>
-      api.patch(`/projects/${projectId}/settings`, { sprint_days: settingsSprintDays }),
+      api.patch(`/projects/${projectId}/settings`, {
+        name: settingsName,
+        prompt: settingsPrompt,
+        sprint_days: settingsSprintDays,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', projectId] })
+      qc.invalidateQueries({ queryKey: ['projects'] })
       setShowSettings(false)
     },
+  })
+
+  const addActor = useMutation({
+    mutationFn: () =>
+      api.post(`/projects/${projectId}/actors`, {
+        project_id: projectId,
+        name: newActorName,
+        type: newActorType,
+        model: newActorType === 'ai' ? newActorModel : undefined,
+        capabilities: [],
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] })
+      setNewActorName('')
+      setNewActorType('ai')
+      setNewActorModel('gpt-4o')
+    },
+  })
+
+  const removeActor = useMutation({
+    mutationFn: (actorId: string) => api.delete(`/actors/${actorId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
   useRealtimeProject(projectId)
@@ -52,6 +93,8 @@ export default function ProjectBoardPage() {
       if (!activeSprint && data.sprints?.length) {
         setActiveSprint(data.sprints[0].id)
       }
+      setSettingsName(data.name)
+      setSettingsPrompt(data.prompt)
       setSettingsSprintDays(data.sprint_days ?? 3)
     }
   }, [data])
@@ -150,16 +193,39 @@ export default function ProjectBoardPage() {
 
         {/* Settings panel */}
         {showSettings && (
-          <div className="mb-3 p-4 bg-gray-900 border border-gray-700 rounded-xl">
-            <div className="flex items-center justify-between mb-3">
+          <div className="mb-3 p-4 bg-gray-900 border border-gray-700 rounded-xl space-y-5">
+            <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-white">Project Settings</span>
               <button onClick={() => setShowSettings(false)} className="text-gray-500 hover:text-white">
                 <X size={14} />
               </button>
             </div>
-            <div className="flex items-center gap-4">
-              <label className="text-sm text-gray-400 whitespace-nowrap">Sprint length (days)</label>
-              <div className="flex items-center gap-2">
+
+            {/* Name */}
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Project name</label>
+              <input
+                value={settingsName}
+                onChange={(e) => setSettingsName(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Project description / prompt</label>
+              <textarea
+                rows={4}
+                value={settingsPrompt}
+                onChange={(e) => setSettingsPrompt(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+              />
+            </div>
+
+            {/* Sprint length */}
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-2">Sprint length (days) — applies to future sprints</label>
+              <div className="flex items-center gap-2 flex-wrap">
                 {[1, 2, 3, 5, 7, 10, 14].map((d) => (
                   <button
                     key={d}
@@ -173,18 +239,78 @@ export default function ProjectBoardPage() {
                     {d}
                   </button>
                 ))}
+                <span className="text-xs text-gray-500 ml-1">{settingsSprintDays * 8}h capacity</span>
               </div>
-              <button
-                onClick={() => saveSettings.mutate()}
-                disabled={saveSettings.isPending || settingsSprintDays === (project.sprint_days ?? 3)}
-                className="ml-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-              >
-                {saveSettings.isPending ? 'Saving…' : 'Save'}
-              </button>
             </div>
-            <p className="text-xs text-gray-600 mt-2">
-              Applies to future sprints. Existing sprints are not affected.
-            </p>
+
+            <button
+              onClick={() => saveSettings.mutate()}
+              disabled={saveSettings.isPending || (!settingsName.trim() && !settingsPrompt.trim())}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+            >
+              {saveSettings.isPending ? 'Saving…' : 'Save changes'}
+            </button>
+
+            {/* Divider */}
+            <div className="border-t border-gray-700 pt-4">
+              <label className="block text-xs font-medium text-gray-400 mb-3">Team actors</label>
+
+              {/* Existing actors */}
+              <div className="space-y-1.5 mb-3">
+                {(project.actors ?? []).map((a) => (
+                  <div key={a.id} className="flex items-center gap-2 text-sm">
+                    {a.type === 'ai'
+                      ? <Bot size={13} className="text-purple-400 shrink-0" />
+                      : <User size={13} className="text-blue-400 shrink-0" />}
+                    <span className="text-white flex-1">{a.name}</span>
+                    {a.model && <span className="text-gray-500 text-xs">{a.model}</span>}
+                    <button
+                      onClick={() => removeActor.mutate(a.id)}
+                      disabled={removeActor.isPending}
+                      className="text-gray-600 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add actor */}
+              <div className="flex gap-2 items-end flex-wrap">
+                <input
+                  placeholder="Name"
+                  value={newActorName}
+                  onChange={(e) => setNewActorName(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-32"
+                />
+                <select
+                  value={newActorType}
+                  onChange={(e) => setNewActorType(e.target.value as 'ai' | 'human')}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="ai">AI</option>
+                  <option value="human">Human</option>
+                </select>
+                {newActorType === 'ai' && (
+                  <select
+                    value={newActorModel}
+                    onChange={(e) => setNewActorModel(e.target.value)}
+                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    {AI_MODELS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  onClick={() => addActor.mutate()}
+                  disabled={addActor.isPending || !newActorName.trim()}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                >
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
