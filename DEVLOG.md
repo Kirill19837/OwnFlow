@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-18 | `eaf2132` — Settings panel bug fixes
+- Fixed Save changes button permanently disabled (wrong guard condition removed)
+- Re-added missing `planNextSprint` mutation that was dropped in a previous edit
+- Added try/except to settings PATCH endpoint for cleaner error reporting
+- Added `sprint_days` and `roadmap` columns to Supabase `projects` table (SQL migration)
+
+---
+
 ## 2026-04-18 | `05f7d3b` — Assignment display fix, actor roles, realtime store crash
 - Fixed "Assigned to" dropdown staying on Unassigned after saving: now tracks task by ID and resolves live from query cache
 - Fixed realtime store crash (`findIndex is not a function`): guarded `assignments` with `Array.isArray()`, fixed predicate to match `assignment.id`
