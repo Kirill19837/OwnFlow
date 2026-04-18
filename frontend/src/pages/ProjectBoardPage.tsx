@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, MessageSquare } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -542,143 +542,155 @@ export default function ProjectBoardPage() {
 
       {/* Floating board prompt bar */}
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-40">
-        {!boardMinimized && showBoardChat && boardChatHistory.length > 0 && (
-          <div className="mb-2 bg-gray-900 border border-gray-700 rounded-xl p-3 max-h-64 overflow-y-auto space-y-2 shadow-2xl">
-            {boardChatHistory.map((m, i) => {
-              const isThinking = boardPromptStreaming && i === boardChatHistory.length - 1 && m.role === 'assistant'
-              const action = m.role === 'assistant' && !isThinking && m.content ? parseStructuredAction(m.content) : null
-              const alreadyConfirmed = createdMsgIndices.has(i)
+        <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 select-none">
+            <Bot size={14} className="text-purple-400 shrink-0" />
+            <span className="text-sm text-purple-400 font-medium">AI Assistant</span>
+            {!boardMinimized && boardChatHistory.length > 0 && (
+              <button
+                onClick={() => { setBoardChatHistory([]); setShowBoardChat(false) }}
+                className="text-gray-600 hover:text-gray-400 text-xs px-1"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setBoardMinimized((v) => !v)}
+              className="ml-auto text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+              title={boardMinimized ? 'Expand Copilot' : 'Collapse Copilot'}
+            >
+              <ChevronDown size={15} className={`transition-transform ${boardMinimized ? '-rotate-90' : ''}`} />
+            </button>
+          </div>
 
-              // Thinking spinner — shown while buffering
-              if (isThinking) {
-                return (
-                  <div key={i} className="flex items-center gap-2 px-3 py-2 text-purple-400 text-sm">
-                    <Loader2 size={14} className="animate-spin" />
-                    <span className="opacity-70">Thinking…</span>
-                  </div>
-                )
-              }
+          {!boardMinimized && showBoardChat && boardChatHistory.length > 0 && (
+            <div className="border-b border-gray-800 p-3 max-h-64 overflow-y-auto space-y-2">
+              {boardChatHistory.map((m, i) => {
+                const isThinking = boardPromptStreaming && i === boardChatHistory.length - 1 && m.role === 'assistant'
+                const action = m.role === 'assistant' && !isThinking && m.content ? parseStructuredAction(m.content) : null
+                const alreadyConfirmed = createdMsgIndices.has(i)
 
-              // Structured action card
-              if (action) {
-                const isPending =
-                  action.intent === 'create_tasks' ? createTasksFromAI.isPending
-                  : action.intent === 'modify_tasks' ? modifyTasksFromAI.isPending
-                  : deleteTasksFromAI.isPending
+                if (isThinking) {
+                  return (
+                    <div key={i} className="flex items-center gap-2 px-3 py-2 text-purple-400 text-sm">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="opacity-70">Thinking…</span>
+                    </div>
+                  )
+                }
 
-                const intentLabel =
-                  action.intent === 'create_tasks' ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to create`, color: 'text-purple-400', confirmText: 'Add to board', confirmStyle: { background: 'rgba(168,85,247,0.2)', color: '#c084fc' } }
-                  : action.intent === 'modify_tasks' ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to update`, color: 'text-blue-400', confirmText: 'Apply changes', confirmStyle: { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' } }
-                  : { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to delete`, color: 'text-red-400', confirmText: 'Delete tasks', confirmStyle: { background: 'rgba(239,68,68,0.15)', color: '#f87171' } }
+                if (action) {
+                  const isPending =
+                    action.intent === 'create_tasks' ? createTasksFromAI.isPending
+                    : action.intent === 'modify_tasks' ? modifyTasksFromAI.isPending
+                    : deleteTasksFromAI.isPending
 
-                const handleConfirm = () => {
-                  if (action.intent === 'create_tasks') {
-                    createTasksFromAI.mutate(
-                      { tasks: action.tasks, sprintId: activeSprint ?? undefined },
-                      { onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])) },
-                    )
-                  } else if (action.intent === 'modify_tasks') {
-                    modifyTasksFromAI.mutate(action.tasks, {
-                      onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])),
-                    })
-                  } else {
-                    deleteTasksFromAI.mutate(action.tasks, {
-                      onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])),
-                    })
+                  const intentLabel =
+                    action.intent === 'create_tasks'
+                      ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to create`, color: 'text-purple-400', confirmText: 'Add to board', confirmStyle: { background: 'rgba(168,85,247,0.2)', color: '#c084fc' } }
+                      : action.intent === 'modify_tasks'
+                        ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to update`, color: 'text-blue-400', confirmText: 'Apply changes', confirmStyle: { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' } }
+                        : { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to delete`, color: 'text-red-400', confirmText: 'Delete tasks', confirmStyle: { background: 'rgba(239,68,68,0.15)', color: '#f87171' } }
+
+                  const handleConfirm = () => {
+                    if (action.intent === 'create_tasks') {
+                      createTasksFromAI.mutate(
+                        { tasks: action.tasks, sprintId: activeSprint ?? undefined },
+                        { onSuccess: () => setCreatedMsgIndices((prev) => new Set([...prev, i])) },
+                      )
+                    } else if (action.intent === 'modify_tasks') {
+                      modifyTasksFromAI.mutate(action.tasks, {
+                        onSuccess: () => setCreatedMsgIndices((prev) => new Set([...prev, i])),
+                      })
+                    } else {
+                      deleteTasksFromAI.mutate(action.tasks, {
+                        onSuccess: () => setCreatedMsgIndices((prev) => new Set([...prev, i])),
+                      })
+                    }
                   }
+
+                  return (
+                    <div key={i} className="bg-gray-950 border border-gray-700 rounded-xl p-3 space-y-2">
+                      <p className={`text-xs font-semibold uppercase tracking-wide ${intentLabel.color}`}>
+                        {intentLabel.label}
+                      </p>
+                      <div className="space-y-1.5">
+                        {action.tasks.map((t, j) => (
+                          <div key={j} className="flex items-start gap-2 bg-gray-900 rounded-lg px-3 py-2">
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium truncate ${action.intent === 'delete_tasks' ? 'text-gray-400 line-through' : 'text-white'}`}>
+                                {t.title}
+                              </p>
+                              {t.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{t.description}</p>}
+                            </div>
+                            <div className="flex gap-1.5 shrink-0 items-center">
+                              {t.type && <span className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{t.type}</span>}
+                              {t.priority && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                  t.priority === 'high'
+                                    ? 'bg-red-900/50 text-red-400'
+                                    : t.priority === 'medium'
+                                      ? 'bg-yellow-900/50 text-yellow-400'
+                                      : 'bg-gray-800 text-gray-400'
+                                }`}>
+                                  {t.priority}
+                                </span>
+                              )}
+                              {t.estimated_hours != null && <span className="text-xs text-gray-500">{t.estimated_hours}h</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={handleConfirm}
+                          disabled={alreadyConfirmed || isPending}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          style={alreadyConfirmed
+                            ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' }
+                            : intentLabel.confirmStyle}
+                        >
+                          {alreadyConfirmed
+                            ? <><CheckCircle size={12} /> Done</>
+                            : isPending
+                              ? <><Loader2 size={12} className="animate-spin" /> Working…</>
+                              : <><Plus size={12} /> {intentLabel.confirmText}</>}
+                        </button>
+                      </div>
+                    </div>
+                  )
                 }
 
                 return (
-                  <div key={i} className="bg-gray-950 border border-gray-700 rounded-xl p-3 space-y-2">
-                    <p className={`text-xs font-semibold uppercase tracking-wide ${intentLabel.color}`}>
-                      {intentLabel.label}
-                    </p>
-                    <div className="space-y-1.5">
-                      {action.tasks.map((t, j) => (
-                        <div key={j} className="flex items-start gap-2 bg-gray-900 rounded-lg px-3 py-2">
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-medium truncate ${action.intent === 'delete_tasks' ? 'text-gray-400 line-through' : 'text-white'}`}>{t.title}</p>
-                            {t.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{t.description}</p>}
-                          </div>
-                          <div className="flex gap-1.5 shrink-0 items-center">
-                            {t.type && <span className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{t.type}</span>}
-                            {t.priority && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                t.priority === 'high' ? 'bg-red-900/50 text-red-400'
-                                : t.priority === 'medium' ? 'bg-yellow-900/50 text-yellow-400'
-                                : 'bg-gray-800 text-gray-400'
-                              }`}>{t.priority}</span>
-                            )}
-                            {t.estimated_hours != null && <span className="text-xs text-gray-500">{t.estimated_hours}h</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex justify-end pt-1">
-                      <button
-                        onClick={handleConfirm}
-                        disabled={alreadyConfirmed || isPending}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-                        style={alreadyConfirmed
-                          ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' }
-                          : intentLabel.confirmStyle}
-                      >
-                        {alreadyConfirmed
-                          ? <><CheckCircle size={12} /> Done</>
-                          : isPending
-                          ? <><Loader2 size={12} className="animate-spin" /> Working…</>
-                          : <><Plus size={12} /> {intentLabel.confirmText}</>}
-                      </button>
-                    </div>
+                  <div key={i} className={`text-sm rounded-lg px-3 py-2 whitespace-pre-wrap ${m.role === 'user' ? 'bg-gray-800 text-gray-200 text-right' : 'bg-gray-950 text-gray-300'}`}>
+                    {m.content}
                   </div>
                 )
-              }
+              })}
+              <div ref={boardChatBottomRef} />
+            </div>
+          )}
 
-              // Plain prose message
-              return (
-                <div key={i} className={`text-sm rounded-lg px-3 py-2 whitespace-pre-wrap ${m.role === 'user' ? 'bg-gray-800 text-gray-200 text-right' : 'bg-gray-950 text-gray-300'}`}>
-                  {m.content}
-                </div>
-              )
-            })}
-            <div ref={boardChatBottomRef} />
-          </div>
-        )}
-        <div className="flex gap-2 items-center bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 shadow-2xl">
-          {/* Minimize / restore */}
-          <button
-            onClick={() => setBoardMinimized((v) => !v)}
-            className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
-            title={boardMinimized ? 'Expand chat' : 'Minimize chat'}
-          >
-            {boardMinimized ? <MessageSquare size={15} /> : <ChevronDown size={15} />}
-          </button>
-          {!boardMinimized && (
-            <input
-              type="text"
-              value={boardPrompt}
-              onChange={(e) => setBoardPrompt(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleBoardPrompt() }}
-              placeholder={`Ask AI about ${project.name}…`}
-              className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-600"
-            />
-          )}
-          {boardMinimized && (
-            <span className="flex-1 text-gray-600 text-sm select-none">AI assistant</span>
-          )}
-          {!boardMinimized && boardChatHistory.length > 0 && (
-            <button onClick={() => { setBoardChatHistory([]); setShowBoardChat(false) }} className="text-gray-600 hover:text-gray-400 text-xs px-1">
-              Clear
-            </button>
-          )}
-          {!boardMinimized && (
-            <button
-              onClick={handleBoardPrompt}
-              disabled={!boardPrompt.trim() || boardPromptStreaming}
-              className="p-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-            >
-              {boardPromptStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            </button>
+          {!boardMinimized ? (
+            <div className="flex gap-2 items-center px-3 py-2">
+              <input
+                type="text"
+                value={boardPrompt}
+                onChange={(e) => setBoardPrompt(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleBoardPrompt() }}
+                placeholder={`Ask AI about ${project.name}…`}
+                className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-600"
+              />
+              <button
+                onClick={handleBoardPrompt}
+                disabled={!boardPrompt.trim() || boardPromptStreaming}
+                className="p-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors"
+              >
+                {boardPromptStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
+          ) : (
+            <div className="px-3 py-2 text-sm text-gray-600 select-none">AI assistant</div>
           )}
         </div>
       </div>

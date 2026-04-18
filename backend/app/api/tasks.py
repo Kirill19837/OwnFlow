@@ -71,6 +71,16 @@ async def execute(task_id: str):
     return deliverable
 
 
+@router.patch("/{task_id}/description")
+async def update_task_description(task_id: str, body: dict):
+    db = get_supabase()
+    content = (body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "content is required")
+    db.table("tasks").update({"description": content}).eq("id", task_id).execute()
+    return {"task_id": task_id, "description": content}
+
+
 @router.get("/{task_id}/execute/stream")
 async def execute_stream(task_id: str):
     db = get_supabase()
@@ -83,9 +93,22 @@ async def execute_stream(task_id: str):
 
     db.table("tasks").update({"status": "in_progress"}).eq("id", task_id).execute()
 
+    # Build a short execution plan announcement before streaming
+    task_resp = db.table("tasks").select("title,description,type,priority").eq("id", task_id).single().execute()
+    task_data = task_resp.data or {}
+    actor_resp2 = db.table("actors").select("name,model").eq("id", actor_id).single().execute()
+    actor_data = actor_resp2.data or {}
+    plan_text = (
+        f"**{actor_data.get('name', 'Agent')} is starting work**\n\n"
+        f"Task: *{task_data.get('title', '')}*\n"
+        f"Type: {task_data.get('type', '')} · Priority: {task_data.get('priority', '')}\n\n"
+        f"I'll produce a detailed {task_data.get('type', 'deliverable')} addressing the task description."
+    )
+
     async def event_stream():
+        yield f"data: {json.dumps({'type': 'plan', 'content': plan_text})}\n\n"
         async for chunk in stream_task_execution(task_id, actor_id):
-            yield f"data: {json.dumps({'content': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -178,6 +201,9 @@ async def prompt_task_stream(task_id: str, body: dict):
                 "```\n"
                 "```json\n"
                 '{"intent":"execute_task","confirm":true}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"update_description","content":"<full markdown to set as the task notes/documentation>"}\n'
                 "```\n"
                 "For all other questions, answer normally using Markdown."
             ),
