@@ -13,10 +13,17 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SECRET_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SECRET_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SECRET_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SECRET_VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         with:
           host: ${{ vars.HOST_DEPLOY_IP }}
           username: ${{ vars.HOST_USER }}
           key: ${{ secrets.HOST_SSH_PRIVATE_KEY }}
+          envs: SECRET_SUPABASE_URL,SECRET_SUPABASE_SERVICE_ROLE_KEY,SECRET_OPENAI_API_KEY,SECRET_ANTHROPIC_API_KEY,SECRET_VITE_SUPABASE_ANON_KEY
           script: |
             set -e
 
@@ -29,20 +36,14 @@ jobs:
             git reset --hard origin/main
 
             # ── Write backend .env ──────────────────────────────
-            cat > backend/.env <<ENVEOF
-SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-CORS_ORIGINS=https://ownflow.21century.tech
-ENVEOF
+            printf 'SUPABASE_URL=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\nOPENAI_API_KEY=%s\nANTHROPIC_API_KEY=%s\nCORS_ORIGINS=https://ownflow.21century.tech\n' \
+              "$SECRET_SUPABASE_URL" "$SECRET_SUPABASE_SERVICE_ROLE_KEY" "$SECRET_OPENAI_API_KEY" "$SECRET_ANTHROPIC_API_KEY" \
+              > backend/.env
 
             # ── Write frontend build args env ───────────────────
-            cat > .env.prod <<ENVEOF
-VITE_API_URL=https://ownflow.21century.tech/api
-VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
-ENVEOF
+            printf 'VITE_API_URL=https://ownflow.21century.tech/api\nVITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
+              "$SECRET_SUPABASE_URL" "$SECRET_VITE_SUPABASE_ANON_KEY" \
+              > .env.prod
 
             # ── Build and restart ───────────────────────────────
             docker compose -f docker-compose.prod.yml --env-file .env.prod \
