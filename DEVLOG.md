@@ -136,3 +136,12 @@
 - `stripActionBlocks(content)` — removes JSON blocks, returns trailing prose/questions
 - Assistant renderer replaced: each message now renders N action cards (one per JSON block) with compound confirmed-state key `i*1000+j`, followed by prose section
 - Old single-action renderer fully removed
+
+## 2026-04-18 — Project Activity page
+
+### What was built
+- **Backend** `GET /projects/{id}/activity`: fetches all `task_interactions` + `task_details` for every task in the project; returns `{ interactions, decisions }`
+- **`ProjectActivityPage.tsx`** at `/projects/:id/activity`:
+  - **Chat Log tab**: all AI/human messages across all tasks, chronologically ordered, grouped under task-name dividers, with task-filter pills when multiple tasks involved
+  - **Decisions tab**: every task that has `task_details` shown as a key/value card; task names link back to the board
+- Route added to `App.tsx`; Activity icon (📊) button added to project board header next to settings gear
