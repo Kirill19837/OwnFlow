@@ -48,11 +48,13 @@ jobs:
             # ── Force-kill any containers we can't stop normally ──
             sudo docker rm -f ownflow-backend-1 ownflow-frontend-1 2>/dev/null || true
 
+            # ── Remove broken buildx plugin if present ──────────
+            sudo rm -f /root/.docker/cli-plugins/docker-buildx
+
             # ── Build and restart ───────────────────────────────
             sudo docker compose -f docker-compose.prod.yml --env-file .env.prod \
               down --remove-orphans 2>/dev/null || true
-            sudo DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 \
-              docker compose -f docker-compose.prod.yml --env-file .env.prod \
+            sudo docker compose -f docker-compose.prod.yml --env-file .env.prod \
               up -d --build --remove-orphans
 
             # ── Cleanup ─────────────────────────────────────────
