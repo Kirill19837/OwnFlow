@@ -160,3 +160,9 @@
 - "Submit for Review" → "Move to Review"
 - "Mark Done" → "Move to Done"
 - "Resume Work" → "Move to In Progress"
+
+## 2026-04-18 — Copilot collapsed by default + task activity shortcut
+
+- **TaskDrawer**: copilot panel now starts collapsed (`useState(false)`) — opens only when needed
+- **TaskDrawer**: Activity icon button (📊) added next to close button — navigates to `/projects/:id/activity?task=<taskId>`
+- **ProjectActivityPage**: reads `?task=` query param on mount and pre-filters the Chat Log tab to that specific task
