@@ -27,6 +27,7 @@ export interface Actor {
   project_id: string
   name: string
   type: ActorType
+  role?: string
   model?: string
   capabilities: string[]
   avatar_url?: string

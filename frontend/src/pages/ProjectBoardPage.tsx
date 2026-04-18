@@ -30,7 +30,7 @@ export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const { currentProject, setCurrentProject } = useProjectStore()
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [settingsName, setSettingsName] = useState('')
@@ -38,6 +38,7 @@ export default function ProjectBoardPage() {
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
   // New actor form state
   const [newActorName, setNewActorName] = useState('')
+  const [newActorRole, setNewActorRole] = useState('')
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
 
@@ -68,6 +69,7 @@ export default function ProjectBoardPage() {
       api.post(`/projects/${projectId}/actors`, {
         project_id: projectId,
         name: newActorName,
+        role: newActorRole || undefined,
         type: newActorType,
         model: newActorType === 'ai' ? newActorModel : undefined,
         capabilities: [],
@@ -75,6 +77,7 @@ export default function ProjectBoardPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', projectId] })
       setNewActorName('')
+      setNewActorRole('')
       setNewActorType('ai')
       setNewActorModel('gpt-4o')
     },
@@ -263,7 +266,7 @@ export default function ProjectBoardPage() {
                       ? <Bot size={13} className="text-purple-400 shrink-0" />
                       : <User size={13} className="text-blue-400 shrink-0" />}
                     <span className="text-white flex-1">{a.name}</span>
-                    {a.model && <span className="text-gray-500 text-xs">{a.model}</span>}
+                    {(a.role || a.model) && <span className="text-gray-500 text-xs">{a.role ?? a.model}</span>}
                     <button
                       onClick={() => removeActor.mutate(a.id)}
                       disabled={removeActor.isPending}
@@ -281,7 +284,13 @@ export default function ProjectBoardPage() {
                   placeholder="Name"
                   value={newActorName}
                   onChange={(e) => setNewActorName(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-32"
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-28"
+                />
+                <input
+                  placeholder="Role (e.g. Lead QA)"
+                  value={newActorRole}
+                  onChange={(e) => setNewActorRole(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-36"
                 />
                 <select
                   value={newActorType}
@@ -381,7 +390,7 @@ export default function ProjectBoardPage() {
                               <TaskCard
                                 task={task}
                                 actors={actors}
-                                onClick={() => setSelectedTask(task)}
+                                onClick={() => setSelectedTaskId(task.id)}
                               />
                             </div>
                           )}
@@ -398,13 +407,16 @@ export default function ProjectBoardPage() {
       </DragDropContext>
 
       {/* Task Drawer */}
-      {selectedTask && (
-        <TaskDrawer
-          task={selectedTask}
-          actors={actors}
-          onClose={() => setSelectedTask(null)}
-        />
-      )}
+      {selectedTaskId && (() => {
+        const liveTask = (project.tasks ?? []).find((t) => t.id === selectedTaskId)
+        return liveTask ? (
+          <TaskDrawer
+            task={liveTask}
+            actors={actors}
+            onClose={() => setSelectedTaskId(null)}
+          />
+        ) : null
+      })()}
     </div>
   )
 }

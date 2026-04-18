@@ -32,6 +32,10 @@ async def assign_task(task_id: str, body: TaskAssign):
     task = db.table("tasks").select("id").eq("id", task_id).single().execute()
     if not task.data:
         raise HTTPException(404, "Task not found")
+    if not body.actor_id:
+        # Unassign: remove all assignments for this task
+        db.table("assignments").delete().eq("task_id", task_id).execute()
+        return {"task_id": task_id, "actor_id": None}
     assignment = await manual_assign(task_id, body.actor_id, assigned_by="user")
     return assignment
 

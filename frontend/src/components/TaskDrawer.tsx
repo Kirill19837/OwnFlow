@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { X, Play, Loader2 } from 'lucide-react'
+import { X, Play, Loader2, Zap } from 'lucide-react'
 import type { Task, Actor, Deliverable } from '../types'
 import api from '../lib/api'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -31,7 +31,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   })
 
   const assign = useMutation({
-    mutationFn: (actor_id: string) => api.patch(`/tasks/${task.id}/assign`, { actor_id }),
+    mutationFn: (actor_id: string) =>
+      api.patch(`/tasks/${task.id}/assign`, { actor_id: actor_id || '' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
   })
 
@@ -127,13 +128,27 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="">Unassigned</option>
-                {actors.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.type === 'ai' ? '🤖' : '👤'} {a.name}
-                  </option>
-                ))}
+                {actors.map((a) => {
+                  const label = a.role ?? (a.type === 'ai' ? a.model ?? 'AI' : 'Human')
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.type === 'ai' ? '🤖' : '👤'} {a.name} · {label}
+                    </option>
+                  )
+                })}
               </select>
             </div>
+          </div>
+
+          {/* Start Work */}
+          <div>
+            <button
+              onClick={() => {}}
+              className="flex items-center gap-2 bg-green-700 hover:bg-green-600 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+            >
+              <Zap size={14} />
+              Start Work
+            </button>
           </div>
 
           {/* Execute */}

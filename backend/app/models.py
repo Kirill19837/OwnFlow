@@ -49,6 +49,7 @@ class ActorCreate(BaseModel):
     project_id: str
     name: str
     type: Literal["human", "ai"]
+    role: Optional[str] = None
     model: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
     avatar_url: Optional[str] = None
@@ -59,6 +60,7 @@ class Actor(BaseModel):
     project_id: str
     name: str
     type: str
+    role: Optional[str] = None
     model: Optional[str]
     capabilities: List[str]
     avatar_url: Optional[str]

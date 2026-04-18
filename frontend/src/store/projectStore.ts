@@ -28,10 +28,10 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       if (!state.currentProject) return state
       const tasks = (state.currentProject.tasks ?? []).map((t) => {
         if (t.id !== assignment.task_id) return t
-        const existing = t.assignments ?? []
-        const idx = existing.findIndex((a) => a.task_id === assignment.task_id)
+        const existing = Array.isArray(t.assignments) ? t.assignments : []
+        const idx = existing.findIndex((a) => a.id === assignment.id)
         const updatedAssignments =
-          idx >= 0 ? existing.map((a) => (a.task_id === assignment.task_id ? assignment : a)) : [...existing, assignment]
+          idx >= 0 ? existing.map((a) => (a.id === assignment.id ? assignment : a)) : [...existing, assignment]
         return { ...t, assignments: updatedAssignments }
       })
       return { currentProject: { ...state.currentProject, tasks } }

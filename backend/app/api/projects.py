@@ -177,6 +177,7 @@ async def add_actor(project_id: str, body: ActorCreate):
         "project_id": project_id,
         "name": body.name,
         "type": body.type,
+        "role": body.role,
         "model": body.model,
         "capabilities": body.capabilities,
         "avatar_url": body.avatar_url,
