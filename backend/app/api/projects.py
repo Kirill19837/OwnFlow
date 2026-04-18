@@ -209,7 +209,10 @@ async def update_project_settings(project_id: str, body: dict):
     if "sprint_days" in update:
         if not isinstance(update["sprint_days"], int) or update["sprint_days"] < 1 or update["sprint_days"] > 30:
             raise HTTPException(400, "sprint_days must be an integer between 1 and 30")
-    db.table("projects").update(update).eq("id", project_id).execute()
+    try:
+        db.table("projects").update(update).eq("id", project_id).execute()
+    except Exception as e:
+        raise HTTPException(500, f"DB update failed: {e}")
     return {"id": project_id, **update}
 
 

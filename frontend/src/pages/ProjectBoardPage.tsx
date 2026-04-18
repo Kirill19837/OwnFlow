@@ -88,6 +88,14 @@ export default function ProjectBoardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
+  const planNextSprint = useMutation({
+    mutationFn: (aiModel: string) =>
+      api.post(`/projects/${projectId}/sprints/next`, { ai_model: aiModel }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] })
+    },
+  })
+
   useRealtimeProject(projectId)
 
   useEffect(() => {
@@ -248,7 +256,7 @@ export default function ProjectBoardPage() {
 
             <button
               onClick={() => saveSettings.mutate()}
-              disabled={saveSettings.isPending || (!settingsName.trim() && !settingsPrompt.trim())}
+              disabled={saveSettings.isPending}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
             >
               {saveSettings.isPending ? 'Saving…' : 'Save changes'}
