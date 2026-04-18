@@ -106,7 +106,7 @@ async def get_deliverables(task_id: str):
 
 @router.post("/{task_id}/prompt/stream")
 async def prompt_task_stream(task_id: str, body: dict):
-    """Stream a free-form AI prompt with full task context."""
+    """Stream a free-form AI prompt with full task context and structured action support."""
     db = get_supabase()
     user_prompt = (body.get("prompt") or "").strip()
     if not user_prompt:
@@ -122,30 +122,64 @@ async def prompt_task_stream(task_id: str, body: dict):
     )
     project = project_resp.data or {}
 
-    # Use assigned actor's model if available, else fallback
+    # Fetch all actors for this project so AI knows who can be assigned
+    actors_resp = (
+        db.table("actors")
+        .select("id,name,role,type,model")
+        .eq("project_id", task["project_id"])
+        .execute()
+    )
+    actors = actors_resp.data or []
+    actors_lines = "\n".join(
+        f'- id:{a["id"]} | {a["name"]} | {a.get("role","") or a.get("type","")} | {a.get("model","") or ""}'
+        for a in actors
+    ) or "none"
+
+    # Use assigned actor's model if available
     assignment_resp = (
         db.table("assignments").select("actor_id").eq("task_id", task_id).single().execute()
     )
     model = "gpt-4o"
+    assigned_actor_id = None
+    assigned_actor_name = "Unassigned"
     if assignment_resp.data:
+        assigned_actor_id = assignment_resp.data["actor_id"]
         actor_resp = (
-            db.table("actors").select("model").eq("id", assignment_resp.data["actor_id"]).single().execute()
+            db.table("actors").select("name,model").eq("id", assigned_actor_id).single().execute()
         )
-        if actor_resp.data and actor_resp.data.get("model"):
-            model = actor_resp.data["model"]
+        if actor_resp.data:
+            assigned_actor_name = actor_resp.data.get("name", "Actor")
+            if actor_resp.data.get("model"):
+                model = actor_resp.data["model"]
 
     history = body.get("history") or []
     messages = [
         {
             "role": "system",
             "content": (
-                f"You are an AI assistant helping with a software project.\n"
+                f"You are {assigned_actor_name}, an AI agent working on a software project.\n"
                 f"Project: {project.get('name', '')}\n"
                 f"Project brief: {project.get('prompt', '')}\n\n"
-                f"Current task: {task['title']}\n"
-                f"Description: {task['description']}\n"
-                f"Status: {task['status']}  |  Type: {task['type']}  |  Priority: {task['priority']}\n\n"
-                "Answer concisely. Use Markdown for code."
+                f"Your task:\n"
+                f"  Title: {task['title']}\n"
+                f"  Description: {task['description']}\n"
+                f"  Status: {task['status']}  |  Type: {task['type']}  |  Priority: {task['priority']}\n\n"
+                f"Team actors (for assignment):\n{actors_lines}\n\n"
+                "Answer concisely. Use Markdown for code.\n\n"
+                "IMPORTANT — structured action rule:\n"
+                "When the user asks you to perform an action on this task, respond ONLY with a "
+                "fenced JSON block — no prose before or after.\n\n"
+                "Supported actions:\n"
+                "```json\n"
+                '{"intent":"assign_actor","actor_id":"<id from actors list>","actor_name":"..."}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"update_status","status":"todo|in_progress|review|done|rework"}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"execute_task","confirm":true}\n'
+                "```\n"
+                "For all other questions, answer normally using Markdown."
             ),
         },
         *history,

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { X, Play, Loader2, Zap, Send } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw } from 'lucide-react'
 import type { Task, Actor, Deliverable } from '../types'
 import api from '../lib/api'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +21,11 @@ const PRIORITY_COLOR: Record<string, string> = {
   critical: 'text-red-400',
 }
 
+type TaskAction =
+  | { intent: 'assign_actor'; actor_id: string; actor_name: string }
+  | { intent: 'update_status'; status: string }
+  | { intent: 'execute_task'; confirm: boolean }
+
 interface Props {
   task: Task
   actors: Actor[]
@@ -33,10 +38,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const [streamContent, setStreamContent] = useState('')
   const abortRef = useRef<AbortController | null>(null)
 
-  // Prompt chat state
+  // Chat state
   const [promptInput, setPromptInput] = useState('')
   const [promptStreaming, setPromptStreaming] = useState(false)
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [confirmedIndices, setConfirmedIndices] = useState<Set<number>>(new Set())
   const promptAbortRef = useRef<AbortController | null>(null)
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
 
@@ -48,10 +54,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const assign = useMutation({
     mutationFn: (actor_id: string) =>
       api.patch(`/tasks/${task.id}/assign`, { actor_id: actor_id || '' }),
-    onSuccess: (response, actor_id) => {
-      const assignment = response.data // { id, task_id, actor_id, assigned_by } or { task_id, actor_id: null }
-      // Write directly into the cache so the UI updates instantly without a
-      // refetch that might race with Supabase propagation.
+    onSuccess: (response) => {
+      const assignment = response.data
       qc.setQueryData(['project', task.project_id], (old: any) => {
         if (!old) return old
         return {
@@ -63,7 +67,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           ),
         }
       })
-      // Still invalidate so the next background refetch stays fresh.
       qc.invalidateQueries({ queryKey: ['project', task.project_id] })
     },
   })
@@ -80,6 +83,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     return a.id === a0?.actor_id
   })
 
+  function parseTaskAction(content: string): TaskAction | null {
+    const m = content.match(/```json\s*([\s\S]*?)```/)
+    if (!m) return null
+    try {
+      const parsed = JSON.parse(m[1].trim())
+      if (['assign_actor', 'update_status', 'execute_task'].includes(parsed.intent)) {
+        return parsed as TaskAction
+      }
+    } catch {}
+    return null
+  }
+
   const handlePrompt = async () => {
     const msg = promptInput.trim()
     if (!msg || promptStreaming) return
@@ -88,6 +103,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
     const userMsg: { role: 'user' | 'assistant'; content: string } = { role: 'user', content: msg }
     const newHistory = [...chatHistory, userMsg]
+    // Silent buffer — show thinking spinner
     setChatHistory([...newHistory, { role: 'assistant', content: '' }])
 
     const ctrl = new AbortController()
@@ -115,10 +131,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           try {
             const { content } = JSON.parse(payload)
             assistantContent += content
-            setChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
+            // Don't reveal mid-stream
           } catch {}
         }
       }
+      setChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
     } catch {}
 
     setPromptStreaming(false)
@@ -153,6 +170,21 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     setStreaming(false)
     qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
     qc.invalidateQueries({ queryKey: ['project'] })
+  }
+
+  const confirmAction = (action: TaskAction, idx: number) => {
+    if (action.intent === 'assign_actor') {
+      assign.mutate(action.actor_id, {
+        onSuccess: () => setConfirmedIndices((p) => new Set([...p, idx])),
+      })
+    } else if (action.intent === 'update_status') {
+      updateStatus.mutate(action.status, {
+        onSuccess: () => setConfirmedIndices((p) => new Set([...p, idx])),
+      })
+    } else if (action.intent === 'execute_task') {
+      handleExecute()
+      setConfirmedIndices((p) => new Set([...p, idx]))
+    }
   }
 
   return (
@@ -280,25 +312,124 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           )}
         </div>
 
-        {/* Prompt chat — pinned at bottom */}
-        <div className="border-t border-gray-800 px-4 py-3 bg-gray-950">
+        {/* Agent chat — pinned at bottom */}
+        <div className="border-t border-gray-800 bg-gray-950 flex flex-col" style={{ maxHeight: '55%' }}>
+          {/* Agent header */}
+          <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+            <Bot size={13} className="text-purple-400" />
+            <span className="text-xs text-purple-400 font-medium">
+              {assignedActor ? `${assignedActor.name}` : 'AI Assistant'}
+            </span>
+            {assignedActor && (
+              <span className="text-xs text-gray-600">
+                · {assignedActor.role || assignedActor.model || assignedActor.type}
+              </span>
+            )}
+            {chatHistory.length > 0 && (
+              <button
+                onClick={() => { setChatHistory([]); setConfirmedIndices(new Set()) }}
+                className="ml-auto text-gray-600 hover:text-gray-400 text-xs"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Chat messages */}
           {chatHistory.length > 0 && (
-            <div className="mb-3 max-h-56 overflow-y-auto space-y-2 pr-1">
-              {chatHistory.map((m, i) => (
-                <div key={i} className={cn('text-sm rounded-lg px-3 py-2 whitespace-pre-wrap', m.role === 'user' ? 'bg-gray-800 text-gray-200 text-right' : 'bg-gray-900 text-gray-300')}>
-                  {m.content || <span className="opacity-40 animate-pulse">▋</span>}
-                </div>
-              ))}
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-0">
+              {chatHistory.map((m, i) => {
+                const isThinking = promptStreaming && i === chatHistory.length - 1 && m.role === 'assistant'
+                const action = m.role === 'assistant' && !isThinking && m.content ? parseTaskAction(m.content) : null
+                const confirmed = confirmedIndices.has(i)
+
+                if (isThinking) {
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-purple-400 text-sm py-1">
+                      <Loader2 size={13} className="animate-spin" />
+                      <span className="opacity-70 text-xs">
+                        {assignedActor ? `${assignedActor.name} is thinking…` : 'Thinking…'}
+                      </span>
+                    </div>
+                  )
+                }
+
+                if (action) {
+                  if (action.intent === 'assign_actor') {
+                    const target = actors.find(a => a.id === action.actor_id)
+                    return (
+                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                        <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide">Assign task</p>
+                        <p className="text-sm text-white">
+                          {target ? `${target.type === 'ai' ? '🤖' : '👤'} ${target.name}` : action.actor_name}
+                          {target?.role && <span className="text-gray-400 text-xs ml-1">· {target.role}</span>}
+                        </p>
+                        <button
+                          onClick={() => confirmAction(action, i)}
+                          disabled={confirmed || assign.isPending}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' }}
+                        >
+                          {confirmed ? <><CheckCircle size={11} /> Assigned</> : assign.isPending ? <><Loader2 size={11} className="animate-spin" /> Assigning…</> : <><UserCheck size={11} /> Assign</>}
+                        </button>
+                      </div>
+                    )
+                  }
+
+                  if (action.intent === 'update_status') {
+                    return (
+                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                        <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide">Update status</p>
+                        <p className="text-sm text-white">{task.status} → <span className="font-semibold">{action.status.replace('_', ' ')}</span></p>
+                        <button
+                          onClick={() => confirmAction(action, i)}
+                          disabled={confirmed || updateStatus.isPending}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.15)', color: '#facc15' }}
+                        >
+                          {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><RefreshCw size={11} /> Apply</>}
+                        </button>
+                      </div>
+                    )
+                  }
+
+                  if (action.intent === 'execute_task') {
+                    return (
+                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                        <p className="text-xs text-purple-400 font-semibold uppercase tracking-wide">Execute task</p>
+                        <p className="text-sm text-gray-300">Run AI execution for this task</p>
+                        <button
+                          onClick={() => confirmAction(action, i)}
+                          disabled={confirmed || streaming}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(168,85,247,0.2)', color: '#c084fc' }}
+                        >
+                          {confirmed ? <><CheckCircle size={11} /> Started</> : streaming ? <><Loader2 size={11} className="animate-spin" /> Running…</> : <><Play size={11} /> Execute</>}
+                        </button>
+                      </div>
+                    )
+                  }
+                }
+
+                // Plain message
+                return (
+                  <div key={i} className={cn('text-sm rounded-lg px-3 py-2 whitespace-pre-wrap', m.role === 'user' ? 'bg-gray-800 text-gray-200 self-end text-right' : 'bg-gray-900 text-gray-300')}>
+                    {m.content}
+                  </div>
+                )
+              })}
               <div ref={chatBottomRef} />
             </div>
           )}
-          <div className="flex gap-2 items-end">
+
+          {/* Input */}
+          <div className="flex gap-2 items-end px-4 pb-4 pt-2">
             <textarea
               rows={1}
               value={promptInput}
               onChange={(e) => setPromptInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePrompt() } }}
-              placeholder="Ask AI about this task…"
+              placeholder={assignedActor ? `Ask ${assignedActor.name}…` : 'Ask AI about this task…'}
               className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
             />
             <button

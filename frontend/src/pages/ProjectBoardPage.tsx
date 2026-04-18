@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -43,6 +43,7 @@ export default function ProjectBoardPage() {
   const boardChatBottomRef = useRef<HTMLDivElement | null>(null)
   const boardPromptAbortRef = useRef<AbortController | null>(null)
   const [createdMsgIndices, setCreatedMsgIndices] = useState<Set<number>>(new Set())
+  const [boardMinimized, setBoardMinimized] = useState(false)
   const [settingsName, setSettingsName] = useState('')
   const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
@@ -541,7 +542,7 @@ export default function ProjectBoardPage() {
 
       {/* Floating board prompt bar */}
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-40">
-        {showBoardChat && boardChatHistory.length > 0 && (
+        {!boardMinimized && showBoardChat && boardChatHistory.length > 0 && (
           <div className="mb-2 bg-gray-900 border border-gray-700 rounded-xl p-3 max-h-64 overflow-y-auto space-y-2 shadow-2xl">
             {boardChatHistory.map((m, i) => {
               const isThinking = boardPromptStreaming && i === boardChatHistory.length - 1 && m.role === 'assistant'
@@ -644,26 +645,41 @@ export default function ProjectBoardPage() {
           </div>
         )}
         <div className="flex gap-2 items-center bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 shadow-2xl">
-          <input
-            type="text"
-            value={boardPrompt}
-            onChange={(e) => setBoardPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleBoardPrompt() }}
-            placeholder={`Ask AI about ${project.name}…`}
-            className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-600"
-          />
-          {boardChatHistory.length > 0 && (
+          {/* Minimize / restore */}
+          <button
+            onClick={() => setBoardMinimized((v) => !v)}
+            className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+            title={boardMinimized ? 'Expand chat' : 'Minimize chat'}
+          >
+            {boardMinimized ? <MessageSquare size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {!boardMinimized && (
+            <input
+              type="text"
+              value={boardPrompt}
+              onChange={(e) => setBoardPrompt(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleBoardPrompt() }}
+              placeholder={`Ask AI about ${project.name}…`}
+              className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-600"
+            />
+          )}
+          {boardMinimized && (
+            <span className="flex-1 text-gray-600 text-sm select-none">AI assistant</span>
+          )}
+          {!boardMinimized && boardChatHistory.length > 0 && (
             <button onClick={() => { setBoardChatHistory([]); setShowBoardChat(false) }} className="text-gray-600 hover:text-gray-400 text-xs px-1">
               Clear
             </button>
           )}
-          <button
-            onClick={handleBoardPrompt}
-            disabled={!boardPrompt.trim() || boardPromptStreaming}
-            className="p-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-          >
-            {boardPromptStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          </button>
+          {!boardMinimized && (
+            <button
+              onClick={handleBoardPrompt}
+              disabled={!boardPrompt.trim() || boardPromptStreaming}
+              className="p-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors"
+            >
+              {boardPromptStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            </button>
+          )}
         </div>
       </div>
     </div>
