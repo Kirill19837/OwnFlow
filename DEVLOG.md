@@ -103,3 +103,19 @@
 - Auth via Supabase, org/project/actor/sprint/task data model
 - AI orchestration via OpenAI and Anthropic APIs
 - Project board UI with sprint/task views, new project wizard
+
+## 2026-04-18 — Unified Copilot panels + execution log
+
+### Features shipped
+- **Execution plan card** — backend `execute_stream` now emits `{"type":"plan","content":"..."}` before streamed output; task drawer shows a purple ✦ plan card announcing what the agent is about to do
+- **Deliverable chat card** — execution output lands as a green-bordered card (FileText icon) in the task chat log; persisted deliverables also injected into chat on drawer open
+- **`update_description` intent** — agent can propose saving content to the task's description field; teal action card with "Save to task" confirm button; backed by `PATCH /tasks/{id}/description` endpoint
+- **Unified chat log** — `chat: ChatMsg[]` replaces the old separate `chatHistory` / `streamContent` / streaming states; renders five message kinds: user, assistant, thinking, plan, deliverable
+- **Collapse/expand both Copilot panels** — both the floating board chat and the task drawer chat now have a matching top-right ChevronDown collapse button; consistent header row with title, optional Clear, and the toggle
+- **Parse error fixed** — JSX nesting issue in `ProjectBoardPage.tsx` board panel block resolved
+
+### Files changed
+- `backend/app/api/tasks.py` — typed SSE events, `PATCH /{task_id}/description`, `update_description` in system prompt
+- `frontend/src/components/TaskDrawer.tsx` — unified chat log, collapse toggle, all new card renderers
+- `frontend/src/pages/ProjectBoardPage.tsx` — matching Copilot panel header with top-right collapse
+
