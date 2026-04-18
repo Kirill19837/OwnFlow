@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
 import { type TaskAction, parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -37,12 +38,13 @@ interface Props {
 }
 
 export default function TaskDrawer({ task, actors, onClose }: Props) {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
 
   // Unified chat log — user msgs, agent replies, plans, deliverables
   const [chat, setChat] = useState<ChatMsg[]>([])
-  const [chatOpen, setChatOpen] = useState(true)
+  const [chatOpen, setChatOpen] = useState(false)
   const [promptInput, setPromptInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [confirmedIndices, setConfirmedIndices] = useState<Set<number>>(new Set())
@@ -288,9 +290,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             </div>
             <h2 className="text-white font-semibold text-lg leading-tight">{task.title}</h2>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors mt-1">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2 mt-1">
+            <button
+              onClick={() => navigate(`/projects/${task.project_id}/activity?task=${task.id}`)}
+              className="text-gray-500 hover:text-white transition-colors"
+              title="Task activity"
+            >
+              <Activity size={16} />
+            </button>
+            <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import api from '../lib/api'
 import { ChevronLeft, MessageSquare, ListChecks, Bot, User, Loader2, AlertCircle } from 'lucide-react'
@@ -31,8 +31,15 @@ type Tab = 'chat' | 'decisions'
 export default function ProjectActivityPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>('chat')
   const [filterTask, setFilterTask] = useState<string>('all')
+
+  // Pre-filter to a specific task if ?task= is in the URL
+  useEffect(() => {
+    const taskParam = searchParams.get('task')
+    if (taskParam) setFilterTask(taskParam)
+  }, [searchParams])
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['project-activity', projectId],
