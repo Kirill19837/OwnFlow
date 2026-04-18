@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useProjectStore } from '../store/projectStore'
@@ -19,7 +19,6 @@ export default function DashboardPage() {
   const { session } = useAuthStore()
   const { setProjects, projects } = useProjectStore()
   const { activeOrg } = useOrgStore()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   // Re-generate log panel state

@@ -18,7 +18,7 @@ export interface OrgMember {
 
 export type ActorType = 'human' | 'ai'
 
-export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done'
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'rework'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'
 export type TaskType = 'code' | 'design' | 'review' | 'research' | 'qa' | 'devops'
 

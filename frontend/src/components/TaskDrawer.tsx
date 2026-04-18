@@ -264,6 +264,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     scrollBottom()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const confirmAction = (action: TaskAction, idx: number) => {
     const markDone = () => setConfirmedIndices((p) => new Set([...p, idx]))
     if (action.intent === 'assign_actor') {
