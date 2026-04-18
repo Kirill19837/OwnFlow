@@ -1,0 +1,25 @@
+name: Deploy Pitch Deck to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pitch/**'
+      - '.github/workflows/deploy-pitch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pitch
+          publish_branch: gh-pages
+          commit_message: "deploy: pitch deck ${{ github.sha }}"

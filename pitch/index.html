@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OwnFlow — Investor Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #07070f;
+  --purple: #7c3aed;
+  --purple-l: #a78bfa;
+  --purple-dim: rgba(124,58,237,0.14);
+  --white: #ffffff;
+  --gray: #9ca3af;
+  --gray-d: #6b7280;
+  --border: rgba(255,255,255,0.07);
+  --green: #4ade80;
+  --green-dim: rgba(34,197,94,0.12);
+}
+
+body {
+  background: var(--bg);
+  color: var(--white);
+  font-family: 'Inter', sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Deck ── */
+.deck {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  cursor: pointer;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 72px 80px 88px;
+  opacity: 0;
+  transform: translateX(48px);
+  transition: opacity 0.45s cubic-bezier(.4,0,.2,1), transform 0.45s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+}
+
+.slide.active {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: all;
+}
+
+.slide.past {
+  opacity: 0;
+  transform: translateX(-48px);
+}
+
+/* ── Nav bar ── */
+.nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 40px;
+  background: linear-gradient(to top, rgba(7,7,15,.9), transparent);
+  z-index: 100;
+  pointer-events: none;
+}
+
+.counter {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gray-d);
+  min-width: 36px;
+  pointer-events: none;
+}
+
+.progress {
+  flex: 1;
+  height: 2px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 2px;
+}
+
+.bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--purple), var(--purple-l));
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  width: 10%;
+}
+
+.arrows {
+  display: flex;
+  gap: 6px;
+  pointer-events: all;
+}
+
+.arrows button {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--gray-d);
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.arrows button:hover { color: var(--white); border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); }
+
+/* ── Type ── */
+.label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--purple-l);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(42px, 5.5vw, 76px);
+  font-weight: 800;
+  line-height: 1.08;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: clamp(28px, 3.5vw, 50px);
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  font-size: clamp(14px, 1.5vw, 19px);
+  color: var(--gray);
+  margin-top: 20px;
+  text-align: center;
+  max-width: 620px;
+  line-height: 1.65;
+  font-weight: 400;
+}
+
+.accent { color: var(--purple-l); }
+
+/* ── Cards ── */
+.grid { display: grid; gap: 18px; width: 100%; max-width: 1000px; margin-top: 40px; }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+.g2 { grid-template-columns: repeat(2, 1fr); }
+
+.card {
+  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 26px;
+}
+
+.card .ico { font-size: 26px; margin-bottom: 10px; }
+.card h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.card p { font-size: 13px; color: var(--gray); line-height: 1.6; }
+
+.big { font-size: clamp(40px, 4.5vw, 64px); font-weight: 800; color: var(--purple-l); line-height: 1; }
+.big-label { font-size: 12px; color: var(--gray); margin-top: 6px; line-height: 1.5; }
+
+/* ── Badge / Pills ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--purple-dim);
+  border: 1px solid rgba(124,58,237,0.35);
+  border-radius: 100px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--purple-l);
+  margin-bottom: 22px;
+}
+
+.pills { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; justify-content: center; }
+
+.pill {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 100px;
+  padding: 9px 18px;
+  font-size: 13px;
+  color: var(--gray);
+  font-weight: 500;
+}
+
+/* ── Checklist ── */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: 13px; width: 100%; }
+
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  font-size: 15px;
+  color: var(--gray);
+  line-height: 1.5;
+}
+
+.ck {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--green-dim);
+  border: 1px solid rgba(34,197,94,0.3);
+  color: var(--green);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Steps ── */
+.steps {
+  display: flex;
+  width: 100%;
+  max-width: 900px;
+  margin-top: 48px;
+  gap: 0;
+}
+
+.step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 20px;
+  position: relative;
+}
+
+.step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 23px;
+  left: 50%;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(124,58,237,0.6), rgba(124,58,237,0.05));
+  z-index: 0;
+}
+
+.step-n {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: var(--purple);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700;
+  margin-bottom: 16px;
+  position: relative; z-index: 1;
+  box-shadow: 0 0 0 6px rgba(124,58,237,0.12);
+}
+
+.step h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.step p { font-size: 13px; color: var(--gray); line-height: 1.55; }
+
+/* ── Two col ── */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  width: 100%;
+  max-width: 1000px;
+  align-items: center;
+}
+
+/* ── Price cards ── */
+.price-row { display: flex; gap: 20px; width: 100%; max-width: 820px; margin-top: 40px; }
+
+.pc {
+  flex: 1;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.pc.hi {
+  background: var(--purple-dim);
+  border-color: rgba(124,58,237,0.4);
+}
+
+.pc .tier { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-d); margin-bottom: 10px; }
+.pc .price { font-size: 44px; font-weight: 800; line-height: 1; }
+.pc.hi .price { color: var(--purple-l); }
+.pc .period { font-size: 12px; color: var(--gray-d); margin-top: 4px; margin-bottom: 20px; }
+.pc .checklist { text-align: left; }
+.pc .checklist li { font-size: 13px; }
+
+/* ── Slide-specific backgrounds ── */
+#s1  { background: radial-gradient(ellipse 75% 55% at 50% 0%,   rgba(124,58,237,0.22) 0%, transparent 65%); }
+#s10 { background: radial-gradient(ellipse 90% 70% at 50% 110%, rgba(124,58,237,0.28) 0%, transparent 65%); }
+
+/* slide text overrides */
+#s1 h1 { max-width: 820px; }
+
+/* Dot indicator */
+.dots {
+  position: fixed;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  z-index: 100;
+}
+
+.dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.18);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.dot.on { background: var(--purple-l); transform: scale(1.4); }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- 1 · Hero ──────────────────────────────── -->
+  <div class="slide active" id="s1">
+    <div class="badge">🤖 AI-Native Project Management</div>
+    <h1>Your AI team members<br><span class="accent">actually do the work</span></h1>
+    <p class="sub">OwnFlow is the first project manager where AI actors are assigned to tasks, ask the right questions, write code, and open pull requests — just like a senior dev, but always available.</p>
+    <div class="pills">
+      <span class="pill">⚡ Task → PR in minutes</span>
+      <span class="pill">🔗 GitHub native</span>
+      <span class="pill">✅ Human approval at every step</span>
+    </div>
+  </div>
+
+  <!-- 2 · Problem ──────────────────────────── -->
+  <div class="slide" id="s2">
+    <div class="label">The Problem</div>
+    <h2>Teams are managing tasks.<br>AI should be <span class="accent">doing</span> them.</h2>
+    <div class="grid g3" style="margin-top:44px">
+      <div class="card" style="text-align:center">
+        <div class="big">40%</div>
+        <div class="big-label">of developer time lost to coordination, ticket writing, and status updates</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big">$450B</div>
+        <div class="big-label">lost annually to inefficient knowledge work — Accenture, 2024</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big">0</div>
+        <div class="big-label">project management tools designed for AI-first teams — until now</div>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:26px">Jira, Asana, Linear — all built for humans in a pre-AI world. They treat AI as a chatbot sidebar, not a team member.</p>
+  </div>
+
+  <!-- 3 · Solution ────────────────────────── -->
+  <div class="slide" id="s3">
+    <div class="two-col">
+      <div>
+        <div class="label">The Solution</div>
+        <h2>AI actors as<br><span class="accent">first-class</span><br>team members</h2>
+        <p class="sub" style="text-align:left;max-width:100%;margin-top:18px">In OwnFlow you assign tasks to AI actors the same way you'd assign to a developer. The AI understands project context, asks clarifying questions, and executes — while you stay in control.</p>
+      </div>
+      <ul class="checklist">
+        <li><span class="ck">✓</span> AI understands your full project brief and tech stack</li>
+        <li><span class="ck">✓</span> Captures every decision into structured fields automatically</li>
+        <li><span class="ck">✓</span> Two-stage approval: AI signals ready → human approves</li>
+        <li><span class="ck">✓</span> Ships code, opens PRs, links them back to the task</li>
+        <li><span class="ck">✓</span> Full audit trail — every question, decision, and commit</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 4 · How it works ────────────────────── -->
+  <div class="slide" id="s4">
+    <div class="label">How It Works</div>
+    <h2>Task to PR in <span class="accent">three steps</span></h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-n">1</div>
+        <h3>Assign &amp; Refine</h3>
+        <p>Assign an AI actor. It reads the project context, asks the right questions, and captures every decision into structured fields automatically.</p>
+      </div>
+      <div class="step">
+        <div class="step-n">2</div>
+        <h3>AI Declares Ready</h3>
+        <p>When the AI has everything it needs, it signals readiness. An amber indicator appears. You review and approve with one click — or push back.</p>
+      </div>
+      <div class="step">
+        <div class="step-n">3</div>
+        <h3>Execute &amp; Ship</h3>
+        <p>The AI implements, commits to a new branch, and opens a pull request on GitHub — all linked back to the task automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5 · Product ─────────────────────────── -->
+  <div class="slide" id="s5">
+    <div class="label">Product</div>
+    <h2>Built for the <span class="accent">AI-first team</span></h2>
+    <div class="grid g3" style="margin-top:32px">
+      <div class="card">
+        <div class="ico">🧠</div>
+        <h3>AI Copilot per Task</h3>
+        <p>Persistent AI chat with full task context. Decisions and history survive across every session.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⚡</div>
+        <h3>Two-Stage Readiness</h3>
+        <p>AI signals when it has enough info. Human approves when it's right. Execution never surprises.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔗</div>
+        <h3>GitHub Native</h3>
+        <p>Connect your repo with a PAT. AI creates branches, writes code, opens PRs — per project, per task.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🏃</div>
+        <h3>AI Sprint Planning</h3>
+        <p>Generate a full sprint plan — stories, estimates, actor assignments — from a single project brief.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🎭</div>
+        <h3>Multi-Actor, Multi-Model</h3>
+        <p>Mix GPT-4o, Claude, and human actors on the same board. Assign the right agent to the right task.</p>
+      </div>
+      <div class="card">
+        <div class="ico">📊</div>
+        <h3>Full Activity Feed</h3>
+        <p>Every AI decision, code change, and status update in one audit trail — per task, per project.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6 · Market ──────────────────────────── -->
+  <div class="slide" id="s6">
+    <div class="label">Market Opportunity</div>
+    <h2>A $12B market<br><span class="accent">being rebuilt from scratch</span></h2>
+    <div class="grid g3" style="margin-top:44px">
+      <div class="card" style="text-align:center">
+        <div class="big">$12B</div>
+        <div class="big-label">Project management software TAM — growing 10% YoY</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big">37%</div>
+        <div class="big-label">CAGR of AI developer tools through 2030 — Grand View Research</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big">1B+</div>
+        <div class="big-label">knowledge workers globally who will need AI-native tooling</div>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:26px">The shift is structural. Every software team will have more AI actors than human ones within 5 years. None of today's tools are built for that world.</p>
+  </div>
+
+  <!-- 7 · Business Model ──────────────────── -->
+  <div class="slide" id="s7">
+    <div class="label">Business Model</div>
+    <h2>Simple SaaS + <span class="accent">usage credits</span></h2>
+    <div class="price-row">
+      <div class="pc">
+        <div class="tier">Starter</div>
+        <div class="price">$25</div>
+        <div class="period">per seat / month</div>
+        <ul class="checklist">
+          <li><span class="ck">✓</span> Up to 5 AI actors</li>
+          <li><span class="ck">✓</span> 3 active projects</li>
+          <li><span class="ck">✓</span> GitHub integration</li>
+        </ul>
+      </div>
+      <div class="pc hi">
+        <div class="tier">Pro</div>
+        <div class="price">$75</div>
+        <div class="period">per seat / month</div>
+        <ul class="checklist">
+          <li><span class="ck">✓</span> Unlimited AI actors</li>
+          <li><span class="ck">✓</span> Unlimited projects</li>
+          <li><span class="ck">✓</span> Custom AI models</li>
+          <li><span class="ck">✓</span> Priority execution</li>
+        </ul>
+      </div>
+      <div class="pc">
+        <div class="tier">Enterprise</div>
+        <div class="price" style="font-size:32px;line-height:1.3">Custom</div>
+        <div class="period">tailored contract</div>
+        <ul class="checklist">
+          <li><span class="ck">✓</span> On-premise deploy</li>
+          <li><span class="ck">✓</span> SSO &amp; audit logs</li>
+          <li><span class="ck">✓</span> Dedicated support</li>
+        </ul>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:22px">+ Usage-based AI execution credits &nbsp;·&nbsp; Net retention target: <strong style="color:var(--white)">130%+</strong></p>
+  </div>
+
+  <!-- 8 · Traction ────────────────────────── -->
+  <div class="slide" id="s8">
+    <div class="label">Traction</div>
+    <h2>Working product.<br><span class="accent">Ready to scale.</span></h2>
+    <div class="two-col" style="margin-top:40px;gap:48px">
+      <ul class="checklist">
+        <li><span class="ck">✓</span> Full end-to-end product built and running</li>
+        <li><span class="ck">✓</span> AI task execution pipeline live (GPT-4o + Claude)</li>
+        <li><span class="ck">✓</span> GitHub integration: branch → commit → PR → task link</li>
+        <li><span class="ck">✓</span> Two-stage human-in-the-loop approval system shipped</li>
+        <li><span class="ck">✓</span> AI sprint planning from a single project brief</li>
+        <li><span class="ck">✓</span> Multi-model, multi-actor, multi-project support</li>
+      </ul>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card" style="text-align:center;padding:28px">
+          <div class="big" style="font-size:46px">6 wks</div>
+          <div class="big-label">from idea to working, end-to-end product</div>
+        </div>
+        <div class="card" style="text-align:center;padding:28px">
+          <div class="big" style="font-size:46px">$0</div>
+          <div class="big-label">raised to date &mdash; built lean, by a solo founder</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9 · Ask ─────────────────────────────── -->
+  <div class="slide" id="s9">
+    <div class="label">The Ask</div>
+    <h2>Raising <span class="accent">$1.5M</span> Seed Round</h2>
+    <div class="grid g3" style="max-width:860px;margin-top:44px">
+      <div class="card" style="text-align:center">
+        <div class="big" style="font-size:52px">60%</div>
+        <div class="big-label">Team — 3 senior engineers + 1 head of growth</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big" style="font-size:52px">25%</div>
+        <div class="big-label">Infrastructure &amp; AI compute at scale</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="big" style="font-size:52px">15%</div>
+        <div class="big-label">Go-to-market, developer community, first 50 customers</div>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:26px">
+      18-month runway &nbsp;·&nbsp; Target: 50 paying teams &nbsp;·&nbsp; ARR goal: <strong style="color:var(--white)">$500K</strong>
+    </p>
+    <div class="pills" style="margin-top:18px">
+      <span class="pill">🎯 Strategic SaaS investors</span>
+      <span class="pill">🤝 Developer tools evangelists</span>
+      <span class="pill">⚡ AI infrastructure partners</span>
+    </div>
+  </div>
+
+  <!-- 10 · Vision ─────────────────────────── -->
+  <div class="slide" id="s10">
+    <div class="label">The Vision</div>
+    <h1 style="max-width:780px">
+      In 5 years, every team will have<br>
+      <span class="accent">more AI actors than human ones.</span>
+    </h1>
+    <p class="sub" style="font-size:clamp(16px,1.8vw,22px);margin-top:24px">OwnFlow is the operating system for that team.</p>
+    <div class="pills" style="margin-top:44px">
+      <span class="pill" style="font-size:15px;padding:12px 28px;color:var(--white);border-color:rgba(124,58,237,0.4);background:var(--purple-dim)">
+        🌊 ownflow.io
+      </span>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- Dot indicator -->
+<div class="dots" id="dots"></div>
+
+<!-- Nav bar -->
+<div class="nav">
+  <span class="counter" id="counter">1 / 10</span>
+  <div class="progress"><div class="bar" id="bar"></div></div>
+  <div class="arrows">
+    <button onclick="prev(event)">←</button>
+    <button onclick="next(event)">→</button>
+  </div>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'))
+  const total = slides.length
+  let cur = 0
+
+  // Build dots
+  const dotsEl = document.getElementById('dots')
+  slides.forEach((_, i) => {
+    const d = document.createElement('div')
+    d.className = 'dot' + (i === 0 ? ' on' : '')
+    d.onclick = (e) => { e.stopPropagation(); goto(i) }
+    dotsEl.appendChild(d)
+  })
+
+  function update() {
+    slides.forEach((s, i) => {
+      s.classList.remove('active', 'past')
+      if (i === cur) s.classList.add('active')
+      else if (i < cur) s.classList.add('past')
+    })
+    document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i === cur))
+    document.getElementById('counter').textContent = `${cur + 1} / ${total}`
+    document.getElementById('bar').style.width = `${((cur + 1) / total) * 100}%`
+  }
+
+  function goto(n) { cur = Math.max(0, Math.min(total - 1, n)); update() }
+  function next(e) { if (e) e.stopPropagation(); goto(cur + 1) }
+  function prev(e) { if (e) e.stopPropagation(); goto(cur - 1) }
+
+  document.getElementById('deck').addEventListener('click', () => next())
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); next() }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     { e.preventDefault(); prev() }
+  })
+
+  // Touch/swipe
+  let tx = 0
+  document.addEventListener('touchstart', e => { tx = e.touches[0].clientX }, { passive: true })
+  document.addEventListener('touchend',   e => {
+    const dx = e.changedTouches[0].clientX - tx
+    if (Math.abs(dx) > 40) dx < 0 ? next() : prev()
+  })
+</script>
+</body>
+</html>
