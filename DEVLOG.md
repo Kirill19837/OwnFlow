@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-18 | `05f7d3b` — Assignment display fix, actor roles, realtime store crash
+- Fixed "Assigned to" dropdown staying on Unassigned after saving: now tracks task by ID and resolves live from query cache
+- Fixed realtime store crash (`findIndex is not a function`): guarded `assignments` with `Array.isArray()`, fixed predicate to match `assignment.id`
+- Added `role` field to actors (full stack: Supabase `ALTER TABLE`, backend models + insert, frontend types + UI)
+- Task drawer actor dropdown shows role label (e.g. "Lead QA") with model as fallback
+- Add Actor form in settings now has a Role input field
+- Handle unassign (empty `actor_id`) in `PATCH /tasks/{id}/assign` — deletes assignment without FK error
+- Added "Start Work" button (no-op) to task drawer
+
+---
+
 ## 2026-04-18 | `2f5729b` — Settings panel: name, description, actor management
 - Expanded project settings panel to include editable project name and description/prompt
 - Added actor management in settings: list existing actors with delete button, add new actor form (name + AI/Human toggle + model selector)
