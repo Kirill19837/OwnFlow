@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { X, Play, Loader2, Zap } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send } from 'lucide-react'
 import type { Task, Actor, Deliverable } from '../types'
 import api from '../lib/api'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -32,6 +32,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const [streaming, setStreaming] = useState(false)
   const [streamContent, setStreamContent] = useState('')
   const abortRef = useRef<AbortController | null>(null)
+
+  // Prompt chat state
+  const [promptInput, setPromptInput] = useState('')
+  const [promptStreaming, setPromptStreaming] = useState(false)
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const promptAbortRef = useRef<AbortController | null>(null)
+  const chatBottomRef = useRef<HTMLDivElement | null>(null)
 
   const { data: deliverables } = useQuery({
     queryKey: ['deliverables', task.id],
@@ -72,6 +79,51 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       : (task.assignments as any)
     return a.id === a0?.actor_id
   })
+
+  const handlePrompt = async () => {
+    const msg = promptInput.trim()
+    if (!msg || promptStreaming) return
+    setPromptInput('')
+    setPromptStreaming(true)
+
+    const userMsg: { role: 'user' | 'assistant'; content: string } = { role: 'user', content: msg }
+    const newHistory = [...chatHistory, userMsg]
+    setChatHistory([...newHistory, { role: 'assistant', content: '' }])
+
+    const ctrl = new AbortController()
+    promptAbortRef.current = ctrl
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+    try {
+      const res = await fetch(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: msg, history: chatHistory }),
+        signal: ctrl.signal,
+      })
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (payload === '[DONE]') break
+          try {
+            const { content } = JSON.parse(payload)
+            assistantContent += content
+            setChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
+          } catch {}
+        }
+      }
+    } catch {}
+
+    setPromptStreaming(false)
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }
 
   const handleExecute = async () => {
     setStreaming(true)
@@ -226,6 +278,37 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Prompt chat — pinned at bottom */}
+        <div className="border-t border-gray-800 px-4 py-3 bg-gray-950">
+          {chatHistory.length > 0 && (
+            <div className="mb-3 max-h-56 overflow-y-auto space-y-2 pr-1">
+              {chatHistory.map((m, i) => (
+                <div key={i} className={cn('text-sm rounded-lg px-3 py-2 whitespace-pre-wrap', m.role === 'user' ? 'bg-gray-800 text-gray-200 text-right' : 'bg-gray-900 text-gray-300')}>
+                  {m.content || <span className="opacity-40 animate-pulse">▋</span>}
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+          )}
+          <div className="flex gap-2 items-end">
+            <textarea
+              rows={1}
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePrompt() } }}
+              placeholder="Ask AI about this task…"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+            />
+            <button
+              onClick={handlePrompt}
+              disabled={!promptInput.trim() || promptStreaming}
+              className="p-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors shrink-0"
+            >
+              {promptStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            </button>
+          </div>
         </div>
       </div>
     </div>

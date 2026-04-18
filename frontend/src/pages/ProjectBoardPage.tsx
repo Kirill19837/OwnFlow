@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Task } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -34,6 +34,15 @@ export default function ProjectBoardPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+
+  // Board-level prompt
+  const [boardPrompt, setBoardPrompt] = useState('')
+  const [boardPromptStreaming, setBoardPromptStreaming] = useState(false)
+  const [boardChatHistory, setBoardChatHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [showBoardChat, setShowBoardChat] = useState(false)
+  const boardChatBottomRef = useRef<HTMLDivElement | null>(null)
+  const boardPromptAbortRef = useRef<AbortController | null>(null)
+  const [createdMsgIndices, setCreatedMsgIndices] = useState<Set<number>>(new Set())
   const [settingsName, setSettingsName] = useState('')
   const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
@@ -113,6 +122,44 @@ export default function ProjectBoardPage() {
     },
   })
 
+  type StructuredAction = {
+    intent: 'create_tasks' | 'modify_tasks' | 'delete_tasks'
+    tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string }[]
+  }
+
+  function parseStructuredAction(content: string): StructuredAction | null {
+    const m = content.match(/```json\s*([\s\S]*?)```/)
+    if (!m) return null
+    try {
+      const parsed = JSON.parse(m[1].trim())
+      if (
+        ['create_tasks', 'modify_tasks', 'delete_tasks'].includes(parsed.intent) &&
+        Array.isArray(parsed.tasks)
+      ) {
+        return parsed as StructuredAction
+      }
+    } catch {}
+    return null
+  }
+
+  const createTasksFromAI = useMutation({
+    mutationFn: ({ tasks, sprintId }: { tasks: { title: string; estimated_hours?: number }[]; sprintId?: string }) =>
+      api.post(`/projects/${projectId}/tasks`, { tasks, sprint_id: sprintId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const modifyTasksFromAI = useMutation({
+    mutationFn: (tasks: StructuredAction['tasks']) =>
+      api.patch(`/projects/${projectId}/tasks/batch`, { tasks }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const deleteTasksFromAI = useMutation({
+    mutationFn: (tasks: StructuredAction['tasks']) =>
+      api.delete(`/projects/${projectId}/tasks/batch`, { data: { tasks } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
   useRealtimeProject(projectId)
 
   useEffect(() => {
@@ -135,6 +182,55 @@ export default function ProjectBoardPage() {
     const newStatus = destination.droppableId
     await api.patch(`/tasks/${draggableId}/status`, { status: newStatus })
     refetch()
+  }
+
+  const handleBoardPrompt = async () => {
+    const msg = boardPrompt.trim()
+    if (!msg || boardPromptStreaming) return
+    setBoardPrompt('')
+    setShowBoardChat(true)
+    setBoardPromptStreaming(true)
+
+    const userMsg: { role: 'user' | 'assistant'; content: string } = { role: 'user', content: msg }
+    const newHistory = [...boardChatHistory, userMsg]
+    // Start with empty content — we buffer silently and only show when done
+    setBoardChatHistory([...newHistory, { role: 'assistant', content: '' }])
+
+    const ctrl = new AbortController()
+    boardPromptAbortRef.current = ctrl
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+    try {
+      const res = await fetch(`${baseUrl}/projects/${projectId}/prompt/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: msg, history: boardChatHistory }),
+        signal: ctrl.signal,
+      })
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (payload === '[DONE]') break
+          try {
+            const { content } = JSON.parse(payload)
+            assistantContent += content
+            // Don't update state mid-stream — reveal only when done
+          } catch {}
+        }
+      }
+      // Reveal final content all at once
+      setBoardChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
+    } catch {}
+
+    setBoardPromptStreaming(false)
+    setTimeout(() => boardChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
 
   if (isLoading) {
@@ -442,6 +538,134 @@ export default function ProjectBoardPage() {
           />
         ) : null
       })()}
+
+      {/* Floating board prompt bar */}
+      <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-40">
+        {showBoardChat && boardChatHistory.length > 0 && (
+          <div className="mb-2 bg-gray-900 border border-gray-700 rounded-xl p-3 max-h-64 overflow-y-auto space-y-2 shadow-2xl">
+            {boardChatHistory.map((m, i) => {
+              const isThinking = boardPromptStreaming && i === boardChatHistory.length - 1 && m.role === 'assistant'
+              const action = m.role === 'assistant' && !isThinking && m.content ? parseStructuredAction(m.content) : null
+              const alreadyConfirmed = createdMsgIndices.has(i)
+
+              // Thinking spinner — shown while buffering
+              if (isThinking) {
+                return (
+                  <div key={i} className="flex items-center gap-2 px-3 py-2 text-purple-400 text-sm">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span className="opacity-70">Thinking…</span>
+                  </div>
+                )
+              }
+
+              // Structured action card
+              if (action) {
+                const isPending =
+                  action.intent === 'create_tasks' ? createTasksFromAI.isPending
+                  : action.intent === 'modify_tasks' ? modifyTasksFromAI.isPending
+                  : deleteTasksFromAI.isPending
+
+                const intentLabel =
+                  action.intent === 'create_tasks' ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to create`, color: 'text-purple-400', confirmText: 'Add to board', confirmStyle: { background: 'rgba(168,85,247,0.2)', color: '#c084fc' } }
+                  : action.intent === 'modify_tasks' ? { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to update`, color: 'text-blue-400', confirmText: 'Apply changes', confirmStyle: { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' } }
+                  : { label: `${action.tasks.length} task${action.tasks.length !== 1 ? 's' : ''} to delete`, color: 'text-red-400', confirmText: 'Delete tasks', confirmStyle: { background: 'rgba(239,68,68,0.15)', color: '#f87171' } }
+
+                const handleConfirm = () => {
+                  if (action.intent === 'create_tasks') {
+                    createTasksFromAI.mutate(
+                      { tasks: action.tasks, sprintId: activeSprint ?? undefined },
+                      { onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])) },
+                    )
+                  } else if (action.intent === 'modify_tasks') {
+                    modifyTasksFromAI.mutate(action.tasks, {
+                      onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])),
+                    })
+                  } else {
+                    deleteTasksFromAI.mutate(action.tasks, {
+                      onSuccess: () => setCreatedMsgIndices(prev => new Set([...prev, i])),
+                    })
+                  }
+                }
+
+                return (
+                  <div key={i} className="bg-gray-950 border border-gray-700 rounded-xl p-3 space-y-2">
+                    <p className={`text-xs font-semibold uppercase tracking-wide ${intentLabel.color}`}>
+                      {intentLabel.label}
+                    </p>
+                    <div className="space-y-1.5">
+                      {action.tasks.map((t, j) => (
+                        <div key={j} className="flex items-start gap-2 bg-gray-900 rounded-lg px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium truncate ${action.intent === 'delete_tasks' ? 'text-gray-400 line-through' : 'text-white'}`}>{t.title}</p>
+                            {t.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{t.description}</p>}
+                          </div>
+                          <div className="flex gap-1.5 shrink-0 items-center">
+                            {t.type && <span className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{t.type}</span>}
+                            {t.priority && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                t.priority === 'high' ? 'bg-red-900/50 text-red-400'
+                                : t.priority === 'medium' ? 'bg-yellow-900/50 text-yellow-400'
+                                : 'bg-gray-800 text-gray-400'
+                              }`}>{t.priority}</span>
+                            )}
+                            {t.estimated_hours != null && <span className="text-xs text-gray-500">{t.estimated_hours}h</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <button
+                        onClick={handleConfirm}
+                        disabled={alreadyConfirmed || isPending}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                        style={alreadyConfirmed
+                          ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' }
+                          : intentLabel.confirmStyle}
+                      >
+                        {alreadyConfirmed
+                          ? <><CheckCircle size={12} /> Done</>
+                          : isPending
+                          ? <><Loader2 size={12} className="animate-spin" /> Working…</>
+                          : <><Plus size={12} /> {intentLabel.confirmText}</>}
+                      </button>
+                    </div>
+                  </div>
+                )
+              }
+
+              // Plain prose message
+              return (
+                <div key={i} className={`text-sm rounded-lg px-3 py-2 whitespace-pre-wrap ${m.role === 'user' ? 'bg-gray-800 text-gray-200 text-right' : 'bg-gray-950 text-gray-300'}`}>
+                  {m.content}
+                </div>
+              )
+            })}
+            <div ref={boardChatBottomRef} />
+          </div>
+        )}
+        <div className="flex gap-2 items-center bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 shadow-2xl">
+          <input
+            type="text"
+            value={boardPrompt}
+            onChange={(e) => setBoardPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleBoardPrompt() }}
+            placeholder={`Ask AI about ${project.name}…`}
+            className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-600"
+          />
+          {boardChatHistory.length > 0 && (
+            <button onClick={() => { setBoardChatHistory([]); setShowBoardChat(false) }} className="text-gray-600 hover:text-gray-400 text-xs px-1">
+              Clear
+            </button>
+          )}
+          <button
+            onClick={handleBoardPrompt}
+            disabled={!boardPrompt.trim() || boardPromptStreaming}
+            className="p-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors"
+          >
+            {boardPromptStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

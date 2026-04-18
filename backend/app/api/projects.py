@@ -7,6 +7,7 @@ from app.db import get_supabase
 from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, generate_next_sprint
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
+from app.providers.registry import get_provider
 import uuid
 import json
 
@@ -284,3 +285,148 @@ async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
         "sprint_number": next_sprint_num,
         "task_count": result["task_count"],
     }
+
+
+@router.post("/{project_id}/tasks", status_code=201)
+async def create_tasks_for_project(project_id: str, body: dict):
+    """Create one or more tasks in a sprint from the AI suggestion."""
+    db = get_supabase()
+    tasks_in = body.get("tasks") or []
+    if not tasks_in:
+        raise HTTPException(400, "tasks list is required")
+
+    sprint_id = body.get("sprint_id")
+    if not sprint_id:
+        sr = (
+            db.table("sprints")
+            .select("id")
+            .eq("project_id", project_id)
+            .order("sprint_number")
+            .limit(1)
+            .execute()
+        )
+        if not sr.data:
+            raise HTTPException(400, "No sprints found — plan the project first")
+        sprint_id = sr.data[0]["id"]
+
+    rows = []
+    for t in tasks_in:
+        rows.append(
+            {
+                "id": str(uuid.uuid4()),
+                "sprint_id": sprint_id,
+                "project_id": project_id,
+                "title": (t.get("title") or "Untitled").strip(),
+                "description": t.get("description") or "",
+                "type": t.get("type") or "feature",
+                "priority": t.get("priority") or "medium",
+                "estimated_hours": float(t.get("estimated_hours") or 1),
+                "status": "todo",
+                "depends_on": [],
+            }
+        )
+
+    result = db.table("tasks").insert(rows).execute()
+    return {"created": len(rows), "tasks": result.data or []}
+
+
+@router.patch("/{project_id}/tasks/batch")
+async def batch_modify_tasks(project_id: str, body: dict):
+    """Bulk-update tasks. Each item must have an 'id' plus the fields to change."""
+    db = get_supabase()
+    tasks_in = body.get("tasks") or []
+    if not tasks_in:
+        raise HTTPException(400, "tasks list is required")
+    updated = []
+    allowed_fields = {"title", "description", "type", "priority", "estimated_hours", "status"}
+    for t in tasks_in:
+        task_id = t.get("id")
+        if not task_id:
+            continue
+        patch = {k: v for k, v in t.items() if k in allowed_fields and v is not None}
+        if patch:
+            r = db.table("tasks").update(patch).eq("id", task_id).eq("project_id", project_id).execute()
+            if r.data:
+                updated.extend(r.data)
+    return {"updated": len(updated), "tasks": updated}
+
+
+@router.delete("/{project_id}/tasks/batch")
+async def batch_delete_tasks(project_id: str, body: dict):
+    """Bulk-delete tasks by ID list."""
+    db = get_supabase()
+    task_ids = [t.get("id") for t in (body.get("tasks") or []) if t.get("id")]
+    if not task_ids:
+        raise HTTPException(400, "tasks list with ids is required")
+    db.table("tasks").delete().in_("id", task_ids).eq("project_id", project_id).execute()
+    return {"deleted": len(task_ids)}
+
+
+@router.post("/{project_id}/prompt/stream")
+async def prompt_project_stream(project_id: str, body: dict):
+    """Stream a free-form AI prompt with full project + sprint context."""
+    db = get_supabase()
+    user_prompt = (body.get("prompt") or "").strip()
+    if not user_prompt:
+        raise HTTPException(400, "prompt is required")
+
+    project_resp = db.table("projects").select("*").eq("id", project_id).single().execute()
+    project = project_resp.data
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    # Gather sprint + task summary for context
+    sprints_resp = db.table("sprints").select("id,sprint_number").eq("project_id", project_id).execute()
+    sprint_ids = [s["id"] for s in sprints_resp.data or []]
+    tasks_resp = db.table("tasks").select("id,title,status,type,priority,estimated_hours").in_("sprint_id", sprint_ids).execute() if sprint_ids else type("R", (), {"data": []})()
+
+    sprint_summary = ", ".join(
+        f"Sprint {s['sprint_number']}" for s in (sprints_resp.data or [])
+    )
+    tasks_list = tasks_resp.data or []
+    task_lines = "\n".join(
+        f'- id:{t["id"]} | {t["title"]} | {t["status"]} | {t.get("type","")} | {t.get("priority","")}'
+        for t in tasks_list
+    ) or "no tasks yet"
+
+    history = body.get("history") or []
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are an AI project assistant.\n"
+                f"Project: {project['name']}\n"
+                f"Brief: {project.get('prompt', '')}\n"
+                f"Sprints: {sprint_summary or 'none yet'}\n\n"
+                f"Current tasks:\n{task_lines}\n\n"
+                "Answer helpfully and concisely.\n\n"
+                "IMPORTANT — structured output rule:\n"
+                "When the user asks to CREATE, ADD, DELETE, MODIFY, UPDATE, REGENERATE, or ADD DETAILS to tasks, "
+                "respond ONLY with a single fenced JSON block — no prose before or after it.\n\n"
+                "Shapes:\n"
+                "```json\n"
+                '{"intent":"create_tasks","tasks":[{"title":"...","description":"...","type":"feature|bug|chore|spike","priority":"low|medium|high","estimated_hours":2}]}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"modify_tasks","tasks":[{"id":"<existing task id>","title":"...","description":"...","type":"...","priority":"...","estimated_hours":2}]}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"delete_tasks","tasks":[{"id":"<existing task id>","title":"..."}]}\n'
+                "```\n"
+                "For 'regenerate', use delete_tasks for old ones and create_tasks for new ones — pick whichever fits.\n"
+                "For all other questions, answer normally using Markdown."
+            ),
+        },
+        *history,
+        {"role": "user", "content": user_prompt},
+    ]
+
+    model = "gpt-4o"
+    provider = get_provider(model)
+
+    async def event_stream():
+        async for chunk in provider.stream(messages):
+            yield f"data: {json.dumps({'content': chunk})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

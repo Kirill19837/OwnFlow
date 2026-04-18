@@ -6,6 +6,7 @@ from app.models import TaskAssign
 from app.db import get_supabase
 from app.services.assignment_engine import manual_assign
 from app.services.actor_executor import execute_task, stream_task_execution
+from app.providers.registry import get_provider
 import json
 
 router = APIRouter()
@@ -101,3 +102,61 @@ async def get_deliverables(task_id: str):
         .execute()
     )
     return resp.data or []
+
+
+@router.post("/{task_id}/prompt/stream")
+async def prompt_task_stream(task_id: str, body: dict):
+    """Stream a free-form AI prompt with full task context."""
+    db = get_supabase()
+    user_prompt = (body.get("prompt") or "").strip()
+    if not user_prompt:
+        raise HTTPException(400, "prompt is required")
+
+    task_resp = db.table("tasks").select("*").eq("id", task_id).single().execute()
+    task = task_resp.data
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    project_resp = (
+        db.table("projects").select("name,prompt").eq("id", task["project_id"]).single().execute()
+    )
+    project = project_resp.data or {}
+
+    # Use assigned actor's model if available, else fallback
+    assignment_resp = (
+        db.table("assignments").select("actor_id").eq("task_id", task_id).single().execute()
+    )
+    model = "gpt-4o"
+    if assignment_resp.data:
+        actor_resp = (
+            db.table("actors").select("model").eq("id", assignment_resp.data["actor_id"]).single().execute()
+        )
+        if actor_resp.data and actor_resp.data.get("model"):
+            model = actor_resp.data["model"]
+
+    history = body.get("history") or []
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are an AI assistant helping with a software project.\n"
+                f"Project: {project.get('name', '')}\n"
+                f"Project brief: {project.get('prompt', '')}\n\n"
+                f"Current task: {task['title']}\n"
+                f"Description: {task['description']}\n"
+                f"Status: {task['status']}  |  Type: {task['type']}  |  Priority: {task['priority']}\n\n"
+                "Answer concisely. Use Markdown for code."
+            ),
+        },
+        *history,
+        {"role": "user", "content": user_prompt},
+    ]
+
+    provider = get_provider(model)
+
+    async def event_stream():
+        async for chunk in provider.stream(messages):
+            yield f"data: {json.dumps({'content': chunk})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
