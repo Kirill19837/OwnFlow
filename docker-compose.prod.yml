@@ -6,6 +6,8 @@ services:
       - ./backend/.env
     expose:
       - "8000"
+    networks:
+      - app-net
 
   frontend:
     build:
@@ -19,3 +21,9 @@ services:
       - "3001:80"
     depends_on:
       - backend
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
