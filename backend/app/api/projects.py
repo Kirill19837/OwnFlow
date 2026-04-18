@@ -430,3 +430,43 @@ async def prompt_project_stream(project_id: str, body: dict):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/{project_id}/run-ready")
+async def run_ready_tasks(project_id: str, background_tasks: BackgroundTasks):
+    """Execute all tasks that are marked is_ready=true and have an AI actor assigned."""
+    from app.services.actor_executor import execute_task
+
+    db = get_supabase()
+
+    # Get all sprint IDs for project
+    sprints = db.table("sprints").select("id").eq("project_id", project_id).execute()
+    sprint_ids = [s["id"] for s in (sprints.data or [])]
+    if not sprint_ids:
+        return {"queued": 0}
+
+    # Find ready tasks with assigned AI actors
+    tasks_resp = (
+        db.table("tasks")
+        .select("id, title, assignments(actor_id, actors(type))")
+        .in_("sprint_id", sprint_ids)
+        .eq("is_ready", True)
+        .execute()
+    )
+    tasks = tasks_resp.data or []
+
+    queued = []
+    for task in tasks:
+        assignments = task.get("assignments") or []
+        if isinstance(assignments, dict):
+            assignments = [assignments]
+        for asgn in assignments:
+            actor = asgn.get("actors") or {}
+            if actor.get("type") == "ai":
+                actor_id = asgn["actor_id"]
+                db.table("tasks").update({"status": "in_progress"}).eq("id", task["id"]).execute()
+                background_tasks.add_task(execute_task, task["id"], actor_id)
+                queued.append(task["id"])
+                break
+
+    return {"queued": len(queued), "task_ids": queued}

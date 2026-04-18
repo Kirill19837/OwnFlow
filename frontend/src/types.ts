@@ -45,6 +45,16 @@ export interface Task {
   estimated_hours: number
   depends_on: string[]
   assignments?: Assignment[]
+  is_ready?: boolean
+  task_details?: Record<string, string>
+}
+
+export interface TaskInteraction {
+  id: string
+  task_id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
 }
 
 export interface Assignment {

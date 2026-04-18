@@ -123,6 +123,13 @@ export default function ProjectBoardPage() {
     },
   })
 
+  const runReadyTasks = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/run-ready`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] })
+    },
+  })
+
   type StructuredAction = {
     intent: 'create_tasks' | 'modify_tasks' | 'delete_tasks'
     tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string }[]
@@ -289,6 +296,20 @@ export default function ProjectBoardPage() {
             {project.status}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {(() => {
+              const readyCount = (project.tasks ?? []).filter((t) => t.is_ready).length
+              return readyCount > 0 ? (
+                <button
+                  onClick={() => runReadyTasks.mutate()}
+                  disabled={runReadyTasks.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                  title={`Run all ${readyCount} ready task${readyCount !== 1 ? 's' : ''}`}
+                >
+                  {runReadyTasks.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                  Run {readyCount} Ready
+                </button>
+              ) : null
+            })()}
             {canPlanNextSprint && (
               <button
                 onClick={() => planNextSprint.mutate(project.roadmap?.[0] ? 'gpt-4o' : 'gpt-4o')}

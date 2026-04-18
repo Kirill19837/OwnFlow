@@ -1,6 +1,6 @@
 import type { Task, Actor } from '../types'
 import { cn } from '../lib/utils'
-import { Bot, User, Clock } from 'lucide-react'
+import { Bot, User, Clock, CheckCircle2 } from 'lucide-react'
 
 const PRIORITY_DOT: Record<string, string> = {
   low: 'bg-gray-500',
@@ -31,10 +31,15 @@ export default function TaskCard({ task, actors, onClick }: Props) {
         <span className="text-white text-sm font-medium leading-tight group-hover:text-purple-300 transition-colors">
           {task.title}
         </span>
-        <span
-          className={cn('w-2 h-2 rounded-full shrink-0 mt-1', PRIORITY_DOT[task.priority])}
-          title={task.priority}
-        />
+        <div className="flex items-center gap-1 shrink-0 mt-0.5">
+          {task.is_ready && (
+            <CheckCircle2 size={13} className="text-green-400" title="Ready for implementation" />
+          )}
+          <span
+            className={cn('w-2 h-2 rounded-full', PRIORITY_DOT[task.priority])}
+            title={task.priority}
+          />
+        </div>
       </div>
       <div className="flex items-center justify-between mt-2">
         <span className="text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">{task.type}</span>

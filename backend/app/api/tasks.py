@@ -81,6 +81,44 @@ async def update_task_description(task_id: str, body: dict):
     return {"task_id": task_id, "description": content}
 
 
+@router.patch("/{task_id}/details")
+async def update_task_details(task_id: str, body: dict):
+    """Merge key-value decisions into task_details JSONB."""
+    db = get_supabase()
+    details = body.get("details") or {}
+    if not isinstance(details, dict):
+        raise HTTPException(400, "details must be an object")
+    # Fetch existing and merge
+    existing = db.table("tasks").select("task_details").eq("id", task_id).single().execute()
+    current = (existing.data or {}).get("task_details") or {}
+    merged = {**current, **details}
+    db.table("tasks").update({"task_details": merged}).eq("id", task_id).execute()
+    return {"task_id": task_id, "task_details": merged}
+
+
+@router.patch("/{task_id}/ready")
+async def set_task_ready(task_id: str, body: dict):
+    """Mark or unmark a task as ready for implementation."""
+    db = get_supabase()
+    is_ready = bool(body.get("is_ready", True))
+    db.table("tasks").update({"is_ready": is_ready}).eq("id", task_id).execute()
+    return {"task_id": task_id, "is_ready": is_ready}
+
+
+@router.get("/{task_id}/interactions")
+async def get_task_interactions(task_id: str):
+    """Return all persisted human/AI interactions for a task."""
+    db = get_supabase()
+    resp = (
+        db.table("task_interactions")
+        .select("*")
+        .eq("task_id", task_id)
+        .order("created_at")
+        .execute()
+    )
+    return resp.data or []
+
+
 @router.get("/{task_id}/execute/stream")
 async def execute_stream(task_id: str):
     db = get_supabase()
@@ -176,6 +214,14 @@ async def prompt_task_stream(task_id: str, body: dict):
                 model = actor_resp.data["model"]
 
     history = body.get("history") or []
+
+    # Format existing task_details for context
+    task_details = task.get("task_details") or {}
+    details_lines = (
+        "\n".join(f"  {k}: {v}" for k, v in task_details.items())
+        if task_details else "  (none captured yet)"
+    )
+
     messages = [
         {
             "role": "system",
@@ -183,28 +229,57 @@ async def prompt_task_stream(task_id: str, body: dict):
                 f"You are {assigned_actor_name}, an AI agent working on a software project.\n"
                 f"Project: {project.get('name', '')}\n"
                 f"Project brief: {project.get('prompt', '')}\n\n"
-                f"Your task:\n"
+                f"Current task:\n"
                 f"  Title: {task['title']}\n"
-                f"  Description: {task['description']}\n"
+                f"  Description: {task.get('description') or '(empty)'}\n"
                 f"  Status: {task['status']}  |  Type: {task['type']}  |  Priority: {task['priority']}\n\n"
+                f"Decisions & details already captured:\n{details_lines}\n\n"
                 f"Team actors (for assignment):\n{actors_lines}\n\n"
-                "Answer concisely. Use Markdown for code.\n\n"
-                "IMPORTANT — structured action rule:\n"
-                "When the user asks you to perform an action on this task, respond ONLY with a "
-                "fenced JSON block — no prose before or after.\n\n"
-                "Supported actions:\n"
+                "────────────────────────────────────\n"
+                "REFINEMENT PROTOCOL\n"
+                "When the user asks you to refine, clarify, or improve this task "
+                "(phrases like 'refine', 'clarify', 'improve description', 'what do you need', "
+                "'ask me questions', 'fill in details', etc.), follow this exact process:\n\n"
+                "STEP 1 — Rewrite description.\n"
+                "  Emit one update_description action with a clear, actionable markdown description. "
+                "  It must include: goal, acceptance criteria, and any technical notes you can infer.\n\n"
+                "STEP 2 — Capture known structured decisions.\n"
+                "  Emit one update_details action for every fact you can already infer from the "
+                "  description, project context, or prior conversation. "
+                "  Typical keys: tech_stack, database, auth_method, api_style, framework, "
+                "  deployment_target, testing_approach, performance_requirements.\n"
+                "  IMPORTANT: never emit a key that was already captured (shown above).\n\n"
+                "STEP 3 — Ask all remaining open questions.\n"
+                "  After the JSON blocks, list every question still unanswered as a numbered list. "
+                "  Be specific — ask one thing per question. Do not ask about things already "
+                "  captured in 'Decisions & details already captured'.\n\n"
+                "STEP 4 — When the user answers a question.\n"
+                "  Immediately emit update_details for the answered fact(s), then check if any "
+                "  questions remain. If none remain, also emit mark_ready.\n\n"
+                "Do NOT emit mark_ready until ALL questions are answered by the user.\n"
+                "Do NOT repeat questions already answered in the captured details.\n"
+                "────────────────────────────────────\n\n"
+                "STRUCTURED ACTIONS (respond with ONLY a fenced JSON block — no prose before/after):\n\n"
                 "```json\n"
-                '{"intent":"assign_actor","actor_id":"<id from actors list>","actor_name":"..."}\n'
+                '{"intent":"update_description","content":"<full markdown description>"}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"update_details","details":{"<key>":"<value>",...}}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"mark_ready","summary":"<one-sentence confirmation all questions answered>"}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"assign_actor","actor_id":"<id>","actor_name":"..."}\n'
                 "```\n"
                 "```json\n"
                 '{"intent":"update_status","status":"todo|in_progress|review|done|rework"}\n'
                 "```\n"
                 "```json\n"
                 '{"intent":"execute_task","confirm":true}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"update_description","content":"<full markdown to set as the task notes/documentation>"}\n'
-                "```\n"
+                "```\n\n"
+                "When the refinement protocol produces multiple actions (steps 1+2), emit them as "
+                "separate fenced JSON blocks in sequence, then ask questions in plain text after.\n"
                 "For all other questions, answer normally using Markdown."
             ),
         },
@@ -212,11 +287,33 @@ async def prompt_task_stream(task_id: str, body: dict):
         {"role": "user", "content": user_prompt},
     ]
 
+    # Persist user message
+    try:
+        db.table("task_interactions").insert({
+            "task_id": task_id,
+            "role": "user",
+            "content": user_prompt,
+        }).execute()
+    except Exception:
+        pass
+
     provider = get_provider(model)
 
     async def event_stream():
+        full_response = []
         async for chunk in provider.stream(messages):
+            full_response.append(chunk)
             yield f"data: {json.dumps({'content': chunk})}\n\n"
         yield "data: [DONE]\n\n"
+        # Persist assistant reply
+        assistant_content = "".join(full_response)
+        try:
+            db.table("task_interactions").insert({
+                "task_id": task_id,
+                "role": "assistant",
+                "content": assistant_content,
+            }).execute()
+        except Exception:
+            pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

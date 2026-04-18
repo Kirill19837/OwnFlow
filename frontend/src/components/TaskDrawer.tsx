@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown } from 'lucide-react'
-import type { Task, Actor, Deliverable } from '../types'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks } from 'lucide-react'
+import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
@@ -26,6 +26,8 @@ type TaskAction =
   | { intent: 'update_status'; status: string }
   | { intent: 'execute_task'; confirm: boolean }
   | { intent: 'update_description'; content: string }
+  | { intent: 'update_details'; details: Record<string, string> }
+  | { intent: 'mark_ready'; summary: string }
 
 // Chat message types
 type ChatMsg =
@@ -60,14 +62,31 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     queryFn: () => api.get<Deliverable[]>(`/tasks/${task.id}/deliverables`).then((r) => r.data),
   })
 
-  // Inject persisted deliverables into chat on first load
+  const { data: interactions } = useQuery({
+    queryKey: ['interactions', task.id],
+    queryFn: () => api.get<TaskInteraction[]>(`/tasks/${task.id}/interactions`).then((r) => r.data),
+  })
+
+  // Seed chat from persisted interactions on first open (once)
+  const seededRef = useRef(false)
   useEffect(() => {
-    if (deliverables && deliverables.length > 0 && chat.length === 0) {
-      const actorName = assignedActor?.name ?? 'Agent'
-      setChat(deliverables.map((d) => ({ kind: 'deliverable' as const, content: d.content, actorName })))
-    }
+    if (seededRef.current) return
+    const hasInteractions = interactions && interactions.length > 0
+    const hasDeliverables = deliverables && deliverables.length > 0
+    if (!hasInteractions && !hasDeliverables) return
+    seededRef.current = true
+    const interactionMsgs: ChatMsg[] = (interactions ?? []).map((m) => ({
+      kind: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+    const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => ({
+      kind: 'deliverable' as const,
+      content: d.content,
+      actorName: assignedActor?.name ?? 'Agent',
+    }))
+    setChat([...interactionMsgs, ...deliverableMsgs])
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deliverables])
+  }, [interactions, deliverables])
 
   const assign = useMutation({
     mutationFn: (actor_id: string) =>
@@ -99,6 +118,16 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
   })
 
+  const updateDetails = useMutation({
+    mutationFn: (details: Record<string, string>) => api.patch(`/tasks/${task.id}/details`, { details }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+  })
+
+  const markReady = useMutation({
+    mutationFn: (is_ready: boolean) => api.patch(`/tasks/${task.id}/ready`, { is_ready }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+  })
+
   const assignedActor = actors.find((a) => {
     const a0 = Array.isArray(task.assignments)
       ? task.assignments[0]
@@ -111,11 +140,31 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     if (!m) return null
     try {
       const parsed = JSON.parse(m[1].trim())
-      if (['assign_actor', 'update_status', 'execute_task', 'update_description'].includes(parsed.intent)) {
+      if (['assign_actor', 'update_status', 'execute_task', 'update_description', 'update_details', 'mark_ready'].includes(parsed.intent)) {
         return parsed as TaskAction
       }
     } catch {}
     return null
+  }
+
+  // Extract ALL action blocks from a single assistant message (refinement can emit several)
+  function parseAllTaskActions(content: string): TaskAction[] {
+    const SUPPORTED = ['assign_actor', 'update_status', 'execute_task', 'update_description', 'update_details', 'mark_ready']
+    const re = /```json\s*([\s\S]*?)```/g
+    const actions: TaskAction[] = []
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content)) !== null) {
+      try {
+        const parsed = JSON.parse(m[1].trim())
+        if (SUPPORTED.includes(parsed.intent)) actions.push(parsed as TaskAction)
+      } catch {}
+    }
+    return actions
+  }
+
+  // Prose text with all JSON blocks stripped out
+  function stripActionBlocks(content: string): string {
+    return content.replace(/```json[\s\S]*?```/g, '').trim()
   }
 
   const handlePrompt = async () => {
@@ -245,6 +294,10 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       updateStatus.mutate(action.status, { onSuccess: markDone })
     } else if (action.intent === 'update_description') {
       updateDescription.mutate(action.content, { onSuccess: markDone })
+    } else if (action.intent === 'update_details') {
+      updateDetails.mutate(action.details, { onSuccess: markDone })
+    } else if (action.intent === 'mark_ready') {
+      markReady.mutate(true, { onSuccess: markDone })
     } else if (action.intent === 'execute_task') {
       handleExecute()
       markDone()
@@ -265,6 +318,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 {task.priority}
               </span>
               <span className="text-xs text-gray-600 bg-gray-800 px-2 py-0.5 rounded">{task.type}</span>
+              {task.is_ready && (
+                <span className="flex items-center gap-1 text-xs text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full">
+                  <CheckCircle2 size={10} /> Ready
+                </span>
+              )}
             </div>
             <h2 className="text-white font-semibold text-lg leading-tight">{task.title}</h2>
           </div>
@@ -278,6 +336,70 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           <div>
             <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Description</h3>
             <p className="text-gray-300 text-sm leading-relaxed">{task.description}</p>
+          </div>
+
+          {/* Task Details (structured decisions) */}
+          {task.task_details && Object.keys(task.task_details).length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-gray-500 uppercase mb-2 flex items-center gap-1.5">
+                <ListChecks size={12} /> Decisions & Details
+              </h3>
+              <div className="space-y-1.5">
+                {Object.entries(task.task_details).map(([key, value]) => (
+                  <div key={key} className="flex gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+                    <span className="text-xs text-gray-400 font-medium capitalize min-w-[100px] shrink-0">
+                      {key.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-xs text-gray-200">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ready status + actions */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {!task.is_ready ? (
+              <>
+                <button
+                  onClick={() => markReady.mutate(true)}
+                  disabled={markReady.isPending}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-green-900/40 border border-green-700/50 text-green-400 hover:bg-green-800/50 transition-colors disabled:opacity-50"
+                >
+                  {markReady.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  Mark Ready
+                </button>
+                <button
+                  onClick={() => { markReady.mutate(true, { onSuccess: () => handleExecute() }) }}
+                  disabled={markReady.isPending || isStreaming || !assignedActor}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-900/40 border border-purple-700/50 text-purple-300 hover:bg-purple-800/50 transition-colors disabled:opacity-50"
+                  title={!assignedActor ? 'Assign an AI actor first' : undefined}
+                >
+                  {(markReady.isPending || isStreaming) ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  Mark Ready &amp; Start
+                </button>
+              </>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                {assignedActor?.type === 'ai' && (
+                  <button
+                    onClick={() => { setChatOpen(true); handleExecute() }}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-700 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
+                  >
+                    {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                    {isStreaming ? 'Running…' : 'Run Interactively'}
+                  </button>
+                )}
+                <button
+                  onClick={() => markReady.mutate(false)}
+                  disabled={markReady.isPending}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                >
+                  <CheckCircle2 size={12} className="text-green-400" /> Ready · Unmark
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Status + Assignment */}
@@ -335,19 +457,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             </button>
           </div>
 
-          {/* Execute */}
-          {assignedActor?.type === 'ai' && (
-            <div>
-              <button
-                onClick={handleExecute}
-                disabled={isStreaming}
-                className="flex items-center gap-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-              >
-                {isStreaming ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                {isStreaming ? 'Executing…' : 'Execute with AI'}
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Agent chat — unified log */}
@@ -428,73 +537,135 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               }
 
               if (m.kind === 'assistant') {
-                const action = parseTaskAction(m.content)
-                const confirmed = confirmedIndices.has(i)
+                const actions = parseAllTaskActions(m.content)
+                const prose = stripActionBlocks(m.content)
 
-                if (action) {
-                  if (action.intent === 'assign_actor') {
-                    const target = actors.find(a => a.id === action.actor_id)
-                    return (
-                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
-                        <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide">Assign task</p>
-                        <p className="text-sm text-white">
-                          {target ? `${target.type === 'ai' ? '🤖' : '👤'} ${target.name}` : action.actor_name}
-                          {target?.role && <span className="text-gray-400 text-xs ml-1">· {target.role}</span>}
-                        </p>
-                        <button onClick={() => confirmAction(action, i)} disabled={confirmed || assign.isPending}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' }}>
-                          {confirmed ? <><CheckCircle size={11} /> Assigned</> : assign.isPending ? <><Loader2 size={11} className="animate-spin" /> Assigning…</> : <><UserCheck size={11} /> Assign</>}
-                        </button>
-                      </div>
-                    )
-                  }
-                  if (action.intent === 'update_status') {
-                    return (
-                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
-                        <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide">Update status</p>
-                        <p className="text-sm text-white">{task.status} → <span className="font-semibold">{action.status.replace('_', ' ')}</span></p>
-                        <button onClick={() => confirmAction(action, i)} disabled={confirmed || updateStatus.isPending}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>
-                          {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><RefreshCw size={11} /> Apply</>}
-                        </button>
-                      </div>
-                    )
-                  }
-                  if (action.intent === 'update_description') {
-                    return (
-                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
-                        <p className="text-xs text-teal-400 font-semibold uppercase tracking-wide">Update task documentation</p>
-                        <div className="text-xs text-gray-300 bg-gray-950 rounded-lg px-2 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
-                          {action.content.slice(0, 300)}{action.content.length > 300 ? '…' : ''}
-                        </div>
-                        <button onClick={() => confirmAction(action, i)} disabled={confirmed || updateDescription.isPending}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(20,184,166,0.15)', color: '#2dd4bf' }}>
-                          {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDescription.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><FileText size={11} /> Save to task</>}
-                        </button>
-                      </div>
-                    )
-                  }
-                  if (action.intent === 'execute_task') {
-                    return (
-                      <div key={i} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
-                        <p className="text-xs text-purple-400 font-semibold uppercase tracking-wide">Execute task</p>
-                        <p className="text-sm text-gray-300">Run AI execution for this task</p>
-                        <button onClick={() => confirmAction(action, i)} disabled={confirmed || isStreaming}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                          style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(168,85,247,0.2)', color: '#c084fc' }}>
-                          {confirmed ? <><CheckCircle size={11} /> Started</> : isStreaming ? <><Loader2 size={11} className="animate-spin" /> Running…</> : <><Play size={11} /> Execute</>}
-                        </button>
-                      </div>
-                    )
-                  }
+                // No structured actions — plain prose
+                if (actions.length === 0) {
+                  return (
+                    <div key={i} className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 whitespace-pre-wrap">
+                      {m.content}
+                    </div>
+                  )
                 }
 
+                // One or more action cards + optional trailing questions/prose
                 return (
-                  <div key={i} className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 whitespace-pre-wrap">
-                    {m.content}
+                  <div key={i} className="space-y-2">
+                    {actions.map((action, ai) => {
+                      const cardKey = `${i}-${ai}`
+                      const confirmed = confirmedIndices.has(i * 1000 + ai)
+                      const markCardDone = () => setConfirmedIndices((p) => new Set([...p, i * 1000 + ai]))
+
+                      if (action.intent === 'assign_actor') {
+                        const target = actors.find(a => a.id === action.actor_id)
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide">Assign task</p>
+                            <p className="text-sm text-white">
+                              {target ? `${target.type === 'ai' ? '🤖' : '👤'} ${target.name}` : action.actor_name}
+                              {target?.role && <span className="text-gray-400 text-xs ml-1">· {target.role}</span>}
+                            </p>
+                            <button onClick={() => { assign.mutate(action.actor_id, { onSuccess: markCardDone }) }} disabled={confirmed || assign.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' }}>
+                              {confirmed ? <><CheckCircle size={11} /> Assigned</> : assign.isPending ? <><Loader2 size={11} className="animate-spin" /> Assigning…</> : <><UserCheck size={11} /> Assign</>}
+                            </button>
+                          </div>
+                        )
+                      }
+                      if (action.intent === 'update_status') {
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide">Update status</p>
+                            <p className="text-sm text-white">{task.status} → <span className="font-semibold">{action.status.replace('_', ' ')}</span></p>
+                            <button onClick={() => { updateStatus.mutate(action.status, { onSuccess: markCardDone }) }} disabled={confirmed || updateStatus.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>
+                              {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><RefreshCw size={11} /> Apply</>}
+                            </button>
+                          </div>
+                        )
+                      }
+                      if (action.intent === 'update_description') {
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-teal-400 font-semibold uppercase tracking-wide">Update task documentation</p>
+                            <div className="text-xs text-gray-300 bg-gray-950 rounded-lg px-2 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
+                              {action.content.slice(0, 300)}{action.content.length > 300 ? '…' : ''}
+                            </div>
+                            <button onClick={() => { updateDescription.mutate(action.content, { onSuccess: markCardDone }) }} disabled={confirmed || updateDescription.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(20,184,166,0.15)', color: '#2dd4bf' }}>
+                              {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDescription.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><FileText size={11} /> Save to task</>}
+                            </button>
+                          </div>
+                        )
+                      }
+                      if (action.intent === 'update_details') {
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide flex items-center gap-1"><ListChecks size={11} /> Save decisions</p>
+                            <div className="space-y-1">
+                              {Object.entries(action.details).map(([k, v]) => (
+                                <div key={k} className="flex gap-2 text-xs bg-gray-950 rounded px-2 py-1">
+                                  <span className="text-gray-400 capitalize min-w-[90px] shrink-0">{k.replace(/_/g, ' ')}</span>
+                                  <span className="text-gray-200">{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <button onClick={() => { updateDetails.mutate(action.details, { onSuccess: markCardDone }) }} disabled={confirmed || updateDetails.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
+                              {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDetails.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><ListChecks size={11} /> Save to details</>}
+                            </button>
+                          </div>
+                        )
+                      }
+                      if (action.intent === 'mark_ready') {
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-green-800/50 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-green-400 font-semibold uppercase tracking-wide flex items-center gap-1"><CheckCircle2 size={11} /> Mark as ready</p>
+                            <p className="text-xs text-gray-300">{action.summary}</p>
+                            <div className="flex gap-2 flex-wrap">
+                              <button onClick={() => { markReady.mutate(true, { onSuccess: markCardDone }) }} disabled={confirmed || markReady.isPending}
+                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                                style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}>
+                                {confirmed ? <><CheckCircle size={11} /> Marked ready</> : markReady.isPending ? <><Loader2 size={11} className="animate-spin" /> Marking…</> : <><CheckCircle2 size={11} /> Mark Ready</>}
+                              </button>
+                              {!confirmed && assignedActor?.type === 'ai' && (
+                                <button
+                                  onClick={() => { markReady.mutate(true, { onSuccess: () => { markCardDone(); handleExecute() } }) }}
+                                  disabled={markReady.isPending || isStreaming}
+                                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                                  style={{ background: 'rgba(168,85,247,0.2)', color: '#c084fc' }}>
+                                  <Play size={11} /> Ready &amp; Start
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
+                      if (action.intent === 'execute_task') {
+                        return (
+                          <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
+                            <p className="text-xs text-purple-400 font-semibold uppercase tracking-wide">Execute task</p>
+                            <p className="text-sm text-gray-300">Run AI execution for this task</p>
+                            <button onClick={() => { handleExecute(); markCardDone() }} disabled={confirmed || isStreaming}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(168,85,247,0.2)', color: '#c084fc' }}>
+                              {confirmed ? <><CheckCircle size={11} /> Started</> : isStreaming ? <><Loader2 size={11} className="animate-spin" /> Running…</> : <><Play size={11} /> Execute</>}
+                            </button>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
+                    {prose && (
+                      <div className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 whitespace-pre-wrap">
+                        {prose}
+                      </div>
+                    )}
                   </div>
                 )
               }
