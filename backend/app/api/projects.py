@@ -68,18 +68,31 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
     project = project_resp.data
 
     async def event_stream():
-        try:
-            def _log(msg: str) -> str:
-                return f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+        def _persist_log(msg: str, level: str = "info") -> None:
+            try:
+                db.table("ai_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                    "phase": "planning",
+                    "message": msg,
+                    "level": level,
+                }).execute()
+            except Exception:
+                pass
 
+        def _log(msg: str, level: str = "info") -> str:
+            _persist_log(msg, level)
+            return f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+
+        try:
             yield _log(f"🔍 Analyzing project: {project['name']!r}")
             yield _log(f"⚙️  Calling {ai_model} to generate task breakdown…")
 
-            tasks = await breakdown_project(project["prompt"], model=ai_model)
-            yield _log(f"📋 Generated {len(tasks)} tasks")
+            task_drafts = await breakdown_project(project["prompt"], model=ai_model, project_id=project_id)
+            yield _log(f"📋 Generated {len(task_drafts)} tasks")
 
             yield _log("📅 Organizing tasks into sprints…")
-            await plan_and_persist(project_id, tasks)
+            await plan_and_persist(project_id, task_drafts)
 
             sprints_resp = db.table("sprints").select("id").eq("project_id", project_id).execute()
             sprint_count = len(sprints_resp.data or [])
@@ -93,6 +106,7 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
             yield _log("✅ Project plan is ready!")
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
+            _persist_log(str(exc), "error")
             db.table("projects").update({"status": "error"}).eq("id", project_id).execute()
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
 
@@ -166,3 +180,27 @@ async def add_actor(project_id: str, body: ActorCreate):
     }
     db.table("actors").insert(row).execute()
     return row
+
+
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(project_id: str):
+    db = get_supabase()
+    project = db.table("projects").select("id").eq("id", project_id).single().execute()
+    if not project.data:
+        raise HTTPException(404, "Project not found")
+    db.table("projects").delete().eq("id", project_id).execute()
+
+
+@router.post("/{project_id}/regenerate", status_code=200)
+async def regenerate_plan(project_id: str):
+    """Wipe all sprints/tasks/assignments for a project and re-run planning via the stream endpoint."""
+    db = get_supabase()
+    project = db.table("projects").select("id,prompt,ai_model").eq("id", project_id).single().execute()
+    if not project.data:
+        raise HTTPException(404, "Project not found")
+
+    # Delete existing sprints (cascade deletes tasks + assignments)
+    db.table("sprints").delete().eq("project_id", project_id).execute()
+    # Reset status back to planning
+    db.table("projects").update({"status": "planning"}).eq("id", project_id).execute()
+    return {"id": project_id, "status": "planning"}

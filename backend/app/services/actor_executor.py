@@ -64,6 +64,29 @@ async def execute_task(task_id: str, actor_id: str) -> dict:
     provider = get_provider(model)
     content = await provider.complete(messages)
 
+    # Persist full prompt + response
+    try:
+        db.table("ai_messages").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "task_id": task_id,
+            "actor_id": actor_id,
+            "phase": "task_execution",
+            "model": model,
+            "messages": messages,
+            "response": content,
+        }).execute()
+        # Log to ai_logs too
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "phase": "task_execution",
+            "message": f"Actor '{actor.get('name', actor_id)}' completed task: {task['title']}",
+            "level": "info",
+        }).execute()
+    except Exception:
+        pass
+
     # Update task status
     db.table("tasks").update({"status": "done"}).eq("id", task_id).execute()
 
@@ -119,12 +142,36 @@ async def stream_task_execution(task_id: str, actor_id: str):
         full_content.append(chunk)
         yield chunk
 
+    final_content = "".join(full_content)
+
+    # Persist full prompt + response
+    try:
+        db.table("ai_messages").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "task_id": task_id,
+            "actor_id": actor_id,
+            "phase": "task_execution",
+            "model": model,
+            "messages": messages,
+            "response": final_content,
+        }).execute()
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "phase": "task_execution",
+            "message": f"Actor '{actor.get('name', actor_id)}' streamed task: {task['title']}",
+            "level": "info",
+        }).execute()
+    except Exception:
+        pass
+
     # Persist deliverable after stream completes
     row = {
         "id": str(uuid.uuid4()),
         "task_id": task_id,
         "actor_id": actor_id,
-        "content": "".join(full_content),
+        "content": final_content,
         "tool_calls_log": [],
         "created_at": datetime.utcnow().isoformat(),
     }

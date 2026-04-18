@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from typing import List
+import uuid
+from typing import List, Optional
 from app.models import TaskDraft
 from app.providers.registry import get_provider
+from app.db import get_supabase
 
 BREAKDOWN_SYSTEM = """You are an expert technical project manager.
 Given a product idea, produce a structured task breakdown as valid JSON.
@@ -25,6 +27,7 @@ Be thorough but realistic — aim for 10-25 tasks for most projects.
 async def breakdown_project(
     prompt: str,
     model: str = "gpt-4o",
+    project_id: Optional[str] = None,
 ) -> List[TaskDraft]:
     provider = get_provider(model)
     messages = [
@@ -38,6 +41,22 @@ async def breakdown_project(
         messages,
         response_format={"type": "json_object"},
     )
+
+    # Persist full prompt + response to ai_messages
+    if project_id:
+        try:
+            db = get_supabase()
+            db.table("ai_messages").insert({
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "phase": "planning",
+                "model": model,
+                "messages": messages,
+                "response": raw,
+            }).execute()
+        except Exception:
+            pass  # never block the main flow
+
     data = json.loads(raw)
     tasks_raw = data.get("tasks") or data.get("task_list") or []
     return [TaskDraft(**t) for t in tasks_raw]
