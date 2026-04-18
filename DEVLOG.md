@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-04-18 | `02c9f01` — Assignment display fixes (board + drawer)
+- Root cause: Supabase returns `assignments` as `{}` (object) instead of `[]` (array) when the table has a unique constraint on `task_id`
+- Normalized assignments to array in the project query (ProjectBoardPage)
+- TaskDrawer `assignedActor` lookup now handles both object and array shapes
+- TaskCard on the board now shows assigned actor name correctly
+- Used `setQueryData` in assign mutation to update cache instantly, avoiding race with background refetch
+
+---
+
 ## 2026-04-18 | `eaf2132` — Settings panel bug fixes
 - Fixed Save changes button permanently disabled (wrong guard condition removed)
 - Re-added missing `planNextSprint` mutation that was dropped in a previous edit
