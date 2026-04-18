@@ -1,6 +1,6 @@
 import type { Task, Actor } from '../types'
 import { cn } from '../lib/utils'
-import { Bot, User, Clock, CheckCircle2 } from 'lucide-react'
+import { Bot, User, Clock, CheckCircle2, GitPullRequest } from 'lucide-react'
 
 const PRIORITY_DOT: Record<string, string> = {
   low: 'bg-gray-500',
@@ -34,6 +34,17 @@ export default function TaskCard({ task, actors, onClick }: Props) {
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
           {task.is_ready && (
             <CheckCircle2 size={13} className="text-green-400" title="Ready for implementation" />
+          )}
+          {task.github_pr_url && (
+            <a
+              href={task.github_pr_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="View PR on GitHub"
+            >
+              <GitPullRequest size={13} className="text-purple-400 hover:text-purple-300" />
+            </a>
           )}
           <span
             className={cn('w-2 h-2 rounded-full', PRIORITY_DOT[task.priority])}

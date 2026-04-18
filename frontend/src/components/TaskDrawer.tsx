@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
 import { type TaskAction, parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -305,6 +305,24 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+          {/* GitHub PR link */}
+          {task.github_pr_url && (
+            <div>
+              <h3 className="text-xs font-medium text-gray-500 uppercase mb-2 flex items-center gap-1.5">
+                <GitPullRequest size={12} /> Pull Request
+              </h3>
+              <a
+                href={task.github_pr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 underline underline-offset-4 break-all"
+              >
+                <GitPullRequest size={13} />
+                {task.github_pr_url}
+              </a>
+            </div>
+          )}
+
           {/* Description */}
           <div>
             <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Description</h3>

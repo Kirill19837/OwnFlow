@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.db import get_supabase
 from app.providers.registry import get_provider
+from app.services.github_service import create_pr_for_task
 import uuid
 from datetime import datetime
 
@@ -99,6 +100,13 @@ async def execute_task(task_id: str, actor_id: str) -> dict:
         "created_at": datetime.utcnow().isoformat(),
     }
     db.table("deliverables").insert(row).execute()
+
+    # Create GitHub PR if connected
+    try:
+        await create_pr_for_task(task_id, task["title"], content)
+    except Exception:
+        pass
+
     return row
 
 
@@ -177,3 +185,9 @@ async def stream_task_execution(task_id: str, actor_id: str):
     }
     db.table("deliverables").insert(row).execute()
     db.table("tasks").update({"status": "done"}).eq("id", task_id).execute()
+
+    # Create GitHub PR if connected
+    try:
+        await create_pr_for_task(task_id, task["title"], final_content)
+    except Exception:
+        pass

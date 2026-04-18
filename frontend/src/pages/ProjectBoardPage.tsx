@@ -5,10 +5,10 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import api from '../lib/api'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
-import type { Project, Task } from '../types'
+import type { Project } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, ChevronDown, ChevronUp, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity } from 'lucide-react'
+import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -52,6 +52,9 @@ export default function ProjectBoardPage() {
   const [newActorRole, setNewActorRole] = useState('')
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
+  const [repoInput, setRepoInput] = useState('')
+  const [tokenInput, setTokenInput] = useState('')
+  const [githubError, setGithubError] = useState('')
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -128,6 +131,36 @@ export default function ProjectBoardPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', projectId] })
     },
+  })
+
+  const { data: githubStatus, refetch: refetchGithub } = useQuery({
+    queryKey: ['github-status', projectId],
+    queryFn: () => api.get<{ connected: boolean; repo?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
+    enabled: !!projectId && showSettings,
+  })
+
+  const connectGithub = useMutation({
+    mutationFn: ({ token, repo }: { token: string; repo: string }) =>
+      api.post(`/github/connect?project_id=${projectId}`, { token, repo }),
+    onSuccess: () => {
+      refetchGithub()
+      setTokenInput('')
+      setRepoInput('')
+      setGithubError('')
+    },
+    onError: (err: any) => {
+      setGithubError(err?.response?.data?.detail ?? 'Connection failed')
+    },
+  })
+
+  const setRepo = useMutation({
+    mutationFn: (repo: string) => api.patch(`/github/repo?project_id=${projectId}`, { repo }),
+    onSuccess: () => refetchGithub(),
+  })
+
+  const disconnectGithub = useMutation({
+    mutationFn: () => api.delete(`/github/disconnect?project_id=${projectId}`),
+    onSuccess: () => refetchGithub(),
   })
 
   type StructuredAction = {
@@ -469,6 +502,87 @@ export default function ProjectBoardPage() {
                   <Plus size={13} /> Add
                 </button>
               </div>
+            </div>
+            {/* GitHub integration */}
+            <div className="border-t border-gray-700 pt-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <GitBranch size={13} className="text-gray-400" />
+                <span className="text-xs font-medium text-gray-400">GitHub integration</span>
+                {githubStatus?.connected && (
+                  <span className="text-xs text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full">Connected</span>
+                )}
+              </div>
+              {githubStatus?.connected ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400">
+                    Repo: <span className="text-white font-mono">{githubStatus.repo}</span>
+                  </p>
+                  <p className="text-xs text-gray-500">AI agents will open PRs to this repo when tasks are executed.</p>
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <input
+                      placeholder="owner/repo-name"
+                      value={repoInput}
+                      onChange={(e) => setRepoInput(e.target.value)}
+                      className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-48 font-mono"
+                    />
+                    <button
+                      onClick={() => { if (repoInput.trim()) setRepo.mutate(repoInput.trim()) }}
+                      disabled={setRepo.isPending || !repoInput.trim()}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      <LinkIcon size={12} /> Change repo
+                    </button>
+                    <button
+                      onClick={() => disconnectGithub.mutate()}
+                      disabled={disconnectGithub.isPending}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-900/40 border border-red-800/50 hover:bg-red-800/50 text-red-400 text-sm rounded-lg transition-colors"
+                    >
+                      <Unlink size={12} /> Disconnect
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">Enter your GitHub credentials so AI agents can commit code and open pull requests.</p>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        Personal Access Token <span className="text-red-400">*</span>
+                        <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="ml-2 text-purple-400 hover:text-purple-300">(create token)</a>
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="ghp_..."
+                        value={tokenInput}
+                        onChange={(e) => { setTokenInput(e.target.value); setGithubError('') }}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        Repository <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        placeholder="owner/repo-name"
+                        value={repoInput}
+                        onChange={(e) => { setRepoInput(e.target.value); setGithubError('') }}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    {githubError && (
+                      <p className="text-xs text-red-400">{githubError}</p>
+                    )}
+                    <button
+                      onClick={() => connectGithub.mutate({ token: tokenInput.trim(), repo: repoInput.trim() })}
+                      disabled={connectGithub.isPending || !tokenInput.trim() || !repoInput.trim()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {connectGithub.isPending ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                      Connect
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

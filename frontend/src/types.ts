@@ -47,6 +47,7 @@ export interface Task {
   assignments?: Assignment[]
   is_ready?: boolean
   task_details?: Record<string, string>
+  github_pr_url?: string
 }
 
 export interface TaskInteraction {
