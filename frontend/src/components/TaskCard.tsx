@@ -16,7 +16,11 @@ interface Props {
 }
 
 export default function TaskCard({ task, actors, onClick }: Props) {
-  const assignedActor = actors.find((a) => a.id === task.assignments?.[0]?.actor_id)
+  // Supabase returns assignments as {} (object) not [] when there's a unique constraint
+  const firstAssignment = Array.isArray(task.assignments)
+    ? task.assignments[0]
+    : (task.assignments as any)
+  const assignedActor = actors.find((a) => a.id === firstAssignment?.actor_id)
 
   return (
     <div

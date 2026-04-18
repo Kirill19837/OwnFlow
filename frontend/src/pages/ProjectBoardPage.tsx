@@ -44,7 +44,23 @@ export default function ProjectBoardPage() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
-    queryFn: () => api.get<Project>(`/projects/${projectId}`).then((r) => r.data),
+    queryFn: () =>
+      api.get<Project>(`/projects/${projectId}`).then((r) => {
+        const d = r.data
+        // Supabase returns assignments as a single object {} when the table has a
+        // unique constraint on task_id — normalize to array [] for the frontend.
+        if (d.tasks) {
+          d.tasks = d.tasks.map((t) => ({
+            ...t,
+            assignments: Array.isArray(t.assignments)
+              ? t.assignments
+              : t.assignments
+              ? [t.assignments as any]
+              : [],
+          }))
+        }
+        return d
+      }),
     enabled: !!projectId,
     refetchInterval: (query) => (query.state.data?.status === 'planning' ? 3000 : false),
   })

@@ -33,7 +33,24 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const assign = useMutation({
     mutationFn: (actor_id: string) =>
       api.patch(`/tasks/${task.id}/assign`, { actor_id: actor_id || '' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+    onSuccess: (response, actor_id) => {
+      const assignment = response.data // { id, task_id, actor_id, assigned_by } or { task_id, actor_id: null }
+      // Write directly into the cache so the UI updates instantly without a
+      // refetch that might race with Supabase propagation.
+      qc.setQueryData(['project', task.project_id], (old: any) => {
+        if (!old) return old
+        return {
+          ...old,
+          tasks: (old.tasks ?? []).map((t: any) =>
+            t.id === task.id
+              ? { ...t, assignments: assignment?.actor_id ? [assignment] : [] }
+              : t
+          ),
+        }
+      })
+      // Still invalidate so the next background refetch stays fresh.
+      qc.invalidateQueries({ queryKey: ['project', task.project_id] })
+    },
   })
 
   const updateStatus = useMutation({
@@ -41,9 +58,12 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
   })
 
-  const assignedActor = actors.find(
-    (a) => a.id === task.assignments?.[0]?.actor_id
-  )
+  const assignedActor = actors.find((a) => {
+    const a0 = Array.isArray(task.assignments)
+      ? task.assignments[0]
+      : (task.assignments as any)
+    return a.id === a0?.actor_id
+  })
 
   const handleExecute = async () => {
     setStreaming(true)
