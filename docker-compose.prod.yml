@@ -16,6 +16,6 @@ services:
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "3001:80"
     depends_on:
       - backend
