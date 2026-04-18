@@ -87,17 +87,64 @@ async def update_task_description(task_id: str, body: dict):
 
 @router.patch("/{task_id}/details")
 async def update_task_details(task_id: str, body: dict):
-    """Merge key-value decisions into task_details JSONB."""
+    """Merge key-value decisions into task_details JSONB, then auto-check readiness."""
     db = get_supabase()
     details = body.get("details") or {}
     if not isinstance(details, dict):
         raise HTTPException(400, "details must be an object")
-    # Fetch existing and merge
-    existing = db.table("tasks").select("task_details").eq("id", task_id).single().execute()
-    current = (existing.data or {}).get("task_details") or {}
+    existing = db.table("tasks").select("title,description,task_details").eq("id", task_id).single().execute()
+    task_row = existing.data or {}
+    current = task_row.get("task_details") or {}
     merged = {**current, **details}
     db.table("tasks").update({"task_details": merged}).eq("id", task_id).execute()
+    # Auto-evaluate readiness after every save
+    await _auto_check_ready(db, task_id, task_row.get("title", ""), task_row.get("description", ""), merged)
     return {"task_id": task_id, "task_details": merged}
+
+
+async def _auto_check_ready(db, task_id: str, title: str, description: str, task_details: dict):
+    """Use AI to decide if the task has enough decisions to be implementation-ready.
+    Silently sets ai_ready=True when the AI says YES (not is_ready — that is user approval)."""
+    if not task_details:
+        return
+    details_text = "\n".join(f"  {k}: {v}" for k, v in task_details.items())
+    prompt = (
+        f"Task: {title}\n"
+        f"Description: {(description or '').strip()[:600]}\n\n"
+        f"Captured decisions:\n{details_text}\n\n"
+        "Does this task have enough implementation decisions (tech stack, approach, requirements, "
+        "acceptance criteria) that a developer could start without asking further questions?\n"
+        "Reply with exactly one word: YES or NO."
+    )
+    try:
+        from app.providers.registry import get_provider
+        provider = get_provider("gpt-4o")
+        result = ""
+        async for chunk in provider.stream([{"role": "user", "content": prompt}]):
+            result += chunk
+            if len(result) > 10:
+                break
+        if "YES" in result.upper():
+            db.table("tasks").update({"ai_ready": True}).eq("id", task_id).execute()
+    except Exception:
+        pass
+
+
+@router.patch("/{task_id}/ai-ready")
+async def set_task_ai_ready(task_id: str, body: dict):
+    """Set ai_ready flag (AI-decided stage)."""
+    db = get_supabase()
+    ai_ready = bool(body.get("ai_ready", True))
+    db.table("tasks").update({"ai_ready": ai_ready}).eq("id", task_id).execute()
+    return {"task_id": task_id, "ai_ready": ai_ready}
+
+
+@router.delete("/{task_id}")
+async def delete_task(task_id: str):
+    """Permanently delete a task and its related data."""
+    db = get_supabase()
+    db.table("tasks").delete().eq("id", task_id).execute()
+    return {"deleted": task_id}
 
 
 @router.patch("/{task_id}/ready")
@@ -262,8 +309,20 @@ async def prompt_task_stream(task_id: str, body: dict):
                 "STEP 4 — When the user answers a question.\n"
                 "  Immediately emit update_details for the answered fact(s), then check if any "
                 "  questions remain. If none remain, also emit mark_ready.\n\n"
-                "Do NOT emit mark_ready until ALL questions are answered by the user.\n"
+                "mark_ready means: YOU (the AI) are confident the task has enough decisions to be\n"
+                "implemented. It does NOT mean the user has approved execution — that is a separate\n"
+                "human decision. Emit mark_ready only when you have all the information you need.\n"
+                "Do NOT emit mark_ready until ALL questions are answered.\n"
                 "Do NOT repeat questions already answered in the captured details.\n"
+                "────────────────────────────────────\n\n"
+                "CONSOLIDATION PROTOCOL\n"
+                "When the user says things like 'consolidate', 'take all decisions', 'collect decisions',\n"
+                "'save everything we discussed', 'update decisions', 'consolidate from chat', 'save decisions':\n"
+                "  1. Scan the ENTIRE conversation history for every decision, fact, or technical choice mentioned.\n"
+                "  2. Emit ONE update_details block with ALL new facts not already in 'Decisions & details already captured'.\n"
+                "  3. Do NOT emit update_description — NEVER touch title or description during consolidation.\n"
+                "  4. After saving, assess: do you now have everything needed to implement this task?\n"
+                "     If YES → also emit mark_ready. If NO → list what is still missing.\n"
                 "────────────────────────────────────\n\n"
                 "STRUCTURED ACTIONS (respond with ONLY a fenced JSON block — no prose before/after):\n\n"
                 "```json\n"
@@ -305,14 +364,46 @@ async def prompt_task_stream(task_id: str, body: dict):
 
     provider = get_provider(model)
 
+    import re as _re
+
+    def _strip_duplicate_details(text: str, existing: dict) -> str:
+        """Remove keys already in existing from every update_details JSON block."""
+        if not existing:
+            return text
+        def _clean(m):
+            try:
+                obj = json.loads(m.group(1))
+                if obj.get("intent") == "update_details" and isinstance(obj.get("details"), dict):
+                    obj["details"] = {k: v for k, v in obj["details"].items() if k not in existing}
+                    if not obj["details"]:
+                        return ""   # remove the entire block
+                    return f"```json\n{json.dumps(obj)}\n```"
+            except Exception:
+                pass
+            return m.group(0)
+        return _re.sub(r"```json\s*({.*?})\s*```", _clean, text, flags=_re.DOTALL)
+
     async def event_stream():
         full_response = []
         async for chunk in provider.stream(messages):
             full_response.append(chunk)
             yield f"data: {json.dumps({'content': chunk})}\n\n"
         yield "data: [DONE]\n\n"
-        # Persist assistant reply
-        assistant_content = "".join(full_response)
+        # Persist assistant reply — strip duplicate detail keys before saving
+        assistant_content = _strip_duplicate_details("".join(full_response), task_details)
+        # If the AI emitted mark_ready, set ai_ready on the task
+        try:
+            import re as _re2
+            for m in _re2.finditer(r"```json\s*({.*?})\s*```", assistant_content, flags=_re2.DOTALL):
+                try:
+                    obj = json.loads(m.group(1))
+                    if obj.get("intent") == "mark_ready":
+                        db.table("tasks").update({"ai_ready": True}).eq("id", task_id).execute()
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             db.table("task_interactions").insert({
                 "task_id": task_id,

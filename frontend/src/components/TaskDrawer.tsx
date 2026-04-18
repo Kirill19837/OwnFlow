@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
 import { type TaskAction, parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -122,6 +123,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const markReady = useMutation({
     mutationFn: (is_ready: boolean) => api.patch(`/tasks/${task.id}/ready`, { is_ready }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+  })
+
+  const setAiReady = useMutation({
+    mutationFn: (ai_ready: boolean) => api.patch(`/tasks/${task.id}/ai-ready`, { ai_ready }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+  })
+
+  const deleteTask = useMutation({
+    mutationFn: () => api.delete(`/tasks/${task.id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project'] })
+      onClose()
+    },
   })
 
   const assignedActor = actors.find((a) => {
@@ -261,7 +275,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     } else if (action.intent === 'update_details') {
       updateDetails.mutate(action.details, { onSuccess: markDone })
     } else if (action.intent === 'mark_ready') {
-      markReady.mutate(true, { onSuccess: markDone })
+      // AI signals it has enough info → set ai_ready (not user approval)
+      setAiReady.mutate(true, { onSuccess: markDone })
     } else if (action.intent === 'execute_task') {
       handleExecute()
       markDone()
@@ -273,7 +288,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       {/* Backdrop */}
       <div className="flex-1 bg-black/50" onClick={onClose} />
       {/* Drawer */}
-      <div className="w-full max-w-xl bg-gray-950 border-l border-gray-800 flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl bg-gray-950 border-l border-gray-800 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-gray-800">
           <div>
@@ -298,6 +313,16 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             >
               <Activity size={16} />
             </button>
+            <button
+              onClick={() => {
+                if (confirm('Delete this task? This cannot be undone.')) deleteTask.mutate()
+              }}
+              disabled={deleteTask.isPending}
+              className="text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
+              title="Delete task"
+            >
+              {deleteTask.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            </button>
             <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
               <X size={20} />
             </button>
@@ -305,28 +330,48 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-          {/* GitHub PR link */}
-          {task.github_pr_url && (
-            <div>
-              <h3 className="text-xs font-medium text-gray-500 uppercase mb-2 flex items-center gap-1.5">
-                <GitPullRequest size={12} /> Pull Request
-              </h3>
-              <a
-                href={task.github_pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 underline underline-offset-4 break-all"
-              >
-                <GitPullRequest size={13} />
-                {task.github_pr_url}
-              </a>
-            </div>
-          )}
+          {/* GitHub PR / branch details */}
+          {task.github_pr_url && (() => {
+            const branchName = `ownflow/${task.id.slice(0, 8)}`
+            const safeTitle = task.title.replace(/[^a-zA-Z0-9\-_ ]/g, '').trim().replace(/ /g, '_').slice(0, 50)
+            const filePath = `.ownflow/tasks/${task.id.slice(0, 8)}_${safeTitle}.md`
+            return (
+              <div className="bg-gray-900 border border-purple-800/40 rounded-xl p-4 space-y-3">
+                <h3 className="text-xs font-medium text-gray-400 uppercase flex items-center gap-1.5">
+                  <GitPullRequest size={12} className="text-purple-400" /> GitHub Changes
+                </h3>
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500 w-16 shrink-0">Branch</span>
+                    <span className="font-mono text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded">{branchName}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-500 w-16 shrink-0 pt-0.5">File</span>
+                    <span className="font-mono text-gray-300 bg-gray-800 px-2 py-0.5 rounded break-all">{filePath}</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-gray-500 w-16 shrink-0">PR</span>
+                    <a
+                      href={task.github_pr_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-purple-400 hover:text-purple-300 underline underline-offset-2 break-all"
+                    >
+                      <GitPullRequest size={12} />
+                      View pull request ↗
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Description */}
           <div>
             <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Description</h3>
-            <p className="text-gray-300 text-sm leading-relaxed">{task.description}</p>
+            <div className="prose prose-invert prose-sm max-w-none text-gray-300 [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&>strong]:text-white [&_strong]:text-white">
+              <ReactMarkdown>{task.description ?? ''}</ReactMarkdown>
+            </div>
           </div>
 
           {/* Task Details (structured decisions) */}
@@ -350,8 +395,70 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
           {/* Ready status + actions */}
           <div className="flex items-center gap-2 flex-wrap">
-            {!task.is_ready ? (
+            {assignedActor?.type === 'ai' ? (
+              // AI actor: two stages — AI ready → user approves
               <>
+                {!task.is_ready ? (
+                  <>
+                    {task.ai_ready ? (
+                      // Stage 1 done: AI thinks it's ready, waiting for user approval
+                      <>
+                        <span className="flex items-center gap-1.5 text-xs text-yellow-400 bg-yellow-900/30 border border-yellow-700/50 px-2.5 py-1 rounded-full">
+                          <Sparkles size={11} /> AI Ready — awaiting your approval
+                        </span>
+                        <button
+                          onClick={() => markReady.mutate(true)}
+                          disabled={markReady.isPending}
+                          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-green-900/40 border border-green-700/50 text-green-400 hover:bg-green-800/50 transition-colors disabled:opacity-50"
+                        >
+                          {markReady.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => markReady.mutate(true, { onSuccess: () => handleExecute() })}
+                          disabled={markReady.isPending || isStreaming}
+                          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-900/40 border border-purple-700/50 text-purple-300 hover:bg-purple-800/50 transition-colors disabled:opacity-50"
+                        >
+                          {(markReady.isPending || isStreaming) ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                          Approve &amp; Start
+                        </button>
+                        <button
+                          onClick={() => setAiReady.mutate(false)}
+                          disabled={setAiReady.isPending}
+                          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </>
+                    ) : (
+                      // Stage 0: not yet AI-ready
+                      <span className="text-xs text-gray-500 italic">AI is collecting decisions before this task can be executed</span>
+                    )}
+                  </>
+                ) : (
+                  // Approved — run button
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => { setChatOpen(true); handleExecute() }}
+                      disabled={isStreaming}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-700 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
+                    >
+                      {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                      {isStreaming ? 'Running…' : 'Run'}
+                    </button>
+                    <button
+                      onClick={() => markReady.mutate(false)}
+                      disabled={markReady.isPending}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                    >
+                      <CheckCircle2 size={12} className="text-green-400" /> Approved · Revoke
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              // Human actor or unassigned: single-stage manual ready
+              !task.is_ready ? (
                 <button
                   onClick={() => markReady.mutate(true)}
                   disabled={markReady.isPending}
@@ -360,28 +467,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                   {markReady.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   Mark Ready
                 </button>
-                <button
-                  onClick={() => { markReady.mutate(true, { onSuccess: () => handleExecute() }) }}
-                  disabled={markReady.isPending || isStreaming || !assignedActor}
-                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-900/40 border border-purple-700/50 text-purple-300 hover:bg-purple-800/50 transition-colors disabled:opacity-50"
-                  title={!assignedActor ? 'Assign an AI actor first' : undefined}
-                >
-                  {(markReady.isPending || isStreaming) ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                  Mark Ready &amp; Start
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 flex-wrap">
-                {assignedActor?.type === 'ai' && (
-                  <button
-                    onClick={() => { setChatOpen(true); handleExecute() }}
-                    disabled={isStreaming}
-                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium bg-purple-700 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
-                  >
-                    {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                    {isStreaming ? 'Running…' : 'Run Interactively'}
-                  </button>
-                )}
+              ) : (
                 <button
                   onClick={() => markReady.mutate(false)}
                   disabled={markReady.isPending}
@@ -389,7 +475,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 >
                   <CheckCircle2 size={12} className="text-green-400" /> Ready · Unmark
                 </button>
-              </div>
+              )
             )}
           </div>
 
@@ -451,18 +537,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         </div>
 
         {/* Agent chat — unified log */}
-        <div className="border-t border-gray-800 bg-gray-950 flex flex-col" style={chatOpen ? { maxHeight: '60%' } : {}}>
+        <div className="border-t border-purple-900/60 bg-gray-950 flex flex-col" style={chatOpen ? { minHeight: '280px', maxHeight: '55%' } : {}}>
           {/* Header */}
-          <div className="flex items-center gap-2 px-4 py-2 shrink-0 select-none">
-            <Bot size={13} className="text-purple-400" />
-            <span className="text-xs text-purple-400 font-medium">
-              {assignedActor ? assignedActor.name : 'AI Assistant'}
-            </span>
-            {assignedActor && (
-              <span className="text-xs text-gray-600">
-                · {assignedActor.role || assignedActor.model || assignedActor.type}
+          <div className="flex items-center gap-2 px-4 py-2.5 shrink-0 select-none bg-purple-950/40 border-b border-purple-900/40">
+            <Bot size={14} className="text-purple-400" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs text-purple-300 font-semibold tracking-wide leading-none">
+                {assignedActor ? assignedActor.name : 'AI Copilot'}
+                {assignedActor && (
+                  <span className="text-purple-600 font-normal"> · {assignedActor.role || assignedActor.model || assignedActor.type}</span>
+                )}
               </span>
-            )}
+              <span className="text-xs text-gray-500 truncate leading-tight mt-0.5">{task.title}</span>
+            </div>
             {chatOpen && chat.length > 0 && (
               <button
                 onClick={() => { setChat([]); setConfirmedIndices(new Set()) }}
@@ -474,7 +561,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             <button
               onClick={() => setChatOpen((open) => !open)}
               className="ml-auto text-gray-500 hover:text-gray-300 transition-colors"
-              title={chatOpen ? 'Collapse Copilot' : 'Expand Copilot'}
+              title={chatOpen ? 'Collapse Copilot' : 'Open Copilot'}
             >
               <ChevronDown size={13} className={`transition-transform ${chatOpen ? '' : '-rotate-90'}`} />
             </button>
@@ -482,11 +569,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
           {/* Message log */}
           {chatOpen && <><div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-0">
-            {chat.length === 0 && (
+            {!assignedActor ? (
+              <div className="flex flex-col items-center justify-center h-full py-8 gap-3 text-center">
+                <Bot size={28} className="text-gray-700" />
+                <p className="text-sm text-gray-400 font-medium">No AI actor assigned</p>
+                <p className="text-xs text-gray-600 max-w-[220px]">
+                  Assign an AI actor to this task first using the <span className="text-gray-400">Assigned to</span> dropdown above.
+                </p>
+              </div>
+            ) : chat.length === 0 ? (
               <p className="text-xs text-gray-700 py-2">
-                {assignedActor ? `Ask ${assignedActor.name} anything about this task, or type "execute" to run it.` : 'Ask AI about this task…'}
+                Ask {assignedActor.name} anything about this task, or type &quot;execute&quot; to run it.
               </p>
-            )}
+            ) : null}
             {chat.map((m, i) => {
               if (m.kind === 'thinking') {
                 return (
@@ -520,8 +615,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         Result · {m.actorName}
                       </span>
                     </div>
-                    <div className="text-xs text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">
-                      {m.content}
+                    <div className="text-xs text-gray-300 max-h-96 overflow-y-auto pr-1 prose prose-invert prose-xs max-w-none [&>h1]:text-sm [&>h2]:text-xs [&>h3]:text-xs [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&_strong]:text-white [&>pre]:bg-gray-950 [&>pre]:rounded [&>pre]:p-2 [&>code]:text-green-300">
+                      <ReactMarkdown>{m.content}</ReactMarkdown>
                     </div>
                   </div>
                 )
@@ -534,8 +629,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 // No structured actions — plain prose
                 if (actions.length === 0) {
                   return (
-                    <div key={i} className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 whitespace-pre-wrap">
-                      {m.content}
+                    <div key={i} className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 prose prose-invert prose-sm max-w-none [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&_strong]:text-white">
+                      <ReactMarkdown>{m.content}</ReactMarkdown>
                     </div>
                   )
                 }
@@ -599,18 +694,25 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         )
                       }
                       if (action.intent === 'update_details') {
+                        if (!action.details || Object.keys(action.details).length === 0) return null
+                        // Filter out keys already saved in task_details
+                        const existingKeys = new Set(Object.keys(task.task_details ?? {}))
+                        const newDetails = Object.fromEntries(
+                          Object.entries(action.details as Record<string, string>).filter(([k]) => !existingKeys.has(k))
+                        )
+                        if (Object.keys(newDetails).length === 0) return null
                         return (
                           <div key={cardKey} className="bg-gray-900 border border-gray-700 rounded-xl p-3 space-y-2">
                             <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide flex items-center gap-1"><ListChecks size={11} /> Save decisions</p>
                             <div className="space-y-1">
-                              {Object.entries(action.details).map(([k, v]) => (
+                              {Object.entries(newDetails).map(([k, v]) => (
                                 <div key={k} className="flex gap-2 text-xs bg-gray-950 rounded px-2 py-1">
                                   <span className="text-gray-400 capitalize min-w-[90px] shrink-0">{k.replace(/_/g, ' ')}</span>
                                   <span className="text-gray-200">{v}</span>
                                 </div>
                               ))}
                             </div>
-                            <button onClick={() => { updateDetails.mutate(action.details, { onSuccess: markCardDone }) }} disabled={confirmed || updateDetails.isPending}
+                            <button onClick={() => { updateDetails.mutate(newDetails, { onSuccess: markCardDone }) }} disabled={confirmed || updateDetails.isPending}
                               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
                               style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
                               {confirmed ? <><CheckCircle size={11} /> Saved</> : updateDetails.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><ListChecks size={11} /> Save to details</>}
@@ -619,26 +721,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         )
                       }
                       if (action.intent === 'mark_ready') {
+                        // Auto-set ai_ready only — user approval is separate
+                        if (!confirmed && !setAiReady.isPending) {
+                          setAiReady.mutate(true, { onSuccess: markCardDone })
+                        }
                         return (
-                          <div key={cardKey} className="bg-gray-900 border border-green-800/50 rounded-xl p-3 space-y-2">
-                            <p className="text-xs text-green-400 font-semibold uppercase tracking-wide flex items-center gap-1"><CheckCircle2 size={11} /> Mark as ready</p>
+                          <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1">
+                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI ready to implement</p>
                             <p className="text-xs text-gray-300">{action.summary}</p>
-                            <div className="flex gap-2 flex-wrap">
-                              <button onClick={() => { markReady.mutate(true, { onSuccess: markCardDone }) }} disabled={confirmed || markReady.isPending}
-                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                                style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}>
-                                {confirmed ? <><CheckCircle size={11} /> Marked ready</> : markReady.isPending ? <><Loader2 size={11} className="animate-spin" /> Marking…</> : <><CheckCircle2 size={11} /> Mark Ready</>}
-                              </button>
-                              {!confirmed && assignedActor?.type === 'ai' && (
-                                <button
-                                  onClick={() => { markReady.mutate(true, { onSuccess: () => { markCardDone(); handleExecute() } }) }}
-                                  disabled={markReady.isPending || isStreaming}
-                                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                                  style={{ background: 'rgba(168,85,247,0.2)', color: '#c084fc' }}>
-                                  <Play size={11} /> Ready &amp; Start
-                                </button>
-                              )}
-                            </div>
+                            <p className="text-xs text-gray-500">Approve the task above to allow execution.</p>
+                            {setAiReady.isPending && (
+                              <p className="text-xs text-gray-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</p>
+                            )}
                           </div>
                         )
                       }
@@ -683,12 +777,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               value={promptInput}
               onChange={(e) => setPromptInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePrompt() } }}
-              placeholder={assignedActor ? `Ask ${assignedActor.name}…` : 'Ask AI about this task…'}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+              placeholder={assignedActor ? `Ask ${assignedActor.name}…` : 'Assign an AI actor first…'}
+              disabled={!assignedActor}
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
             />
             <button
               onClick={handlePrompt}
-              disabled={!promptInput.trim() || isStreaming}
+              disabled={!promptInput.trim() || isStreaming || !assignedActor}
               className="p-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg transition-colors shrink-0"
             >
               {isStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

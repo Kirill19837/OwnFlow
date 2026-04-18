@@ -46,6 +46,7 @@ export interface Task {
   depends_on: string[]
   assignments?: Assignment[]
   is_ready?: boolean
+  ai_ready?: boolean
   task_details?: Record<string, string>
   github_pr_url?: string
 }

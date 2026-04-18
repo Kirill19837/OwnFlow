@@ -1,6 +1,6 @@
 import type { Task, Actor } from '../types'
 import { cn } from '../lib/utils'
-import { Bot, User, Clock, CheckCircle2, GitPullRequest } from 'lucide-react'
+import { Bot, User, Clock, CheckCircle2, GitPullRequest, Sparkles } from 'lucide-react'
 
 const PRIORITY_DOT: Record<string, string> = {
   low: 'bg-gray-500',
@@ -34,6 +34,9 @@ export default function TaskCard({ task, actors, onClick }: Props) {
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
           {task.is_ready && (
             <CheckCircle2 size={13} className="text-green-400" title="Ready for implementation" />
+          )}
+          {!task.is_ready && task.ai_ready && (
+            <Sparkles size={13} className="text-yellow-400" title="AI ready — awaiting your approval" />
           )}
           {task.github_pr_url && (
             <a
