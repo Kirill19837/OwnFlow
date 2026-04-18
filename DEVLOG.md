@@ -145,3 +145,18 @@
   - **Chat Log tab**: all AI/human messages across all tasks, chronologically ordered, grouped under task-name dividers, with task-filter pills when multiple tasks involved
   - **Decisions tab**: every task that has `task_details` shown as a key/value card; task names link back to the board
 - Route added to `App.tsx`; Activity icon (📊) button added to project board header next to settings gear
+
+## 2026-04-18 — Title + description refinement & workflow button labels
+
+### update_description now saves title
+- Backend `PATCH /{task_id}/description` accepts optional `title`; updates both in one DB write
+- System prompt STEP 1 instructs AI to emit `"title"` (≤10 words) alongside `"content"`
+- `taskActions.ts`: `update_description` union gains `title?: string`
+- TaskDrawer card shows new title in preview row; button label → "Save title & description"
+- AssistantMessage readonly card shows title in activity log
+
+### Workflow button renamed
+- "Start Work" → "Move to In Progress"
+- "Submit for Review" → "Move to Review"
+- "Mark Done" → "Move to Done"
+- "Resume Work" → "Move to In Progress"
