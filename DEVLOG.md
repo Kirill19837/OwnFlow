@@ -2,6 +2,23 @@
 
 ---
 
+## 2026-04-18 | `0b9cfe3` — AI prompt chat on kanban + structured task actions
+- Task drawer: pinned chat panel at bottom with streaming AI responses, task/project context in system prompt
+- Board: floating prompt bar (fixed bottom-center) with project-level AI chat
+- Structured intent system: AI returns a fenced JSON block for task operations instead of prose
+  - `create_tasks` → purple card with "Add to board" button
+  - `modify_tasks` → blue card with "Apply changes" button (real task IDs from context)
+  - `delete_tasks` → red card with strikethrough titles and "Delete tasks" button
+- Silent buffering: raw JSON never shown to user; "Thinking…" spinner shown while processing
+- Each action card confirms before executing; turns green "Done" after success
+- Backend: `POST /projects/{id}/tasks` — bulk create tasks in active sprint
+- Backend: `PATCH /projects/{id}/tasks/batch` — bulk update task fields
+- Backend: `DELETE /projects/{id}/tasks/batch` — bulk delete by task IDs
+- Backend system prompt now includes all task IDs + full task list for AI reference
+- Fixed 500 on `/projects/{id}/prompt/stream`: removed non-existent `sprints.theme` column
+
+---
+
 ## 2026-04-18 | `548bee9` — Workflow progression button and Rework column
 - Added Rework column to board (5 columns total: To Do, In Progress, Review, Done, Rework)
 - Wired Start Work button to advance task through workflow: `todo→in_progress→review→done`, `rework→in_progress`
