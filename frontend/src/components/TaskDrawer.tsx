@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
 import api from '../lib/api'
-import { type TaskAction, parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
+import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 
@@ -264,25 +264,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     scrollBottom()
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const confirmAction = (action: TaskAction, idx: number) => {
-    const markDone = () => setConfirmedIndices((p) => new Set([...p, idx]))
-    if (action.intent === 'assign_actor') {
-      assign.mutate(action.actor_id, { onSuccess: markDone })
-    } else if (action.intent === 'update_status') {
-      updateStatus.mutate(action.status, { onSuccess: markDone })
-    } else if (action.intent === 'update_description') {
-      updateDescription.mutate({ content: action.content, title: action.title }, { onSuccess: markDone })
-    } else if (action.intent === 'update_details') {
-      updateDetails.mutate(action.details, { onSuccess: markDone })
-    } else if (action.intent === 'mark_ready') {
-      // AI signals it has enough info → set ai_ready (not user approval)
-      setAiReady.mutate(true, { onSuccess: markDone })
-    } else if (action.intent === 'execute_task') {
-      handleExecute()
-      markDone()
-    }
-  }
 
   return (
     <div className="fixed inset-0 z-50 flex">
