@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-18 | `548bee9` — Workflow progression button and Rework column
+- Added Rework column to board (5 columns total: To Do, In Progress, Review, Done, Rework)
+- Wired Start Work button to advance task through workflow: `todo→in_progress→review→done`, `rework→in_progress`
+- Button label adapts to current status: Start Work / Submit for Review / Mark Done / Done ✓ / Resume Work
+- Backend: `rework` added to allowed task statuses in `PATCH /tasks/{id}/status`
+
+---
+
 ## 2026-04-18 | `02c9f01` — Assignment display fixes (board + drawer)
 - Root cause: Supabase returns `assignments` as `{}` (object) instead of `[]` (array) when the table has a unique constraint on `task_id`
 - Normalized assignments to array in the project query (ProjectBoardPage)
