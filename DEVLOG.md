@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-22 | `d676497` — Python 3.13 upgrade, fix .env path resolution, fix accept-invites spam
+
+- `Dockerfile` — updated base image from `python:3.12-slim` → `python:3.13-slim`
+- `.github/workflows/ci.yml` — updated CI Python from `3.11` → `3.13`
+- `requirements.txt` — updated `python-multipart` `0.0.20` → `0.0.26` (requires Python ≥ 3.10)
+- `app/config.py` — fixed `env_file` to use absolute path resolved from `__file__` so `.env` is found regardless of uvicorn working directory (`--app-dir` flag)
+- `frontend/src/components/Auth.tsx` — `accept-invites` now only fires on `SIGNED_IN` event, not on every page refresh/session restore (was called 2–3× per page load)
+
+---
+
 ## 2026-04-22 | `e3addee` — Fix remaining ruff F841: remove unused invite_resp
 
 - `app/api/orgs.py` — removed `invite_resp = None` initialisation and `invite_resp = link_resp` assignment (variable was never read after the postmark path was cleaned up)
