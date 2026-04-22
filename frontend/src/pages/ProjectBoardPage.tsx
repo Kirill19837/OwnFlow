@@ -5,7 +5,7 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import api from '../lib/api'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
-import type { Project } from '../types'
+import type { Project, Assignment } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink } from 'lucide-react'
@@ -69,7 +69,7 @@ export default function ProjectBoardPage() {
             assignments: Array.isArray(t.assignments)
               ? t.assignments
               : t.assignments
-              ? [t.assignments as any]
+              ? [t.assignments as Assignment]
               : [],
           }))
         }
@@ -148,8 +148,9 @@ export default function ProjectBoardPage() {
       setRepoInput('')
       setGithubError('')
     },
-    onError: (err: any) => {
-      setGithubError(err?.response?.data?.detail ?? 'Connection failed')
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setGithubError(detail ?? 'Connection failed')
     },
   })
 
@@ -213,7 +214,7 @@ export default function ProjectBoardPage() {
       setSettingsPrompt(data.prompt)
       setSettingsSprintDays(data.sprint_days ?? 3)
     }
-  }, [data])
+  }, [data, activeSprint, setCurrentProject])
 
   const project = currentProject ?? data
 
@@ -263,12 +264,12 @@ export default function ProjectBoardPage() {
             const { content } = JSON.parse(payload)
             assistantContent += content
             // Don't update state mid-stream — reveal only when done
-          } catch {}
+          } catch (_e) { /* malformed SSE chunk — skip */ }
         }
       }
       // Reveal final content all at once
       setBoardChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
-    } catch {}
+    } catch (_e) { /* stream error — silently stop */ }
 
     setBoardPromptStreaming(false)
     setTimeout(() => boardChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
