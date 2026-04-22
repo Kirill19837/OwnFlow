@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-22 | `TBD` — Fix CI: sync package-lock.json
+
+- `frontend/package-lock.json` — regenerated to include missing `@emnapi/core` and `@emnapi/runtime` packages that were out of sync
+
+---
+
 ## 2026-04-22 | `57d2c55` — CI status checks + deploy injects Postmark vars
 
 **CI / Deploy**
