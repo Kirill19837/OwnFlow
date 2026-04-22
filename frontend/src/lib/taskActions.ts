@@ -26,7 +26,7 @@ export function parseAllTaskActions(content: string): TaskAction[] {
       if (SUPPORTED_INTENTS.includes(parsed.intent)) {
         actions.push(parsed as TaskAction)
       }
-    } catch {}
+    } catch { /* invalid JSON — skip */ }
   }
   return actions
 }

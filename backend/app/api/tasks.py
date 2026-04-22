@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: str):
+def get_task(task_id: str):
     db = get_supabase()
     resp = (
         db.table("tasks")
@@ -42,7 +42,7 @@ async def assign_task(task_id: str, body: TaskAssign):
 
 
 @router.patch("/{task_id}/status")
-async def update_task_status(task_id: str, body: dict):
+def update_task_status(task_id: str, body: dict):
     db = get_supabase()
     allowed = {"todo", "in_progress", "review", "done", "rework"}
     status = body.get("status")
@@ -131,7 +131,7 @@ async def _auto_check_ready(db, task_id: str, title: str, description: str, task
 
 
 @router.patch("/{task_id}/ai-ready")
-async def set_task_ai_ready(task_id: str, body: dict):
+def set_task_ai_ready(task_id: str, body: dict):
     """Set ai_ready flag (AI-decided stage)."""
     db = get_supabase()
     ai_ready = bool(body.get("ai_ready", True))
@@ -140,7 +140,7 @@ async def set_task_ai_ready(task_id: str, body: dict):
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str):
+def delete_task(task_id: str):
     """Permanently delete a task and its related data."""
     db = get_supabase()
     db.table("tasks").delete().eq("id", task_id).execute()
@@ -148,7 +148,7 @@ async def delete_task(task_id: str):
 
 
 @router.patch("/{task_id}/ready")
-async def set_task_ready(task_id: str, body: dict):
+def set_task_ready(task_id: str, body: dict):
     """Mark or unmark a task as ready for implementation."""
     db = get_supabase()
     is_ready = bool(body.get("is_ready", True))
@@ -157,7 +157,7 @@ async def set_task_ready(task_id: str, body: dict):
 
 
 @router.get("/{task_id}/interactions")
-async def get_task_interactions(task_id: str):
+def get_task_interactions(task_id: str):
     """Return all persisted human/AI interactions for a task."""
     db = get_supabase()
     resp = (
@@ -204,7 +204,7 @@ async def execute_stream(task_id: str):
 
 
 @router.get("/{task_id}/deliverables")
-async def get_deliverables(task_id: str):
+def get_deliverables(task_id: str):
     db = get_supabase()
     resp = (
         db.table("deliverables")

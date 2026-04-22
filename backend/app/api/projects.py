@@ -122,7 +122,7 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: str):
+def get_project(project_id: str):
     db = get_supabase()
     project = db.table("projects").select("*").eq("id", project_id).single().execute()
     if not project.data:
@@ -160,7 +160,7 @@ async def get_project(project_id: str):
 
 
 @router.get("")
-async def list_projects(owner_id: str = "", org_id: str = ""):
+def list_projects(owner_id: str = "", org_id: str = ""):
     db = get_supabase()
     q = db.table("projects").select("*").order("created_at", desc=True)
     if org_id:
@@ -173,7 +173,7 @@ async def list_projects(owner_id: str = "", org_id: str = ""):
 
 
 @router.post("/{project_id}/actors", status_code=201)
-async def add_actor(project_id: str, body: ActorCreate):
+def add_actor(project_id: str, body: ActorCreate):
     db = get_supabase()
     row = {
         "id": str(uuid.uuid4()),
@@ -190,7 +190,7 @@ async def add_actor(project_id: str, body: ActorCreate):
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: str):
+def delete_project(project_id: str):
     db = get_supabase()
     project = db.table("projects").select("id").eq("id", project_id).single().execute()
     if not project.data:
@@ -199,7 +199,7 @@ async def delete_project(project_id: str):
 
 
 @router.patch("/{project_id}/settings", status_code=200)
-async def update_project_settings(project_id: str, body: dict):
+def update_project_settings(project_id: str, body: dict):
     """Update editable project settings: name, sprint_days."""
     db = get_supabase()
     project = db.table("projects").select("id").eq("id", project_id).single().execute()

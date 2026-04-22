@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useOrgStore } from '../store/orgStore'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
-import type { Organization } from '../types'
-import { ChevronLeft, Settings, Trash2, UserPlus, Check } from 'lucide-react'
+import type { Organization, OrgPendingInvite } from '../types'
+import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw } from 'lucide-react'
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
@@ -24,6 +24,7 @@ export default function OrgSettingsPage() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
   const [inviteMessage, setInviteMessage] = useState('')
+  const [resendingEmail, setResendingEmail] = useState<string | null>(null)
   const [localPendingInvites, setLocalPendingInvites] = useState<{ email: string; role: string }[]>([])
   const [saved, setSaved] = useState(false)
 
@@ -51,7 +52,7 @@ export default function OrgSettingsPage() {
         role: inviteRole,
         invited_by_user_id: session!.user.id,
       }),
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       const sentEmail = inviteEmail.trim().toLowerCase()
       const sentRole = inviteRole
       setInviteEmail('')
@@ -74,6 +75,18 @@ export default function OrgSettingsPage() {
   const removeMember = useMutation({
     mutationFn: (userId: string) => api.delete(`/orgs/${orgId}/members/${userId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org', orgId] }),
+  })
+
+  const resendInvite = useMutation({
+    mutationFn: ({ email, role }: { email: string; role: string }) =>
+      api.post(`/orgs/${orgId}/invites`, {
+        email,
+        role,
+        invited_by_user_id: session!.user.id,
+      }),
+    onMutate: ({ email }) => setResendingEmail(email),
+    onSettled: () => setResendingEmail(null),
+    onSuccess: (_, { email }) => setInviteMessage(`Invite re-sent to ${email}.`),
   })
 
   if (isLoading || !org) {
@@ -156,7 +169,7 @@ export default function OrgSettingsPage() {
               ...(org.pending_invites ?? []),
               ...localPendingInvites
                 .filter((i) => !serverEmails.has(i.email))
-                .map((i) => ({ id: i.email, email: i.email, role: i.role as any, invited_by_email: undefined, invited_at: '', status: 'pending' as const })),
+                .map((i) => ({ id: i.email, email: i.email, role: i.role as OrgPendingInvite['role'], invited_by_email: undefined, invited_at: '', status: 'pending' as const })),
             ]
             if (merged.length === 0) return null
             return (
@@ -171,9 +184,19 @@ export default function OrgSettingsPage() {
                           {inv.role}{inv.invited_by_email ? ` • invited by ${inv.invited_by_email}` : ''}
                         </p>
                       </div>
-                      <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
-                        invite sent
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => resendInvite.mutate({ email: inv.email, role: inv.role })}
+                          disabled={resendingEmail === inv.email}
+                          title="Resend invite email"
+                          className="text-gray-500 hover:text-yellow-300 transition-colors disabled:opacity-40"
+                        >
+                          <RotateCcw size={13} className={resendingEmail === inv.email ? 'animate-spin' : ''} />
+                        </button>
+                        <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
+                          invite sent
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -194,7 +217,7 @@ export default function OrgSettingsPage() {
               />
               <select
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as any)}
+                onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
                 className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-white text-sm focus:outline-none"
               >
                 <option value="member">Member</option>

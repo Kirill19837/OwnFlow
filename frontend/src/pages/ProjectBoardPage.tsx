@@ -180,7 +180,7 @@ export default function ProjectBoardPage() {
       ) {
         return parsed as StructuredAction
       }
-    } catch {}
+    } catch { /* invalid JSON — not a structured action */ }
     return null
   }
 
@@ -204,6 +204,7 @@ export default function ProjectBoardPage() {
 
   useRealtimeProject(projectId)
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (data) {
       setCurrentProject(data)
@@ -215,6 +216,7 @@ export default function ProjectBoardPage() {
       setSettingsSprintDays(data.sprint_days ?? 3)
     }
   }, [data, activeSprint, setCurrentProject])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const project = currentProject ?? data
 
@@ -264,12 +266,12 @@ export default function ProjectBoardPage() {
             const { content } = JSON.parse(payload)
             assistantContent += content
             // Don't update state mid-stream — reveal only when done
-          } catch (_e) { /* malformed SSE chunk — skip */ }
+          } catch { /* malformed SSE chunk — skip */ }
         }
       }
       // Reveal final content all at once
       setBoardChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
-    } catch (_e) { /* stream error — silently stop */ }
+    } catch { /* stream error — silently stop */ }
 
     setBoardPromptStreaming(false)
     setTimeout(() => boardChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)

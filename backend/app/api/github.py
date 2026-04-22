@@ -42,7 +42,7 @@ async def github_connect(project_id: str, body: ConnectBody):
 
 
 @router.get("/status")
-async def github_status(project_id: str):
+def github_status(project_id: str):
     db = get_supabase()
     resp = db.table("github_connections").select("repo_owner,repo_name").eq("project_id", project_id).execute()
     if not resp.data or not resp.data[0].get("repo_name"):
@@ -52,7 +52,7 @@ async def github_status(project_id: str):
 
 
 @router.patch("/repo")
-async def set_github_repo(project_id: str, body: RepoBody):
+def set_github_repo(project_id: str, body: RepoBody):
     repo = body.repo.strip()
     if "/" not in repo:
         raise HTTPException(400, "repo must be owner/repo-name")
@@ -66,7 +66,7 @@ async def set_github_repo(project_id: str, body: RepoBody):
 
 
 @router.delete("/disconnect")
-async def github_disconnect(project_id: str):
+def github_disconnect(project_id: str):
     db = get_supabase()
     db.table("github_connections").delete().eq("project_id", project_id).execute()
     return {"project_id": project_id, "connected": False}

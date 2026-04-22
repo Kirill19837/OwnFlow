@@ -454,7 +454,7 @@ export default function NewProjectPage() {
         </div>
 
         {createProject.isError && (
-          <p className="text-red-400 text-sm">{(createProject.error as any)?.message}</p>
+          <p className="text-red-400 text-sm">{(createProject.error as Error)?.message}</p>
         )}
 
         <button

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
-import type { Task, Actor, Deliverable, TaskInteraction } from '../types'
+import type { Task, Actor, Deliverable, TaskInteraction, Assignment, Project } from '../types'
 import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -63,6 +63,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     queryFn: () => api.get<TaskInteraction[]>(`/tasks/${task.id}/interactions`).then((r) => r.data),
   })
 
+  const assignedActor = actors.find((a) => {
+    const a0 = Array.isArray(task.assignments)
+      ? task.assignments[0]
+      : (task.assignments as unknown as Assignment)
+    return a.id === a0?.actor_id
+  })
+
   // Seed chat from persisted interactions on first open (once)
   const seededRef = useRef(false)
   useEffect(() => {
@@ -80,6 +87,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       content: d.content,
       actorName: assignedActor?.name ?? 'Agent',
     }))
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChat([...interactionMsgs, ...deliverableMsgs])
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interactions, deliverables])
@@ -89,11 +97,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       api.patch(`/tasks/${task.id}/assign`, { actor_id: actor_id || '' }),
     onSuccess: (response) => {
       const assignment = response.data
-      qc.setQueryData(['project', task.project_id], (old: any) => {
+      qc.setQueryData(['project', task.project_id], (old: Project | undefined) => {
         if (!old) return old
         return {
           ...old,
-          tasks: (old.tasks ?? []).map((t: any) =>
+          tasks: (old.tasks ?? []).map((t: Task) =>
             t.id === task.id
               ? { ...t, assignments: assignment?.actor_id ? [assignment] : [] }
               : t
@@ -138,13 +146,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     },
   })
 
-  const assignedActor = actors.find((a) => {
-    const a0 = Array.isArray(task.assignments)
-      ? task.assignments[0]
-      : (task.assignments as any)
-    return a.id === a0?.actor_id
-  })
-
   const handlePrompt = async () => {
     const msg = promptInput.trim()
     if (!msg || isStreaming) return
@@ -154,7 +155,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     // Snapshot history for backend (only user+assistant messages)
     const historyForBackend = chat
       .filter((m) => m.kind === 'user' || m.kind === 'assistant')
-      .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as any).content as string }))
+      .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
 
     setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
     scrollBottom()
@@ -184,7 +185,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           try {
             const { content } = JSON.parse(payload)
             assistantContent += content
-          } catch {}
+          } catch { /* malformed SSE chunk — skip */ }
         }
       }
       setChat((prev) => [
@@ -240,7 +241,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               // legacy fallback (no type field)
               deliverableContent += evt.content
             }
-          } catch {}
+          } catch { /* malformed SSE chunk — skip */ }
         }
       }
 

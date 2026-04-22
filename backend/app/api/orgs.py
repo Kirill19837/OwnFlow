@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from app.config import get_settings
 from app.db import get_supabase
-from app.email import send_invite_email
+from app.email import send_invite_email, send_added_to_org_email
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -83,7 +83,7 @@ def _extract_user_id(invite_resp) -> Optional[str]:
 
 
 @router.post("", status_code=201)
-async def create_org(body: OrgCreate):
+def create_org(body: OrgCreate):
     if body.default_ai_model not in AI_MODELS:
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
     db = get_supabase()
@@ -109,7 +109,7 @@ async def create_org(body: OrgCreate):
 
 
 @router.get("/my")
-async def my_orgs(user_id: str):
+def my_orgs(user_id: str):
     db = get_supabase()
     members = db.table("org_members").select("org_id, role").eq("user_id", user_id).execute()
     items = members.data or []
@@ -125,12 +125,12 @@ async def my_orgs(user_id: str):
 
 
 @router.get("/models")
-async def list_models():
+def list_models():
     return {"models": AI_MODELS}
 
 
 @router.get("/{org_id}")
-async def get_org(org_id: str):
+def get_org(org_id: str):
     db = get_supabase()
     org = db.table("organizations").select("*").eq("id", org_id).single().execute()
     if not org.data:
@@ -168,7 +168,7 @@ async def get_org(org_id: str):
 
 
 @router.patch("/{org_id}")
-async def update_org(org_id: str, body: OrgUpdate):
+def update_org(org_id: str, body: OrgUpdate):
     db = get_supabase()
     if body.default_ai_model and body.default_ai_model not in AI_MODELS:
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
@@ -180,7 +180,7 @@ async def update_org(org_id: str, body: OrgUpdate):
 
 
 @router.post("/{org_id}/members", status_code=201)
-async def invite_member(org_id: str, body: OrgInvite):
+def invite_member(org_id: str, body: OrgInvite):
     db = get_supabase()
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "role must be owner, admin, or member")
@@ -190,7 +190,7 @@ async def invite_member(org_id: str, body: OrgInvite):
 
 
 @router.post("/{org_id}/invites", status_code=201)
-async def invite_member_by_email(org_id: str, body: OrgEmailInvite):
+def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     db = get_supabase()
     settings = get_settings()
     invite_tracking_enabled = True
@@ -224,10 +224,28 @@ async def invite_member_by_email(org_id: str, body: OrgEmailInvite):
 
     existing_user = next((u for u in users if (_user_email(u) or "").lower() == email), None)
 
-    existing_user_id = _user_id(existing_user) if existing_user else None
+    # Only treat as existing if email is confirmed — unconfirmed users (waiting for
+    # verification) should go through the invite flow so they get a proper invite link.
+    def _is_confirmed(user) -> bool:
+        confirmed = getattr(user, "email_confirmed_at", None) or (
+            user.get("email_confirmed_at") if isinstance(user, dict) else None
+        )
+        return bool(confirmed)
+
+    existing_user_id = _user_id(existing_user) if (existing_user and _is_confirmed(existing_user)) else None
     if existing_user_id:
         row = {"org_id": org_id, "user_id": existing_user_id, "role": body.role}
         db.table("org_members").upsert(row).execute()
+        try:
+            send_added_to_org_email(
+                to_email=email,
+                org_name=org.data["name"],
+                inviter_email=inviter_email,
+                role=body.role,
+                frontend_url=settings.frontend_url,
+            )
+        except Exception:
+            pass  # Non-blocking — member was added regardless
         return {
             "status": "added_existing_user",
             "email": email,
@@ -337,7 +355,7 @@ class AcceptInvitesBody(BaseModel):
 
 
 @router.post("/accept-invites")
-async def accept_pending_invites(body: AcceptInvitesBody):
+def accept_pending_invites(body: AcceptInvitesBody):
     db = get_supabase()
 
     email = body.email.strip().lower()
@@ -368,6 +386,6 @@ async def accept_pending_invites(body: AcceptInvitesBody):
 
 
 @router.delete("/{org_id}/members/{user_id}", status_code=204)
-async def remove_member(org_id: str, user_id: str):
+def remove_member(org_id: str, user_id: str):
     db = get_supabase()
     db.table("org_members").delete().eq("org_id", org_id).eq("user_id", user_id).execute()

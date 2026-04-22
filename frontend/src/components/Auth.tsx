@@ -8,7 +8,7 @@ export function AuthProvider() {
   const { setSession } = useAuthStore()
   const [ready, setReady] = useState(false)
 
-  const acceptInvitesIfNeeded = async (session: any) => {
+  const acceptInvitesIfNeeded = async (session: { user?: { email?: string; id?: string } | null } | null) => {
     const email = session?.user?.email
     const userId = session?.user?.id
     if (!email || !userId) return

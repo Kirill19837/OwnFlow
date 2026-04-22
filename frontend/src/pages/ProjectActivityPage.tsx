@@ -38,6 +38,7 @@ export default function ProjectActivityPage() {
   // Pre-filter to a specific task if ?task= is in the URL
   useEffect(() => {
     const taskParam = searchParams.get('task')
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (taskParam) setFilterTask(taskParam)
   }, [searchParams])
 

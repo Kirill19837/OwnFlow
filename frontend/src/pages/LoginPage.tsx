@@ -23,8 +23,8 @@ export default function LoginPage() {
         await signUp(email, password)
       }
       navigate('/')
-    } catch (err: any) {
-      setError(err.message ?? 'Something went wrong')
+    } catch (err: unknown) {
+      setError((err as Error).message ?? 'Something went wrong')
     } finally {
       setLoading(false)
     }

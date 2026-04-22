@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useProjectStore } from '../store/projectStore'
-import type { Task, Assignment } from '../types'
+import type { Task, Assignment, Project } from '../types'
 
 export function useRealtimeProject(projectId: string | undefined) {
   const { upsertTask, upsertAssignment, setCurrentProject, currentProject } = useProjectStore()
@@ -31,7 +31,7 @@ export function useRealtimeProject(projectId: string | undefined) {
         { event: 'UPDATE', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` },
         (payload) => {
           if (payload.new && currentProject) {
-            setCurrentProject({ ...currentProject, ...(payload.new as any) })
+            setCurrentProject({ ...currentProject, ...(payload.new as Partial<Project>) })
           }
         }
       )

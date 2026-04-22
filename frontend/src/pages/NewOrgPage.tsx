@@ -78,7 +78,7 @@ export default function NewOrgPage() {
         </div>
 
         {create.isError && (
-          <p className="text-red-400 text-sm">{(create.error as any)?.message}</p>
+          <p className="text-red-400 text-sm">{(create.error as Error)?.message}</p>
         )}
 
         <button

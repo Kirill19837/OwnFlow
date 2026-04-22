@@ -1,4 +1,4 @@
-import type { Task, Actor } from '../types'
+import type { Task, Actor, Assignment } from '../types'
 import { cn } from '../lib/utils'
 import { Bot, User, Clock, CheckCircle2, GitPullRequest, Sparkles } from 'lucide-react'
 
@@ -19,7 +19,7 @@ export default function TaskCard({ task, actors, onClick }: Props) {
   // Supabase returns assignments as {} (object) not [] when there's a unique constraint
   const firstAssignment = Array.isArray(task.assignments)
     ? task.assignments[0]
-    : (task.assignments as any)
+    : (task.assignments as unknown as Assignment)
   const assignedActor = actors.find((a) => a.id === firstAssignment?.actor_id)
 
   return (

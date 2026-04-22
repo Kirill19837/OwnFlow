@@ -2,6 +2,29 @@
 
 ---
 
+## 2026-04-22 | `TBD` — Harden invite flow: unconfirmed-user fix, notification email, tests
+
+**Security fix**
+- `app/api/orgs.py` — `invite_member_by_email` now checks `email_confirmed_at` before treating an auth user as "existing"; unconfirmed/ghost users (created by prior `generate_link` calls) are routed through the invite flow instead of being added directly to `org_members`. This closed a gap where a pending user could gain org access without ever verifying email ownership.
+- Cleaned up dirty `org_members` row that was created by the old logic for `asset19837@gmail.com`
+
+**Notification email for directly-added users**
+- `app/email.py` — added `send_added_to_org_email()` — branded HTML email sent when a confirmed existing user is added directly to an org (no invite link needed)
+- `app/api/orgs.py` — `existing_user_id` branch now calls `send_added_to_org_email` (non-blocking try/except so member addition never fails if email is down)
+
+**Invite flow tests**
+- `backend/tests/test_invite_flow.py` — 7 unit tests covering: new-email invite, confirmed-user direct-add, unconfirmed-user invite routing, invalid email 400, non-member 403, accept-invites happy path, accept-invites with no pending
+- `requirements.txt` — added `pytest==8.3.5` and `pytest-httpx==0.35.0`
+
+**Backend async → def conversion (event loop fix)**
+- `app/api/orgs.py`, `projects.py`, `tasks.py`, `actors.py`, `github.py` — all sync-only route handlers converted from `async def` to `def` so FastAPI runs them in a threadpool instead of blocking the event loop (was causing 500s and hanging requests)
+
+**Frontend**
+- `OrgSettingsPage.tsx` — resend invite button (`RotateCcw`) next to "invite sent" badge; `resendingEmail` state drives spinner animation
+- Fixed all 23 ESLint errors across `TaskDrawer.tsx`, `TaskCard.tsx`, `Auth.tsx`, `useRealtimeProject.ts`, `taskActions.ts`, `ProjectBoardPage.tsx`, `ProjectActivityPage.tsx`, `LoginPage.tsx`, `NewOrgPage.tsx`, `NewProjectPage.tsx`
+
+---
+
 ## 2026-04-22 | `TBD` — Fix deploy: consolidate env into single .env.prod for docker compose
 
 - `.github/workflows/deploy.yml` — merged backend + frontend vars into one `.env.prod` file so `docker compose --env-file` interpolates all `${VAR}` references in `docker-compose.prod.yml` (was writing separate `backend/.env` that never reached compose interpolation, causing backend 500 on startup)
