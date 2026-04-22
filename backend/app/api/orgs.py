@@ -99,6 +99,8 @@ def create_org(body: OrgCreate):
         "owner_id": body.owner_id,
         "default_ai_model": body.default_ai_model,
     }
+    if body.company_id:
+        row["company_id"] = body.company_id
     db.table("organizations").insert(row).execute()
     db.table("org_members").insert({
         "org_id": org_id,
@@ -201,7 +203,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     if not _is_valid_email(email):
         raise HTTPException(400, "Invalid email")
 
-    org = db.table("organizations").select("id,name").eq("id", org_id).single().execute()
+    org = db.table("organizations").select("id,name,company_id").eq("id", org_id).single().execute()
     if not org.data:
         raise HTTPException(404, "Organization not found")
 
@@ -233,8 +235,15 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
 
     existing_user_id = _user_id(existing_user) if (existing_user and _is_confirmed(existing_user)) else None
     if existing_user_id:
+        company_id = (org.data or {}).get("company_id")
         row = {"org_id": org_id, "user_id": existing_user_id, "role": body.role}
         db.table("org_members").upsert(row).execute()
+        if company_id:
+            db.table("company_members").upsert({
+                "company_id": company_id,
+                "user_id": existing_user_id,
+                "role": body.role,
+            }).execute()
         try:
             send_added_to_org_email(
                 to_email=email,
@@ -261,6 +270,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
             "invited_by_user_id": body.invited_by_user_id,
             "invited_by_email": inviter_email,
             "status": "pending",
+            "company_id": (org.data or {}).get("company_id"),
         }).execute()
     except Exception:
         # Migration may not be applied yet; continue with invite email flow.
@@ -281,7 +291,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                         "org_name": org.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}",
                 },
             })
             action_link = (
@@ -313,7 +323,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                         "org_name": org.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}",
                 },
             )
         except Exception as exc:
@@ -346,6 +356,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
 class AcceptInvitesBody(BaseModel):
     user_id: str
     email: str
+    org_id: Optional[str] = None  # If provided, only accept this specific org's invite
 
 
 @router.post("/accept-invites")
@@ -353,14 +364,50 @@ def accept_pending_invites(body: AcceptInvitesBody):
     db = get_supabase()
 
     email = body.email.strip().lower()
-    pending = (
+    query = (
         db.table("org_invites")
         .select("id,org_id,role")
         .eq("email", email)
         .eq("status", "pending")
-        .execute()
     )
+    if body.org_id:
+        query = query.eq("org_id", body.org_id)
+    pending = query.execute()
     rows = pending.data or []
+
+    if not rows:
+        return {"accepted": 0, "org_ids": []}
+
+    # Look up company for the target team(s)
+    target_org_ids = [r["org_id"] for r in rows]
+    teams = db.table("organizations").select("id,company_id").in_("id", target_org_ids).execute()
+    company_ids = list({t["company_id"] for t in (teams.data or []) if t.get("company_id")})
+
+    if company_ids:
+        target_company_id = company_ids[0]
+        # One company at a time: remove from all OTHER companies' teams + memberships
+        other_memberships = (
+            db.table("company_members")
+            .select("company_id")
+            .eq("user_id", body.user_id)
+            .neq("company_id", target_company_id)
+            .execute()
+        )
+        for cm in (other_memberships.data or []):
+            old_cid = cm["company_id"]
+            old_teams = db.table("organizations").select("id").eq("company_id", old_cid).execute()
+            for ot in (old_teams.data or []):
+                db.table("org_members").delete().eq("user_id", body.user_id).eq("org_id", ot["id"]).execute()
+            db.table("company_members").delete().eq("user_id", body.user_id).eq("company_id", old_cid).execute()
+        # Join the target company
+        db.table("company_members").upsert({
+            "company_id": target_company_id,
+            "user_id": body.user_id,
+            "role": "member",
+        }).execute()
+    else:
+        # Legacy: teams without company_id — evict from all current teams before joining
+        db.table("org_members").delete().eq("user_id", body.user_id).execute()
 
     accepted_org_ids: list[str] = []
     for row in rows:
@@ -377,6 +424,15 @@ def accept_pending_invites(body: AcceptInvitesBody):
         accepted_org_ids.append(row["org_id"])
 
     return {"accepted": len(accepted_org_ids), "org_ids": accepted_org_ids}
+
+
+@router.delete("/{org_id}", status_code=204)
+def delete_org(org_id: str):
+    db = get_supabase()
+    # Remove all members and invites first, then the org
+    db.table("org_members").delete().eq("org_id", org_id).execute()
+    db.table("org_invites").delete().eq("org_id", org_id).execute()
+    db.table("organizations").delete().eq("id", org_id).execute()
 
 
 @router.delete("/{org_id}/members/{user_id}", status_code=204)

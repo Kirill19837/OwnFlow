@@ -8,12 +8,15 @@ export function AuthProvider() {
   const { setSession } = useAuthStore()
   const [ready, setReady] = useState(false)
 
-  const acceptInvitesIfNeeded = async (session: { user?: { email?: string; id?: string } | null } | null) => {
+  const acceptInvitesIfNeeded = async (
+    session: { user?: { email?: string; id?: string } | null } | null,
+    orgId?: string
+  ) => {
     const email = session?.user?.email
     const userId = session?.user?.id
     if (!email || !userId) return
     try {
-      await api.post('/orgs/accept-invites', { user_id: userId, email })
+      await api.post('/orgs/accept-invites', { user_id: userId, email, org_id: orgId })
     } catch {
       // Non-blocking: auth flow should continue even if invite sync fails.
     }
@@ -27,7 +30,10 @@ export function AuthProvider() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       // Only accept invites on a real sign-in, not on every session restore/refresh.
       if (event === 'SIGNED_IN') {
-        await acceptInvitesIfNeeded(session)
+        // Read invite_org from the URL (embedded in the magic link redirect).
+        const params = new URLSearchParams(window.location.search)
+        const inviteOrg = params.get('invite_org') ?? undefined
+        await acceptInvitesIfNeeded(session, inviteOrg)
       }
       setSession(session)
     })

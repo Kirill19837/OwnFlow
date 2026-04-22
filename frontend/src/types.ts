@@ -1,8 +1,19 @@
+export interface Company {
+  id: string
+  name: string
+  slug: string
+  owner_id: string
+  created_at: string
+  my_role?: 'owner' | 'admin' | 'member'
+  default_team_id?: string
+}
+
 export interface Organization {
   id: string
   name: string
   slug: string
   owner_id: string
+  company_id?: string
   default_ai_model: string
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'

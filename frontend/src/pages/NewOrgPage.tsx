@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useOrgStore } from '../store/orgStore'
+import { useCompanyStore } from '../store/companyStore'
 import api from '../lib/api'
 import type { Organization } from '../types'
-import { ChevronLeft, Building2 } from 'lucide-react'
+import { ChevronLeft, Users } from 'lucide-react'
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o (OpenAI)' },
@@ -18,6 +19,7 @@ const AI_MODELS = [
 export default function NewOrgPage() {
   const { session } = useAuthStore()
   const { setActiveOrg } = useOrgStore()
+  const { company } = useCompanyStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
@@ -29,10 +31,11 @@ export default function NewOrgPage() {
         name,
         owner_id: session!.user.id,
         default_ai_model: model,
+        company_id: company?.id,
       }).then((r) => r.data),
     onSuccess: (org) => {
       setActiveOrg(org)
-      qc.invalidateQueries({ queryKey: ['orgs'] })
+      qc.invalidateQueries({ queryKey: ['teams'] })
       navigate('/')
     },
   })
@@ -44,19 +47,19 @@ export default function NewOrgPage() {
       </button>
 
       <div className="flex items-center gap-3 mb-8">
-        <Building2 size={28} className="text-purple-400" />
+        <Users size={28} className="text-purple-400" />
         <div>
-          <h1 className="text-2xl font-bold text-white">New Organization</h1>
-          <p className="text-gray-400 text-sm">A workspace for your team and projects</p>
+          <h1 className="text-2xl font-bold text-white">New Team</h1>
+          <p className="text-gray-400 text-sm">{company ? `A team inside ${company.name}` : 'A workspace for your projects'}</p>
         </div>
       </div>
 
       <div className="space-y-5">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Organization name</label>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Team name</label>
           <input
             type="text"
-            placeholder="Acme Corp"
+            placeholder="Engineering"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -86,7 +89,7 @@ export default function NewOrgPage() {
           disabled={create.isPending || !name.trim()}
           className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors"
         >
-          {create.isPending ? 'Creating…' : 'Create organization'}
+          {create.isPending ? 'Creating…' : 'Create team'}
         </button>
       </div>
     </div>

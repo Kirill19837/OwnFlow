@@ -5,7 +5,7 @@ import { useOrgStore } from '../store/orgStore'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import type { Organization, OrgPendingInvite } from '../types'
-import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw } from 'lucide-react'
+import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil } from 'lucide-react'
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
@@ -27,6 +27,9 @@ export default function OrgSettingsPage() {
   const [resendingEmail, setResendingEmail] = useState<string | null>(null)
   const [localPendingInvites, setLocalPendingInvites] = useState<{ email: string; role: string }[]>([])
   const [saved, setSaved] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: org, isLoading } = useQuery({
     queryKey: ['org', orgId],
@@ -39,9 +42,35 @@ export default function OrgSettingsPage() {
     onSuccess: (_, model) => {
       updateOrgModel(orgId!, model)
       qc.invalidateQueries({ queryKey: ['org', orgId] })
-      qc.invalidateQueries({ queryKey: ['orgs'] })
+      qc.invalidateQueries({ queryKey: ['teams'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  const renameTeam = useMutation({
+    mutationFn: (name: string) => api.patch(`/orgs/${orgId}`, { name }),
+    onSuccess: (_, name) => {
+      qc.invalidateQueries({ queryKey: ['org', orgId] })
+      qc.invalidateQueries({ queryKey: ['teams'] })
+      // Update active org name in store if it's this one
+      const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
+      const updated = orgs.map((o) => o.id === orgId ? { ...o, name } : o)
+      setOrgs(updated)
+      if (activeOrg?.id === orgId) setActiveOrg({ ...activeOrg, name })
+      setRenaming(false)
+    },
+  })
+
+  const deleteTeam = useMutation({
+    mutationFn: () => api.delete(`/orgs/${orgId}`),
+    onSuccess: () => {
+      const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
+      const remaining = orgs.filter((o) => o.id !== orgId)
+      setOrgs(remaining)
+      if (activeOrg?.id === orgId) setActiveOrg(remaining[0] ?? null)
+      qc.invalidateQueries({ queryKey: ['teams'] })
+      navigate('/')
     },
   })
 
@@ -61,7 +90,7 @@ export default function OrgSettingsPage() {
         setInviteMessage(`Invite saved — email couldn't be sent right now (rate limit). It will be sent later.`)
         setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: sentRole }])
       } else if (payload.status === 'added_existing_user') {
-        setInviteMessage(`${payload.email} is already registered and was added to the org.`)
+        setInviteMessage(`${payload.email} is already registered and was added to the team.`)
       } else {
         const who = payload.invited_by_email ? ` by ${payload.invited_by_email}` : ''
         const orgName = payload.organization ? ` to ${payload.organization}` : ''
@@ -99,11 +128,46 @@ export default function OrgSettingsPage() {
         <ChevronLeft size={16} /> Back
       </button>
 
-      <div className="flex items-center gap-3 mb-8">
-        <Settings size={24} className="text-purple-400" />
-        <div>
-          <h1 className="text-2xl font-bold text-white">{org.name}</h1>
-          <p className="text-gray-500 text-sm">Organization settings</p>
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3">
+          <Settings size={24} className="text-purple-400" />
+          <div>
+            {renaming ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newName.trim()) renameTeam.mutate(newName.trim())
+                    if (e.key === 'Escape') setRenaming(false)
+                  }}
+                  className="bg-gray-800 border border-purple-500 rounded px-2 py-1 text-white text-xl font-bold focus:outline-none w-52"
+                />
+                <button
+                  onClick={() => newName.trim() && renameTeam.mutate(newName.trim())}
+                  disabled={!newName.trim() || renameTeam.isPending}
+                  className="text-xs px-2 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded"
+                >
+                  Save
+                </button>
+                <button onClick={() => setRenaming(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-white">{org.name}</h1>
+                <button
+                  onClick={() => { setNewName(org.name); setRenaming(true) }}
+                  className="text-gray-600 hover:text-gray-300 transition-colors"
+                  title="Rename team"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
+            <p className="text-gray-500 text-sm">Team settings</p>
+          </div>
         </div>
       </div>
 
@@ -112,7 +176,7 @@ export default function OrgSettingsPage() {
         <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h2 className="font-semibold text-white mb-1">Default AI Model</h2>
           <p className="text-gray-500 text-sm mb-4">
-            All new projects in this org use this model unless overridden. You can switch between OpenAI and Anthropic here.
+            All new projects in this team use this model unless overridden.
           </p>
           <div className="grid grid-cols-1 gap-2">
             {AI_MODELS.map((m) => (
@@ -234,6 +298,33 @@ export default function OrgSettingsPage() {
             </div>
             {inviteMessage && <p className="text-xs text-green-400 mt-2">{inviteMessage}</p>}
           </div>
+        </section>
+
+        {/* Danger zone */}
+        <section className="bg-gray-900 border border-red-900/50 rounded-xl p-5">
+          <h2 className="font-semibold text-red-400 mb-1">Danger zone</h2>
+          <p className="text-gray-500 text-sm mb-4">Permanently delete this team and all its projects. This cannot be undone.</p>
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-red-400 border border-red-800 rounded-lg hover:bg-red-900/30 transition-colors"
+            >
+              <Trash2 size={14} />
+              Delete team
+            </button>
+          ) : (
+            <div className="flex items-center gap-3">
+              <p className="text-sm text-red-300">Delete <span className="font-bold">{org.name}</span>?</p>
+              <button
+                onClick={() => deleteTeam.mutate()}
+                disabled={deleteTeam.isPending}
+                className="px-3 py-1.5 text-sm bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+              >
+                {deleteTeam.isPending ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="text-sm text-gray-400 hover:text-white">Cancel</button>
+            </div>
+          )}
         </section>
       </div>
     </div>

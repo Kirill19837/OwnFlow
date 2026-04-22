@@ -2,27 +2,62 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useOrgStore } from '../store/orgStore'
+import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
-import type { Organization } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings } from 'lucide-react'
+import type { Company, Organization } from '../types'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2 } from 'lucide-react'
 
 export default function AppLayout() {
   const { signOut, session } = useAuthStore()
   const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore()
+  const { company, setCompany } = useCompanyStore()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [dropOpen, setDropOpen] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
   const lastUserIdRef = useRef<string | null>(null)
-  const autoCreateAttemptRef = useRef<string | null>(null)
 
-  const { mutate: createDefaultOrgMutate, isPending: isCreatingDefaultOrg } = useMutation({
+  // Fetch company
+  const { data: companyData, isSuccess: companyLoaded } = useQuery({
+    queryKey: ['company', session?.user.id],
+    queryFn: () =>
+      api.get<Company | null>('/companies/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
+    enabled: !!session,
+  })
+
+  useEffect(() => {
+    if (!companyLoaded) return
+    setCompany(companyData ?? null)
+  }, [companyData, companyLoaded, setCompany])
+
+  // Fetch teams (scoped to company if available, else legacy /orgs/my)
+  const { data: teamsData } = useQuery({
+    queryKey: ['teams', companyData?.id ?? 'legacy', session?.user.id],
+    queryFn: () =>
+      companyData
+        ? api.get<Organization[]>(`/companies/${companyData.id}/teams`, { params: { user_id: session!.user.id } }).then((r) => r.data)
+        : api.get<Organization[]>('/orgs/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
+    enabled: !!session && companyLoaded,
+  })
+
+  // Clear state on user switch
+  useEffect(() => {
+    const currentUserId = session?.user.id ?? null
+    if (lastUserIdRef.current && lastUserIdRef.current !== currentUserId) {
+      setOrgs([])
+      setActiveOrg(null)
+      setCompany(null)
+    }
+    lastUserIdRef.current = currentUserId
+  }, [session?.user.id, setOrgs, setActiveOrg, setCompany])
+
+  // Sync teams into store; redirect to company setup if nothing exists
+  const { mutate: createDefaultTeamMutate, isPending: isCreatingDefaultTeam } = useMutation({
     mutationFn: async () => {
       const emailPrefix = session?.user.email?.split('@')[0]?.trim() || 'My'
       const first = emailPrefix[0]?.toUpperCase() || 'M'
-      const rest = emailPrefix.slice(1)
-      const name = `${first}${rest} Organization`
+      const name = `${first}${emailPrefix.slice(1)} Organization`
       const { data } = await api.post<Organization>('/orgs', {
         name,
         owner_id: session!.user.id,
@@ -33,35 +68,28 @@ export default function AppLayout() {
     onSuccess: (org) => {
       setOrgs([org])
       setActiveOrg(org)
-      queryClient.setQueryData(['orgs', session?.user.id], [org])
+      queryClient.setQueryData(['teams', 'legacy', session?.user.id], [org])
     },
   })
 
-  const { data } = useQuery({
-    queryKey: ['orgs', session?.user.id],
-    queryFn: () =>
-      api.get<Organization[]>('/orgs/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
-    enabled: !!session,
-  })
+  const autoCreateAttemptRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const currentUserId = session?.user.id ?? null
-    if (lastUserIdRef.current && lastUserIdRef.current !== currentUserId) {
-      setOrgs([])
-      setActiveOrg(null)
-      autoCreateAttemptRef.current = null
+    if (!teamsData || !session?.user.id || !companyLoaded) return
+    setOrgs(teamsData)
+    if (teamsData.length > 0) return
+    // No teams and no company → send to company setup
+    if (!companyData) {
+      navigate('/company/new')
+      return
     }
-    lastUserIdRef.current = currentUserId
-  }, [session?.user.id, setOrgs, setActiveOrg])
-
-  useEffect(() => {
-    if (!data || !session?.user.id) return
-    setOrgs(data)
-    if (data.length === 0 && autoCreateAttemptRef.current !== session.user.id && !isCreatingDefaultOrg) {
+    // Has company but no teams yet → auto-create a default team (edge case)
+    if (autoCreateAttemptRef.current !== session.user.id && !isCreatingDefaultTeam) {
       autoCreateAttemptRef.current = session.user.id
-      createDefaultOrgMutate()
+      createDefaultTeamMutate()
     }
-  }, [data, session?.user.id, setOrgs, isCreatingDefaultOrg, createDefaultOrgMutate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamsData, session?.user.id, companyLoaded])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -76,6 +104,7 @@ export default function AppLayout() {
     await signOut()
     setOrgs([])
     setActiveOrg(null)
+    setCompany(null)
     navigate('/login')
   }
 
@@ -87,14 +116,22 @@ export default function AppLayout() {
           OwnFlow
         </NavLink>
 
-        {/* Org switcher */}
+        {/* Company name */}
+        {company && (
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
+            <Building2 size={12} />
+            <span>{company.name}</span>
+          </div>
+        )}
+
+        {/* Team switcher */}
         <div className="relative" ref={dropRef}>
           <button
             onClick={() => setDropOpen((p) => !p)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm text-white transition-colors"
           >
             <span className="w-2 h-2 rounded-full bg-purple-500" />
-            <span className="max-w-[140px] truncate">{activeOrg?.name ?? 'Select org'}</span>
+            <span className="max-w-[140px] truncate">{activeOrg?.name ?? 'Select team'}</span>
             <ChevronDown size={14} className="text-gray-400" />
           </button>
 
@@ -114,11 +151,11 @@ export default function AppLayout() {
               ))}
               <div className="border-t border-gray-800">
                 <button
-                  onClick={() => { navigate('/orgs/new'); setDropOpen(false) }}
+                  onClick={() => { navigate('/teams/new'); setDropOpen(false) }}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                 >
                   <Plus size={14} />
-                  New organization
+                  New team
                 </button>
                 {activeOrg && (
                   <button
@@ -126,7 +163,7 @@ export default function AppLayout() {
                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                   >
                     <Settings size={14} />
-                    Org settings
+                    Team settings
                   </button>
                 )}
               </div>

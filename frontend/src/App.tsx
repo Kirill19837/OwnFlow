@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectBoardPage from './pages/ProjectBoardPage'
 import NewOrgPage from './pages/NewOrgPage'
+import NewCompanyPage from './pages/NewCompanyPage'
 import OrgSettingsPage from './pages/OrgSettingsPage'
 import ProjectActivityPage from './pages/ProjectActivityPage'
 
@@ -23,12 +24,14 @@ export default function App() {
           <Route element={<AuthProvider />}>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
+              <Route path="/company/new" element={<NewCompanyPage />} />
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
                 <Route path="/new" element={<NewProjectPage />} />
                 <Route path="/projects/:projectId" element={<ProjectBoardPage />} />
                 <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
                 <Route path="/orgs/new" element={<NewOrgPage />} />
+                <Route path="/teams/new" element={<NewOrgPage />} />
                 <Route path="/orgs/:orgId/settings" element={<OrgSettingsPage />} />
               </Route>
             </Route>

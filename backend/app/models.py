@@ -5,10 +5,21 @@ from typing import Literal, Optional, List
 from datetime import datetime
 
 
-# ── Organizations ────────────────────────────────────────
+# ── Companies ────────────────────────────────────────────
+class Company(BaseModel):
+    id: str
+    name: str
+    slug: str
+    owner_id: str
+    created_at: datetime
+    my_role: Optional[str] = None
+
+
+# ── Organizations (Teams) ────────────────────────────────
 class OrgCreate(BaseModel):
     name: str
     owner_id: str
+    company_id: Optional[str] = None
     default_ai_model: str = "gpt-4o"
 
 
