@@ -2,7 +2,7 @@
 
 ---
 
-## 2026-04-22 | `TBD` — CI status checks + deploy injects Postmark vars
+## 2026-04-22 | `57d2c55` — CI status checks + deploy injects Postmark vars
 
 **CI / Deploy**
 - `.github/workflows/ci.yml` (new) — CI pipeline: frontend lint + type-check + build, backend ruff lint; runs on every push and PRs to `main`
