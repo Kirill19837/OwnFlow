@@ -2,6 +2,34 @@
 
 ---
 
+## 2026-04-22 | `TBD` — CI status checks + deploy injects Postmark vars
+
+**CI / Deploy**
+- `.github/workflows/ci.yml` (new) — CI pipeline: frontend lint + type-check + build, backend ruff lint; runs on every push and PRs to `main`
+- `.github/workflows/deploy.yml` — pass `POSTMARK_TOKEN` (secret) and `POSTMARK_FROM` (var) into backend `.env` on deploy
+- `docker-compose.prod.yml` — switched from `env_file` to explicit `environment:` entries for platform-injected secrets/vars
+
+---
+
+## 2026-04-22 | `28516a7` — Email-based org invites via Postmark, fix org isolation, fix infinite render loop
+
+**Backend**
+- `app/email.py` (new) — Postmark HTML invite email sender via `httpx`
+- `app/config.py` — added `postmark_token`, `postmark_from`, `postmark_enabled` property
+- `app/api/orgs.py` — full email invite flow: existing users added directly, new users get Postmark invite email + pending record; `GET /{org_id}` enriches members with emails from auth; `POST /accept-invites` auto-joins pending orgs on login
+- `supabase/migrations/004_org_invites.sql` (new) — `org_invites` table tracking pending/accepted/revoked invites
+- `app/api/projects.py` — guard: return `[]` if no `org_id`/`owner_id` provided (prevents cross-user data leak)
+- `docker-compose.prod.yml` — switched from `env_file` to explicit `environment:` entries so platform secrets/variables (`POSTMARK_TOKEN`, `POSTMARK_FROM`, etc.) are injected at deploy time
+
+**Frontend**
+- `OrgSettingsPage.tsx` — invite by email (not UUID), shows member emails, optimistic "invite sent" badge for pending invites
+- `Auth.tsx` — calls `POST /orgs/accept-invites` on every session load to auto-accept pending invites after login
+- `types.ts` — `OrgMember.email?`, `OrgPendingInvite` interface, `Organization.pending_invites?`
+- `store/orgStore.ts` — `setOrgs` falls back to `orgs[0]` if persisted `activeOrg` not found (prevents stale org after logout)
+- `components/AppLayout.tsx` — fixed infinite render loop (stable mutation refs); auto-creates default org for new users; clears org state on sign-out and user switch
+
+---
+
 ## 2026-04-18 | `fc7d941` — GitHub per-project PAT integration with auto PR creation
 
 Each project owner enters their own GitHub Personal Access Token + target repo in project settings. No shared GitHub App credentials required.

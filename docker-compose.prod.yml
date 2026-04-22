@@ -2,8 +2,14 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    env_file:
-      - ./backend/.env
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      POSTMARK_TOKEN: ${POSTMARK_TOKEN}
+      POSTMARK_FROM: ${POSTMARK_FROM}
     ports:
       - "127.0.0.1:8000:8000"
     networks:
