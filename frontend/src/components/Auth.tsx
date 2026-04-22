@@ -21,15 +21,18 @@ export function AuthProvider() {
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
-      await acceptInvitesIfNeeded(data.session)
       setSession(data.session)
       setReady(true)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      await acceptInvitesIfNeeded(session)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Only accept invites on a real sign-in, not on every session restore/refresh.
+      if (event === 'SIGNED_IN') {
+        await acceptInvitesIfNeeded(session)
+      }
       setSession(session)
     })
     return () => subscription.unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!ready) return null

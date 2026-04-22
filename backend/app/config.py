@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# Resolve .env relative to this file (backend/app/config.py → backend/.env)
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -28,7 +32,7 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",")]
 
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE)
 
 
 @lru_cache
