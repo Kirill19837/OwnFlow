@@ -6,6 +6,7 @@ create table if not exists companies (
   name       text not null,
   slug       text not null unique,
   owner_id   uuid not null,
+  phone      text,
   created_at timestamptz not null default now()
 );
 

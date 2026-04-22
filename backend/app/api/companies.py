@@ -25,6 +25,7 @@ class CompanyCreate(BaseModel):
     name: str
     owner_id: str
     default_ai_model: str = "gpt-4o"
+    phone: Optional[str] = None
 
 
 class TeamCreate(BaseModel):
@@ -47,6 +48,8 @@ def create_company(body: CompanyCreate):
         slug = f"{slug}-{str(uuid.uuid4())[:6]}"
     company_id = str(uuid.uuid4())
     company_row = {"id": company_id, "name": body.name, "slug": slug, "owner_id": body.owner_id}
+    if body.phone:
+        company_row["phone"] = body.phone
     db.table("companies").insert(company_row).execute()
     db.table("company_members").insert({
         "company_id": company_id,

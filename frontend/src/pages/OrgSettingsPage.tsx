@@ -57,7 +57,7 @@ export default function OrgSettingsPage() {
       const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
       const updated = orgs.map((o) => o.id === orgId ? { ...o, name } : o)
       setOrgs(updated)
-      if (activeOrg?.id === orgId) setActiveOrg({ ...activeOrg, name })
+      if (activeOrg && activeOrg.id === orgId) setActiveOrg({ ...activeOrg, name })
       setRenaming(false)
     },
   })
@@ -68,7 +68,7 @@ export default function OrgSettingsPage() {
       const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
       const remaining = orgs.filter((o) => o.id !== orgId)
       setOrgs(remaining)
-      if (activeOrg?.id === orgId) setActiveOrg(remaining[0] ?? null)
+      if (activeOrg && activeOrg.id === orgId) setActiveOrg(remaining[0] ?? null)
       qc.invalidateQueries({ queryKey: ['teams'] })
       navigate('/')
     },
