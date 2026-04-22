@@ -8,7 +8,7 @@
 
 ---
 
-## 2026-04-22 | `TBD` — Add Sentry error monitoring + fix deploy env injection
+## 2026-04-22 | `09e6e22` — Add Sentry error monitoring + fix deploy env injection
 
 **Backend**
 - `requirements.txt` — added `sentry-sdk[fastapi]`
