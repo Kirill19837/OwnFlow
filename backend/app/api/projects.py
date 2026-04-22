@@ -46,7 +46,7 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", 
     db = get_supabase()
     try:
         tasks = await breakdown_project(prompt, model=ai_model)
-        result = await plan_and_persist(project_id, tasks, sprint_days=sprint_days)
+        await plan_and_persist(project_id, tasks, sprint_days=sprint_days)
 
         # Auto-assign all sprints
         sprints_resp = (
@@ -56,7 +56,7 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", 
             await auto_assign(sprint["id"])
 
         db.table("projects").update({"status": "active"}).eq("id", project_id).execute()
-    except Exception as exc:
+    except Exception:
         db.table("projects").update({"status": "error"}).eq("id", project_id).execute()
         raise
 

@@ -53,7 +53,6 @@ async def plan_and_persist(
 
     current_sprint_tasks: List[int] = []
     current_hours = 0.0
-    sprint_num = 0
 
     def flush_sprint(task_indices: List[int], snum: int):
         sprint_start = start_date + timedelta(days=(snum - start_sprint_number) * sprint_days)

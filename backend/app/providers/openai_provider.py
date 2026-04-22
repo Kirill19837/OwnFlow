@@ -4,7 +4,6 @@ from openai import AsyncOpenAI
 from app.providers.base import AIProvider
 from app.config import get_settings
 from typing import List, Optional
-import json
 
 
 class OpenAIProvider(AIProvider):

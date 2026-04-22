@@ -193,7 +193,6 @@ def invite_member(org_id: str, body: OrgInvite):
 def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     db = get_supabase()
     settings = get_settings()
-    invite_tracking_enabled = True
 
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "role must be owner, admin, or member")
@@ -265,7 +264,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
         }).execute()
     except Exception:
         # Migration may not be applied yet; continue with invite email flow.
-        invite_tracking_enabled = False
+        pass
 
     invite_resp = None
     invite_error: str | None = None
@@ -291,7 +290,6 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                 or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
             )
             invite_resp = link_resp
-            invited_user_id = _extract_user_id(link_resp)
             send_invite_email(
                 to_email=email,
                 invite_url=action_link or f"{settings.frontend_url}/login",
@@ -308,7 +306,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     else:
         # Fallback: Supabase built-in mailer (subject to rate limits on free tier).
         try:
-            invite_resp = db.auth.admin.invite_user_by_email(
+            db.auth.admin.invite_user_by_email(
                 email,
                 {
                     "data": {
@@ -328,8 +326,6 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                 invite_error = "already_exists"
             else:
                 raise HTTPException(400, f"Failed to send invite: {exc}")
-        invited_user_id = _extract_user_id(invite_resp) if invite_resp else None
-
     # Do NOT add to org_members yet — user hasn't confirmed the invite.
     # They will be added when they log in and accept-invites is called.
 
