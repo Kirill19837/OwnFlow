@@ -296,3 +296,10 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - **TaskDrawer**: copilot panel now starts collapsed (`useState(false)`) — opens only when needed
 - **TaskDrawer**: Activity icon button (📊) added next to close button — navigates to `/projects/:id/activity?task=<taskId>`
 - **ProjectActivityPage**: reads `?task=` query param on mount and pre-filters the Chat Log tab to that specific task
+
+## 2026-04-22 — Company/Team architecture refactor (c431ad8)
+- Introduced Company as top-level tenant boundary (migration 005_companies.sql)
+- Added /companies backend API (create, my, teams listing)
+- Renamed Org→Team throughout UI; /company/new onboarding page for new users
+- Team rename (inline) and delete (danger zone) in settings page
+- invite_org scoping + company-aware accept-invites flow

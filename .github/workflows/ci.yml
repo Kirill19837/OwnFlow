@@ -4,8 +4,15 @@ on:
   push:
     branches-ignore:
       - 'dependabot/**'
+    paths-ignore:
+      - '*.md'
+      - 'pitch/**'
+      - 'supabase/seed.sql'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'pitch/**'
 
 jobs:
   frontend:
