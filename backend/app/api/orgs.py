@@ -266,7 +266,6 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
         # Migration may not be applied yet; continue with invite email flow.
         pass
 
-    invite_resp = None
     invite_error: str | None = None
 
     if settings.postmark_enabled:
@@ -289,7 +288,6 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                 getattr(link_resp, "action_link", None)
                 or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
             )
-            invite_resp = link_resp
             send_invite_email(
                 to_email=email,
                 invite_url=action_link or f"{settings.frontend_url}/login",
