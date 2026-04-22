@@ -1,18 +1,32 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import api from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 
 export function AuthProvider() {
   const { setSession } = useAuthStore()
   const [ready, setReady] = useState(false)
 
+  const acceptInvitesIfNeeded = async (session: any) => {
+    const email = session?.user?.email
+    const userId = session?.user?.id
+    if (!email || !userId) return
+    try {
+      await api.post('/orgs/accept-invites', { user_id: userId, email })
+    } catch {
+      // Non-blocking: auth flow should continue even if invite sync fails.
+    }
+  }
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      await acceptInvitesIfNeeded(data.session)
       setSession(data.session)
       setReady(true)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await acceptInvitesIfNeeded(session)
       setSession(session)
     })
     return () => subscription.unsubscribe()

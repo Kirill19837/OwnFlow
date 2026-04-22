@@ -21,8 +21,10 @@ export default function OrgSettingsPage() {
   const qc = useQueryClient()
   const { updateOrgModel } = useOrgStore()
   const { session } = useAuthStore()
-  const [inviteId, setInviteId] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
+  const [inviteMessage, setInviteMessage] = useState('')
+  const [localPendingInvites, setLocalPendingInvites] = useState<{ email: string; role: string }[]>([])
   const [saved, setSaved] = useState(false)
 
   const { data: org, isLoading } = useQuery({
@@ -44,9 +46,27 @@ export default function OrgSettingsPage() {
 
   const invite = useMutation({
     mutationFn: () =>
-      api.post(`/orgs/${orgId}/members`, { user_id: inviteId, role: inviteRole }),
-    onSuccess: () => {
-      setInviteId('')
+      api.post(`/orgs/${orgId}/invites`, {
+        email: inviteEmail,
+        role: inviteRole,
+        invited_by_user_id: session!.user.id,
+      }),
+    onSuccess: (res: any) => {
+      const sentEmail = inviteEmail.trim().toLowerCase()
+      const sentRole = inviteRole
+      setInviteEmail('')
+      const payload = res?.data || {}
+      if (payload.status === 'invite_queued') {
+        setInviteMessage(`Invite saved — email couldn't be sent right now (rate limit). It will be sent later.`)
+        setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: sentRole }])
+      } else if (payload.status === 'added_existing_user') {
+        setInviteMessage(`${payload.email} is already registered and was added to the org.`)
+      } else {
+        const who = payload.invited_by_email ? ` by ${payload.invited_by_email}` : ''
+        const orgName = payload.organization ? ` to ${payload.organization}` : ''
+        setInviteMessage(`Invite sent${who}${orgName}.`)
+        setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: sentRole }])
+      }
       qc.invalidateQueries({ queryKey: ['org', orgId] })
     },
   })
@@ -114,7 +134,8 @@ export default function OrgSettingsPage() {
             {(org.members ?? []).map((m) => (
               <div key={m.user_id} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
                 <div>
-                  <p className="text-sm text-white font-mono">{m.user_id}</p>
+                  <p className="text-sm text-white font-mono">{m.email ?? m.user_id}</p>
+                  {!m.email && <p className="text-[11px] text-gray-600">{m.user_id}</p>}
                   <p className="text-xs text-gray-500 capitalize">{m.role}</p>
                 </div>
                 {m.user_id !== session?.user.id && (
@@ -129,15 +150,46 @@ export default function OrgSettingsPage() {
             ))}
           </div>
 
-          {/* Invite by user ID */}
+          {(() => {
+            const serverEmails = new Set((org.pending_invites ?? []).map((i) => i.email))
+            const merged = [
+              ...(org.pending_invites ?? []),
+              ...localPendingInvites
+                .filter((i) => !serverEmails.has(i.email))
+                .map((i) => ({ id: i.email, email: i.email, role: i.role as any, invited_by_email: undefined, invited_at: '', status: 'pending' as const })),
+            ]
+            if (merged.length === 0) return null
+            return (
+              <div className="mb-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Pending invites</p>
+                <div className="space-y-2">
+                  {merged.map((inv) => (
+                    <div key={inv.id} className="flex items-center justify-between px-3 py-2 bg-gray-800/60 rounded-lg">
+                      <div>
+                        <p className="text-sm text-white">{inv.email}</p>
+                        <p className="text-xs text-gray-500">
+                          {inv.role}{inv.invited_by_email ? ` • invited by ${inv.invited_by_email}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
+                        invite sent
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Invite by email */}
           <div className="border-t border-gray-800 pt-4">
-            <p className="text-sm text-gray-400 mb-2">Add member by Supabase user ID</p>
+            <p className="text-sm text-gray-400 mb-2">Invite member by email</p>
             <div className="flex gap-2">
               <input
-                type="text"
-                placeholder="User UUID"
-                value={inviteId}
-                onChange={(e) => setInviteId(e.target.value)}
+                type="email"
+                placeholder="teammate@example.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
                 className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
               <select
@@ -150,13 +202,14 @@ export default function OrgSettingsPage() {
               </select>
               <button
                 onClick={() => invite.mutate()}
-                disabled={!inviteId.trim() || invite.isPending}
+                disabled={!inviteEmail.trim() || invite.isPending || !session?.user.id}
                 className="flex items-center gap-1 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
               >
                 <UserPlus size={14} />
-                Add
+                Invite
               </button>
             </div>
+            {inviteMessage && <p className="text-xs text-green-400 mt-2">{inviteMessage}</p>}
           </div>
         </section>
       </div>

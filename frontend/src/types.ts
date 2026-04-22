@@ -7,13 +7,24 @@ export interface Organization {
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'
   members?: OrgMember[]
+  pending_invites?: OrgPendingInvite[]
 }
 
 export interface OrgMember {
   org_id: string
   user_id: string
+  email?: string
   role: 'owner' | 'admin' | 'member'
   joined_at: string
+}
+
+export interface OrgPendingInvite {
+  id: string
+  email: string
+  role: 'owner' | 'admin' | 'member'
+  invited_by_email?: string
+  invited_at: string
+  status: 'pending' | 'accepted' | 'revoked'
 }
 
 export type ActorType = 'human' | 'ai'

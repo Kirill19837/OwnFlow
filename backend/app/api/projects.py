@@ -167,6 +167,8 @@ async def list_projects(owner_id: str = "", org_id: str = ""):
         q = q.eq("org_id", org_id)
     elif owner_id:
         q = q.eq("owner_id", owner_id)
+    else:
+        return []
     return q.execute().data or []
 
 

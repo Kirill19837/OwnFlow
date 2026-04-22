@@ -18,7 +18,7 @@ export const useOrgStore = create<OrgStore>()(
       setOrgs: (orgs) => set((s) => ({
         orgs,
         // keep activeOrg in sync if it was updated
-        activeOrg: s.activeOrg ? (orgs.find((o) => o.id === s.activeOrg!.id) ?? s.activeOrg) : (orgs[0] ?? null),
+        activeOrg: s.activeOrg ? (orgs.find((o) => o.id === s.activeOrg!.id) ?? orgs[0] ?? null) : (orgs[0] ?? null),
       })),
       setActiveOrg: (org) => set({ activeOrg: org }),
       updateOrgModel: (orgId, model) =>

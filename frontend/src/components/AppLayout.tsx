@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useOrgStore } from '../store/orgStore'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Organization } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings } from 'lucide-react'
@@ -11,8 +11,31 @@ export default function AppLayout() {
   const { signOut, session } = useAuthStore()
   const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [dropOpen, setDropOpen] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
+  const lastUserIdRef = useRef<string | null>(null)
+  const autoCreateAttemptRef = useRef<string | null>(null)
+
+  const { mutate: createDefaultOrgMutate, isPending: isCreatingDefaultOrg } = useMutation({
+    mutationFn: async () => {
+      const emailPrefix = session?.user.email?.split('@')[0]?.trim() || 'My'
+      const first = emailPrefix[0]?.toUpperCase() || 'M'
+      const rest = emailPrefix.slice(1)
+      const name = `${first}${rest} Organization`
+      const { data } = await api.post<Organization>('/orgs', {
+        name,
+        owner_id: session!.user.id,
+        default_ai_model: 'gpt-4o',
+      })
+      return data
+    },
+    onSuccess: (org) => {
+      setOrgs([org])
+      setActiveOrg(org)
+      queryClient.setQueryData(['orgs', session?.user.id], [org])
+    },
+  })
 
   const { data } = useQuery({
     queryKey: ['orgs', session?.user.id],
@@ -22,8 +45,23 @@ export default function AppLayout() {
   })
 
   useEffect(() => {
-    if (data) setOrgs(data)
-  }, [data])
+    const currentUserId = session?.user.id ?? null
+    if (lastUserIdRef.current && lastUserIdRef.current !== currentUserId) {
+      setOrgs([])
+      setActiveOrg(null)
+      autoCreateAttemptRef.current = null
+    }
+    lastUserIdRef.current = currentUserId
+  }, [session?.user.id, setOrgs, setActiveOrg])
+
+  useEffect(() => {
+    if (!data || !session?.user.id) return
+    setOrgs(data)
+    if (data.length === 0 && autoCreateAttemptRef.current !== session.user.id && !isCreatingDefaultOrg) {
+      autoCreateAttemptRef.current = session.user.id
+      createDefaultOrgMutate()
+    }
+  }, [data, session?.user.id, setOrgs, isCreatingDefaultOrg, createDefaultOrgMutate])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -36,6 +74,8 @@ export default function AppLayout() {
 
   const handleSignOut = async () => {
     await signOut()
+    setOrgs([])
+    setActiveOrg(null)
     navigate('/login')
   }
 
