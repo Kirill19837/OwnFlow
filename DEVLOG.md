@@ -2,6 +2,26 @@
 
 ---
 
+## 2026-04-22 | `TBD` — Fix deploy: consolidate env into single .env.prod for docker compose
+
+- `.github/workflows/deploy.yml` — merged backend + frontend vars into one `.env.prod` file so `docker compose --env-file` interpolates all `${VAR}` references in `docker-compose.prod.yml` (was writing separate `backend/.env` that never reached compose interpolation, causing backend 500 on startup)
+
+---
+
+## 2026-04-22 | `TBD` — Add Sentry error monitoring + fix deploy env injection
+
+**Backend**
+- `requirements.txt` — added `sentry-sdk[fastapi]`
+- `app/config.py` — added `sentry_dsn: str = ""` setting
+- `app/main.py` — init Sentry before app creation (only when `SENTRY_DSN` is set); added `GET /sentry-debug` endpoint to verify Sentry capture
+- `backend/.env` — added `SENTRY_DSN` for local dev
+
+**Deploy**
+- `deploy.yml` — consolidated backend + frontend vars into single `.env.prod` so `docker compose --env-file` interpolates all `${VAR}` references in `docker-compose.prod.yml` (fixes backend 500 on startup — previously backend vars were written to `backend/.env` which was never read by compose); added `SECRET_SENTRY_DSN` injection
+- `docker-compose.prod.yml` — added `SENTRY_DSN: ${SENTRY_DSN}` to backend environment block
+
+---
+
 ## 2026-04-22 | `2539f58` — Fix CI: sync package-lock.json
 
 - `frontend/package-lock.json` — regenerated to include missing `@emnapi/core` and `@emnapi/runtime` packages that were out of sync

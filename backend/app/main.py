@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.api import projects, tasks, actors, orgs, github
 
 settings = get_settings()
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        send_default_pii=True,
+        traces_sample_rate=0.2,
+    )
 
 app = FastAPI(title="OwnFlow API", version="0.1.0")
 
@@ -27,3 +35,8 @@ app.include_router(github.router, prefix="/github", tags=["github"])
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0

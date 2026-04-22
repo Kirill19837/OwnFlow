@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     postmark_token: str = ""
     postmark_from: str = ""
 
+    # Sentry (optional – error monitoring)
+    sentry_dsn: str = ""
+
     @property
     def postmark_enabled(self) -> bool:
         return bool(self.postmark_token and self.postmark_from)

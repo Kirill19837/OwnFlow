@@ -9,3 +9,4 @@ python-dotenv==1.0.1
 httpx==0.27.2
 sse-starlette==2.1.3
 python-multipart==0.0.12
+sentry-sdk[fastapi]==2.24.1
