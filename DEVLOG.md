@@ -2,7 +2,32 @@
 
 ---
 
-## 2026-04-22 | `TBD` — Harden invite flow: unconfirmed-user fix, notification email, tests
+## 2026-04-22 | `e3addee` — Fix remaining ruff F841: remove unused invite_resp
+
+- `app/api/orgs.py` — removed `invite_resp = None` initialisation and `invite_resp = link_resp` assignment (variable was never read after the postmark path was cleaned up)
+
+---
+
+## 2026-04-22 | `e36acc6` — Fix all ruff lint errors; add Makefile pre-commit checks
+
+- `app/api/orgs.py` — removed unused `invite_tracking_enabled` and `invite_resp` variables
+- `app/api/projects.py` — removed unused `result` assignment and renamed `exc` → bare `except`
+- `app/main.py` — removed unused `division_by_zero` assignment in sentry-debug endpoint (`1 / 0` inline)
+- `app/providers/openai_provider.py` — removed unused `import json`
+- `app/services/sprint_planner.py` — removed unused `sprint_num = 0` variable
+- `Makefile` — added `make check` (runs both), `make check-backend` (ruff + pytest), `make check-frontend` (eslint + tsc + build)
+
+---
+
+
+
+- `requirements.txt` — removed `pytest` and `pytest-httpx` (were causing `httpx` version conflict in Docker build: `pytest-httpx==0.35` needs `httpx==0.28.*` but `supabase 2.7.4` needs `httpx<0.28`)
+- `requirements-dev.txt` — new file: `-r requirements.txt` + `pytest==8.3.5` for local dev and CI
+- `.github/workflows/ci.yml` — backend job now installs `requirements-dev.txt`, renamed to "Backend — lint & test", added `python -m pytest tests/ -v` step with placeholder Supabase env vars
+
+---
+
+
 
 **Security fix**
 - `app/api/orgs.py` — `invite_member_by_email` now checks `email_confirmed_at` before treating an auth user as "existing"; unconfirmed/ghost users (created by prior `generate_link` calls) are routed through the invite flow instead of being added directly to `org_members`. This closed a gap where a pending user could gain org access without ever verifying email ownership.
