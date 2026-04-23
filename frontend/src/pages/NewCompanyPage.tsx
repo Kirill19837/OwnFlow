@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useCompanyStore } from '../store/companyStore'
 import { useOrgStore } from '../store/orgStore'
@@ -54,6 +54,18 @@ export default function NewCompanyPage() {
   const { setCompany } = useCompanyStore()
   const { setOrgs, setActiveOrg } = useOrgStore()
   const navigate = useNavigate()
+
+  // Guard: if the user already belongs to a company, send them to the dashboard.
+  // This prevents invited members from creating duplicate companies.
+  const { data: existingCompany, isSuccess: companyChecked } = useQuery({
+    queryKey: ['company', session?.user.id],
+    queryFn: () =>
+      api.get<{ id: string } | null>('/companies/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
+    enabled: !!session,
+  })
+  useEffect(() => {
+    if (companyChecked && existingCompany) navigate('/', { replace: true })
+  }, [existingCompany, companyChecked, navigate])
 
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')

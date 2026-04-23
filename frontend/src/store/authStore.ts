@@ -6,7 +6,9 @@ import api from '../lib/api'
 interface AuthStore {
   session: Session | null
   loading: boolean
+  needsPassword: boolean
   setSession: (s: Session | null) => void
+  setNeedsPassword: (v: boolean) => void
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<{ confirmationSent: true }>
   signOut: () => Promise<void>
@@ -15,7 +17,9 @@ interface AuthStore {
 export const useAuthStore = create<AuthStore>((set) => ({
   session: null,
   loading: true,
+  needsPassword: false,
   setSession: (session) => set({ session, loading: false }),
+  setNeedsPassword: (needsPassword) => set({ needsPassword }),
   signIn: async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error

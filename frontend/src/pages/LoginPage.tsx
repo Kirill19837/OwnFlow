@@ -1,11 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import api from '../lib/api'
 import { Layers, Mail } from 'lucide-react'
 
+const MAGIC_LINK_COOLDOWN_MS = 60 * 60 * 1000 // 1 hour
+
+function getMagicLinkCooldownRemaining(email: string): number {
+  try {
+    const raw = localStorage.getItem(`ml_sent_${email}`)
+    if (!raw) return 0
+    const sentAt = parseInt(raw, 10)
+    const elapsed = Date.now() - sentAt
+    return Math.max(0, MAGIC_LINK_COOLDOWN_MS - elapsed)
+  } catch {
+    return 0
+  }
+}
+
+function formatMinutes(ms: number) {
+  return Math.ceil(ms / 60_000)
+}
+
 export default function LoginPage() {
-  const { signIn, signUp } = useAuthStore()
+  const { signIn, signUp, session } = useAuthStore()
   const navigate = useNavigate()
+
+  // Already logged in → go to app
+  useEffect(() => {
+    if (session) navigate('/', { replace: true })
+  }, [session, navigate])
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'login' | 'signup'>('login')
@@ -13,9 +38,26 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [signedUpEmail, setSignedUpEmail] = useState<string | null>(null)
 
+  // Magic link state
+  const [showMagicLink, setShowMagicLink] = useState(false)
+  const [magicLinkSent, setMagicLinkSent] = useState(false)
+  const [magicLinkLoading, setMagicLinkLoading] = useState(false)
+  const [magicLinkCooldown, setMagicLinkCooldown] = useState(0)
+
+  // Refresh cooldown display every minute
+  useEffect(() => {
+    if (!showMagicLink) return
+    const refresh = () => setMagicLinkCooldown(getMagicLinkCooldownRemaining(email))
+    refresh()
+    const id = setInterval(refresh, 30_000)
+    return () => clearInterval(id)
+  }, [showMagicLink, email])
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setShowMagicLink(false)
+    setMagicLinkSent(false)
     setLoading(true)
     try {
       if (mode === 'login') {
@@ -26,9 +68,31 @@ export default function LoginPage() {
         setSignedUpEmail(email)
       }
     } catch (err: unknown) {
-      setError((err as Error).message ?? 'Something went wrong')
+      const msg = (err as Error).message ?? 'Something went wrong'
+      setError(msg)
+      // Detect wrong-password / invalid credentials → offer magic link
+      if (mode === 'login' && /invalid|credentials|password|incorrect/i.test(msg)) {
+        setShowMagicLink(true)
+        setMagicLinkCooldown(getMagicLinkCooldownRemaining(email))
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const sendMagicLink = async () => {
+    if (magicLinkCooldown > 0 || magicLinkLoading) return
+    setMagicLinkLoading(true)
+    try {
+      await api.post('/auth/magic-link', { email })
+      localStorage.setItem(`ml_sent_${email}`, String(Date.now()))
+      setMagicLinkCooldown(MAGIC_LINK_COOLDOWN_MS)
+      setMagicLinkSent(true)
+    } catch {
+      // Still show success to avoid user enumeration
+      setMagicLinkSent(true)
+    } finally {
+      setMagicLinkLoading(false)
     }
   }
 
@@ -98,6 +162,34 @@ export default function LoginPage() {
                 />
               </div>
               {error && <p className="text-red-400 text-sm">{error}</p>}
+
+              {showMagicLink && (
+                <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 text-sm">
+                  {magicLinkSent ? (
+                    <p className="text-purple-300">
+                      Magic link sent to <strong>{email}</strong> — check your inbox.
+                    </p>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-400">Trouble signing in?</span>
+                      {magicLinkCooldown > 0 ? (
+                        <span className="text-gray-500 text-xs">
+                          Try again in {formatMinutes(magicLinkCooldown)} min
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={sendMagicLink}
+                          disabled={magicLinkLoading}
+                          className="text-purple-400 hover:text-purple-300 font-medium disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {magicLinkLoading ? 'Sending…' : 'Send magic link'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 type="submit"
                 disabled={loading}

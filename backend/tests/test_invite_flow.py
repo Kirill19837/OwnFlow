@@ -121,7 +121,8 @@ def test_invite_new_email_sends_invite(client):
 # 2. Invite a confirmed existing user — adds to org directly, sends notification
 # ---------------------------------------------------------------------------
 
-def test_invite_confirmed_existing_user_adds_directly(client):
+def test_invite_confirmed_existing_user_goes_through_pending_flow(client):
+    """Confirmed existing Supabase users must also go through the pending invite flow."""
     db = MagicMock()
 
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
@@ -134,6 +135,9 @@ def test_invite_confirmed_existing_user_adds_directly(client):
     db.auth.admin.list_users.return_value = [owner_user, existing]
 
     db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+
+    # generate_link raises "already registered" for a confirmed user
+    db.auth.admin.generate_link.side_effect = Exception("User already registered")
 
     with _patch_db(db):
         with patch("app.api.orgs.send_added_to_org_email") as mock_notify:
@@ -151,7 +155,9 @@ def test_invite_confirmed_existing_user_adds_directly(client):
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["status"] == "added_existing_user"
+    # Status must NOT be "added_existing_user" — invite stays pending
+    assert body["status"] == "invite_sent"
+    # A notification email should still be sent so user knows to log in
     mock_notify.assert_called_once()
     assert mock_notify.call_args.kwargs["to_email"] == INVITEE_EMAIL
 

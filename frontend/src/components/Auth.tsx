@@ -24,6 +24,15 @@ export function AuthProvider() {
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
+      // For already-logged-in users visiting /login?invite_org=xxx,
+      // SIGNED_IN never fires — accept the invite here instead.
+      if (data.session) {
+        const params = new URLSearchParams(window.location.search)
+        const inviteOrg = params.get('invite_org') ?? undefined
+        if (inviteOrg) {
+          await acceptInvitesIfNeeded(data.session, inviteOrg)
+        }
+      }
       setSession(data.session)
       setReady(true)
     })
@@ -34,6 +43,12 @@ export function AuthProvider() {
         const params = new URLSearchParams(window.location.search)
         const inviteOrg = params.get('invite_org') ?? undefined
         await acceptInvitesIfNeeded(session, inviteOrg)
+
+        // Detect magic-link / invite sign-in — user needs to set a password.
+        const hashType = new URLSearchParams(window.location.hash.slice(1)).get('type')
+        if (hashType === 'invite' || hashType === 'magiclink') {
+          useAuthStore.getState().setNeedsPassword(true)
+        }
       }
       setSession(session)
     })

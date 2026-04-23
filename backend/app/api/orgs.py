@@ -223,44 +223,9 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     inviter_user = next((u for u in users if _user_id(u) == body.invited_by_user_id), None)
     inviter_email = (_user_email(inviter_user) or "Unknown").strip()
 
-    existing_user = next((u for u in users if (_user_email(u) or "").lower() == email), None)
-
-    # Only treat as existing if email is confirmed — unconfirmed users (waiting for
-    # verification) should go through the invite flow so they get a proper invite link.
-    def _is_confirmed(user) -> bool:
-        confirmed = getattr(user, "email_confirmed_at", None) or (
-            user.get("email_confirmed_at") if isinstance(user, dict) else None
-        )
-        return bool(confirmed)
-
-    existing_user_id = _user_id(existing_user) if (existing_user and _is_confirmed(existing_user)) else None
-    if existing_user_id:
-        company_id = (org.data or {}).get("company_id")
-        row = {"org_id": org_id, "user_id": existing_user_id, "role": body.role}
-        db.table("org_members").upsert(row).execute()
-        if company_id:
-            db.table("company_members").upsert({
-                "company_id": company_id,
-                "user_id": existing_user_id,
-                "role": body.role,
-            }).execute()
-        try:
-            send_added_to_org_email(
-                to_email=email,
-                org_name=org.data["name"],
-                inviter_email=inviter_email,
-                role=body.role,
-                frontend_url=settings.frontend_url,
-            )
-        except Exception:
-            pass  # Non-blocking — member was added regardless
-        return {
-            "status": "added_existing_user",
-            "email": email,
-            "invited_by_email": inviter_email,
-            "organization": org.data["name"],
-            **row,
-        }
+    # Always use the pending invite flow — even for confirmed existing users.
+    # They will be added to the org when they next log in and accept-invites runs.
+    # This avoids adding users to teams without their knowledge.
 
     try:
         db.table("org_invites").upsert({
@@ -280,6 +245,8 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
 
     if settings.postmark_enabled:
         # Use generate_link + Postmark: bypasses Supabase email rate limits entirely.
+        # For confirmed existing users, generate_link(type=invite) fails — send a
+        # login notification email instead so they know to log in and accept.
         try:
             link_resp = db.auth.admin.generate_link({
                 "type": "invite",
@@ -308,7 +275,18 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
         except Exception as exc:
             msg = str(exc).lower()
             if "already registered" in msg or "already been invited" in msg:
-                invite_error = "already_exists"
+                # User has a confirmed account — send a login notification instead
+                login_url = f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}"
+                try:
+                    send_added_to_org_email(
+                        to_email=email,
+                        org_name=org.data["name"],
+                        inviter_email=inviter_email,
+                        role=body.role,
+                        frontend_url=login_url,
+                    )
+                except Exception:
+                    pass  # Non-blocking
             else:
                 raise HTTPException(400, f"Failed to send invite: {exc}")
     else:
@@ -340,8 +318,6 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
     status = "invite_sent"
     if invite_error == "rate_limit":
         status = "invite_queued"
-    elif invite_error == "already_exists":
-        status = "added_existing_user"
 
     return {
         "status": status,

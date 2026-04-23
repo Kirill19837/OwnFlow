@@ -7,9 +7,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Organization } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings, Building2 } from 'lucide-react'
+import SetPasswordModal from './SetPasswordModal'
 
 export default function AppLayout() {
-  const { signOut, session } = useAuthStore()
+  const { signOut, session, needsPassword } = useAuthStore()
   const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore()
   const { company, setCompany } = useCompanyStore()
   const navigate = useNavigate()
@@ -182,6 +183,7 @@ export default function AppLayout() {
       <main className="flex-1 flex flex-col">
         <Outlet />
       </main>
+      {needsPassword && <SetPasswordModal />}
     </div>
   )
 }
