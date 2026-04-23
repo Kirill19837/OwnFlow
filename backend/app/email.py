@@ -133,3 +133,64 @@ def send_added_to_org_email(
     if resp.status_code != 200:
         raise RuntimeError(f"Postmark error {resp.status_code}: {resp.text}")
 
+
+def send_signup_confirmation_email(
+    to_email: str,
+    confirmation_url: str,
+) -> None:
+    settings = get_settings()
+    if not settings.postmark_enabled:
+        raise RuntimeError("Postmark not configured")
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:32px;">
+  <div style="max-width:520px;margin:0 auto;background:#1e293b;border-radius:12px;padding:32px;border:1px solid #334155;">
+    <h1 style="font-size:22px;font-weight:700;color:#a78bfa;margin-bottom:8px;">OwnFlow</h1>
+    <h2 style="font-size:18px;font-weight:600;color:#f1f5f9;margin-bottom:16px;">
+      Confirm your email address
+    </h2>
+    <p style="color:#94a3b8;margin-bottom:8px;">
+      Thanks for signing up! Click the button below to confirm your email and activate your account.
+    </p>
+    <p style="color:#94a3b8;margin-bottom:28px;">
+      This link expires in <strong style="color:#e2e8f0">24 hours</strong>.
+    </p>
+    <a href="{confirmation_url}"
+       style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;
+              padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+      Confirm email address
+    </a>
+    <p style="color:#475569;font-size:12px;margin-top:28px;">
+      If you didn't create an OwnFlow account, you can safely ignore this email.
+    </p>
+  </div>
+</body>
+</html>
+"""
+
+    resp = httpx.post(
+        "https://api.postmarkapp.com/email",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Postmark-Server-Token": settings.postmark_token,
+        },
+        json={
+            "From": settings.postmark_from,
+            "To": to_email,
+            "Subject": "Confirm your OwnFlow account",
+            "HtmlBody": html,
+            "TextBody": (
+                "Thanks for signing up for OwnFlow!\n\n"
+                f"Confirm your email address: {confirmation_url}\n\n"
+                "This link expires in 24 hours."
+            ),
+            "MessageStream": "outbound",
+        },
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Postmark error {resp.status_code}: {resp.text}")

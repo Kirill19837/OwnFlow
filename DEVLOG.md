@@ -303,3 +303,16 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Renamed Org→Team throughout UI; /company/new onboarding page for new users
 - Team rename (inline) and delete (danger zone) in settings page
 - invite_org scoping + company-aware accept-invites flow
+
+## 2026-04-22 — Company registration page + team rename/delete (c25efb0)
+- NewCompanyPage: two-panel layout, required company name + phone, AI model radio selector
+- Add phone column to companies table (migration 006_company_phone.sql)
+- OrgSettingsPage: inline team rename (pencil icon) + danger-zone delete
+- Fix TS narrowing bug in rename/delete store updates
+- CI: skip runs on *.md / pitch / seed-only commits
+
+## 2026-04-22 — Custom Postmark signup confirmation emails (pending commit)
+- New POST /auth/signup backend endpoint: uses generate_link(type="signup") + Postmark
+- Bypasses Supabase rate-limited mailer for all signup confirmations
+- LoginPage: shows branded "Check your email" screen after signup
+- authStore.signUp() now calls backend instead of Supabase directly

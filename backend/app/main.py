@@ -4,7 +4,7 @@ import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.api import projects, tasks, actors, orgs, github, companies
+from app.api import projects, tasks, actors, orgs, github, companies, auth
 
 settings = get_settings()
 
@@ -30,6 +30,7 @@ app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(actors.router, prefix="/actors", tags=["actors"])
 app.include_router(orgs.router, prefix="/orgs", tags=["orgs"])
 app.include_router(companies.router)
+app.include_router(auth.router)
 app.include_router(github.router, prefix="/github", tags=["github"])
 
 
