@@ -49,14 +49,16 @@ export function AuthProvider() {
         const inviteOrg = params.get('invite_org') ?? undefined
         await acceptInvitesIfNeeded(session, inviteOrg)
 
-        // Check if the user has a password set — magic-link / invite users won't.
-        // Ask them to create one immediately after sign-in.
+        // Decode JWT AMR (Authentication Methods References) to detect OTP / invite
+        // sign-ins — these users have no password yet and need to set one.
+        // method "password" → already has a password; method "otp" → magic link / invite.
         try {
-          const { data } = await api.get<{ has_password: boolean }>('/auth/has-password', {
-            params: { user_id: session?.user?.id },
-          })
-          if (data && !data.has_password) {
-            useAuthStore.getState().setNeedsPassword(true)
+          const token = session?.access_token
+          if (token) {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+            const amr: Array<{ method: string }> = payload.amr ?? []
+            const isOtp = amr.some((a) => a.method === 'otp')
+            if (isOtp) useAuthStore.getState().setNeedsPassword(true)
           }
         } catch {
           // Non-blocking

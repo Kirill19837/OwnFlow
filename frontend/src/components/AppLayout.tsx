@@ -7,8 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Organization } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings, Building2 } from 'lucide-react'
-import SetPasswordModal from './SetPasswordModal'
-import SetNameModal from './SetNameModal'
+import CompleteProfileModal from './CompleteProfileModal'
 
 export default function AppLayout() {
   const { signOut, session, needsPassword, needsName } = useAuthStore()
@@ -184,8 +183,7 @@ export default function AppLayout() {
       <main className="flex-1 flex flex-col">
         <Outlet />
       </main>
-      {needsPassword && <SetPasswordModal />}
-      {!needsPassword && needsName && <SetNameModal />}
+      {(needsPassword || needsName) && <CompleteProfileModal />}
     </div>
   )
 }

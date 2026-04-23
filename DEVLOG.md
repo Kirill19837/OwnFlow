@@ -326,3 +326,10 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - **SetPasswordModal**: shown after magic-link/invite sign-in so user can set a permanent password
 - **POST /auth/magic-link**: Supabase generate_link + Postmark delivery
 - **Wrong-password magic link**: LoginPage surfaces "Send magic link" after failed password attempt, rate-limited 1h via localStorage
+
+## 2026-04-22 — User display name (fdebcad)
+
+- Signup form now collects full name (required field)
+- Backend writes full_name to user_metadata on signup
+- SetNameModal prompts existing users missing a name after sign-in
+- GET /auth/has-password replaces URL hash detection for SetPasswordModal
