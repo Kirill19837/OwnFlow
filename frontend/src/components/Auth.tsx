@@ -32,6 +32,11 @@ export function AuthProvider() {
         if (inviteOrg) {
           await acceptInvitesIfNeeded(data.session, inviteOrg)
         }
+        // Check name on session restore (existing sessions)
+        const name = data.session.user?.user_metadata?.full_name
+        if (!name || !String(name).trim()) {
+          useAuthStore.getState().setNeedsName(true)
+        }
       }
       setSession(data.session)
       setReady(true)
@@ -44,10 +49,23 @@ export function AuthProvider() {
         const inviteOrg = params.get('invite_org') ?? undefined
         await acceptInvitesIfNeeded(session, inviteOrg)
 
-        // Detect magic-link / invite sign-in — user needs to set a password.
-        const hashType = new URLSearchParams(window.location.hash.slice(1)).get('type')
-        if (hashType === 'invite' || hashType === 'magiclink') {
-          useAuthStore.getState().setNeedsPassword(true)
+        // Check if the user has a password set — magic-link / invite users won't.
+        // Ask them to create one immediately after sign-in.
+        try {
+          const { data } = await api.get<{ has_password: boolean }>('/auth/has-password', {
+            params: { user_id: session?.user?.id },
+          })
+          if (data && !data.has_password) {
+            useAuthStore.getState().setNeedsPassword(true)
+          }
+        } catch {
+          // Non-blocking
+        }
+
+        // Check if name is set
+        const name = session?.user?.user_metadata?.full_name
+        if (!name || !String(name).trim()) {
+          useAuthStore.getState().setNeedsName(true)
         }
       }
       setSession(session)

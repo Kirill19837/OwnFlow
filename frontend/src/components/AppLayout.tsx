@@ -8,9 +8,10 @@ import api from '../lib/api'
 import type { Company, Organization } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings, Building2 } from 'lucide-react'
 import SetPasswordModal from './SetPasswordModal'
+import SetNameModal from './SetNameModal'
 
 export default function AppLayout() {
-  const { signOut, session, needsPassword } = useAuthStore()
+  const { signOut, session, needsPassword, needsName } = useAuthStore()
   const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore()
   const { company, setCompany } = useCompanyStore()
   const navigate = useNavigate()
@@ -184,6 +185,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
       {needsPassword && <SetPasswordModal />}
+      {!needsPassword && needsName && <SetNameModal />}
     </div>
   )
 }

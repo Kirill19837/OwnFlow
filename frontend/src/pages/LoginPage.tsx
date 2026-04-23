@@ -33,6 +33,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -64,7 +65,7 @@ export default function LoginPage() {
         await signIn(email, password)
         navigate('/')
       } else {
-        await signUp(email, password)
+        await signUp(email, password, name)
         setSignedUpEmail(email)
       }
     } catch (err: unknown) {
@@ -131,7 +132,7 @@ export default function LoginPage() {
               {(['login', 'signup'] as const).map((m) => (
                 <button
                   key={m}
-                  onClick={() => { setMode(m); setError('') }}
+                  onClick={() => { setMode(m); setError(''); setName('') }}
                   className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                     mode === m ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
                   }`}
@@ -141,6 +142,19 @@ export default function LoginPage() {
               ))}
             </div>
             <form onSubmit={submit} className="space-y-4">
+              {mode === 'signup' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Full name</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Jane Smith"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Email</label>
                 <input

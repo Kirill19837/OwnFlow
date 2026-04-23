@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class SignupBody(BaseModel):
     email: str
     password: str
+    name: Optional[str] = None
 
 
 @router.post("/signup", status_code=201)
@@ -46,6 +48,16 @@ def signup(body: SignupBody):
     if not action_link:
         raise HTTPException(500, "Could not generate confirmation link.")
 
+    # Persist the display name in user_metadata if provided.
+    if body.name and body.name.strip():
+        try:
+            user_obj = getattr(link_resp, "user", None) or getattr(getattr(link_resp, "properties", None), "user", None)
+            user_id = getattr(user_obj, "id", None)
+            if user_id:
+                db.auth.admin.update_user_by_id(user_id, {"user_metadata": {"full_name": body.name.strip()}})
+        except Exception:
+            pass  # Non-blocking — account still created
+
     try:
         send_signup_confirmation_email(
             to_email=body.email,
@@ -55,6 +67,27 @@ def signup(body: SignupBody):
         raise HTTPException(500, f"Account created but failed to send confirmation email: {exc}")
 
     return {"status": "confirmation_sent", "email": body.email}
+
+
+@router.get("/has-password")
+def has_password(user_id: str):
+    """
+    Returns whether the user has an encrypted password set.
+    Used by the frontend to decide whether to prompt for password creation
+    after a magic-link or invite sign-in.
+    """
+    db = get_supabase()
+    try:
+        resp = db.auth.admin.get_user_by_id(user_id)
+        user = resp.user
+        # encrypted_password may be on the model directly or in model_extra (pydantic v2)
+        pw = getattr(user, "encrypted_password", None)
+        if pw is None:
+            pw = (getattr(user, "model_extra", None) or {}).get("encrypted_password")
+        return {"has_password": bool(pw)}
+    except Exception:
+        # Fail open — assume password exists to avoid forced modal on error
+        return {"has_password": True}
 
 
 class MagicLinkBody(BaseModel):

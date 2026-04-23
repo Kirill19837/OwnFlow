@@ -316,3 +316,13 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Bypasses Supabase rate-limited mailer for all signup confirmations
 - LoginPage: shows branded "Check your email" screen after signup
 - authStore.signUp() now calls backend instead of Supabase directly
+
+## 2026-04-22 — Invite flow overhaul + magic link sign-in (ee1df47)
+
+- **Pending-only invites**: all email invites now create a pending `org_invites` row; confirmed existing users get a login-notification email and are added to the org on next sign-in
+- **Auth.tsx session restore**: accept invites for already-logged-in users clicking invite links
+- **NewCompanyPage guard**: redirect to / if user already has a company
+- **LoginPage guard**: redirect to / if session already active
+- **SetPasswordModal**: shown after magic-link/invite sign-in so user can set a permanent password
+- **POST /auth/magic-link**: Supabase generate_link + Postmark delivery
+- **Wrong-password magic link**: LoginPage surfaces "Send magic link" after failed password attempt, rate-limited 1h via localStorage
