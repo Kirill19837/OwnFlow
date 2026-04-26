@@ -29,17 +29,11 @@ export function AuthProvider() {
       if (data.session) {
         const params = new URLSearchParams(window.location.search)
         const inviteOrg = params.get('invite_org') ?? undefined
-        const isInviteLanding = !!params.get('invite_org') || !!params.get('link_type')
         if (inviteOrg) {
           await acceptInvitesIfNeeded(data.session, inviteOrg)
         }
-        // Check name on session restore (existing sessions).
-        // Skip on invite landings — SIGNED_IN will handle name + password together
-        // once the password check completes, so both fields appear in one modal.
-        const name = data.session.user?.user_metadata?.full_name
-        if (!isInviteLanding && (!name || !String(name).trim())) {
-          useAuthStore.getState().setNeedsName(true)
-        }
+        // Name is collected only in the combined name+password modal (new invite flow).
+        // Existing users without a name can set it via the Profile page.
       }
       setSession(data.session)
       setReady(true)
@@ -70,17 +64,16 @@ export function AuthProvider() {
               )
               if (!data.has_password) {
                 useAuthStore.getState().setNeedsPassword(true)
+                // Ask for name alongside password only when the user is brand-new
+                const name = session?.user?.user_metadata?.full_name
+                if (!name || !String(name).trim()) {
+                  useAuthStore.getState().setNeedsName(true)
+                }
               }
             }
           }
         } catch {
           // Non-blocking
-        }
-
-        // Check if name is set
-        const name = session?.user?.user_metadata?.full_name
-        if (!name || !String(name).trim()) {
-          useAuthStore.getState().setNeedsName(true)
         }
       }
       setSession(session)

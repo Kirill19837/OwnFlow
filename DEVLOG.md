@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-04-26 | `e250c72` — Profile page, delete account, revoke invite, fix invite modal
+
+- `backend/app/api/teams.py` — `DELETE /teams/{team_id}/invites/{invite_id}` sets invite status to `revoked`
+- `backend/app/api/auth.py` — `DELETE /auth/account?user_id=...` removes user from `team_members`/`company_members` and deletes auth account; blocked with 403 if user is company owner
+- `frontend/src/pages/ProfilePage.tsx` — new page: edit display name, change password, delete account (delete blocked with explanation if company owner)
+- `frontend/src/pages/OrgSettingsPage.tsx` — `revokeInvite` mutation; trash icon on each pending invite row
+- `frontend/src/App.tsx` — `/profile` route added
+- `frontend/src/components/AppLayout.tsx` — user name in header is now a clickable link to `/profile` with `UserCircle` icon
+- `frontend/src/components/Auth.tsx` — on invite landing pages (`invite_org` or `link_type` in URL), skip early `setNeedsName` in `getSession` handler; let `SIGNED_IN` set both `needsName` + `needsPassword` together so only one combined modal appears
+
+---
+
 ## 2026-04-26 | `ab90989` — Frontend rename Organization→Team; fix team auto-select & password re-prompt
 
 - `frontend/src/types.ts` — `Organization` → `Team`, `OrgMember` → `TeamMember`, `OrgPendingInvite` → `TeamPendingInvite`
