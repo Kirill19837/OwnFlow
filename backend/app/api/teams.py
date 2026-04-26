@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from app.config import get_settings
 from app.db import get_supabase
 from app.email import send_invite_email, send_added_to_org_email
+from app.auth_deps import current_user_id
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -156,7 +157,18 @@ def get_team(team_id: str):
             .order("invited_at", desc=True)
             .execute()
         )
-        pending_invites = pending_resp.data or []
+        raw_invites = pending_resp.data or []
+        # Exclude invites for emails that are already active members
+        # (can happen if a previous accept-invites call failed mid-transaction).
+        member_emails = {(m.get("email") or "").lower() for m in members if m.get("email")}
+        pending_invites = [i for i in raw_invites if i["email"].lower() not in member_emails]
+        # Heal stuck invites in the background — mark them accepted.
+        stuck_ids = [i["id"] for i in raw_invites if i["email"].lower() in member_emails]
+        for sid in stuck_ids:
+            try:
+                db.table("team_invites").update({"status": "accepted"}).eq("id", sid).execute()
+            except Exception:
+                pass
     except Exception:
         pending_invites = []
 
@@ -206,7 +218,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
 
     inviter_member = (
         db.table("team_members")
-        .select("user_id")
+        .select("user_id,role")
         .eq("team_id", team_id)
         .eq("user_id", body.invited_by_user_id)
         .limit(1)
@@ -214,6 +226,9 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     )
     if not inviter_member.data:
         raise HTTPException(403, "Only team members can invite")
+    inviter_role = ROLE_NAMES.get(inviter_member.data[0]["role"], "member")
+    if inviter_role not in ("owner", "admin"):
+        raise HTTPException(403, "Only admins and owners can invite members")
 
     users_resp = db.auth.admin.list_users()
     users = _extract_auth_users(users_resp)
@@ -385,6 +400,8 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
             "user_id": body.user_id,
             "role": row["role"],
         }).execute()
+        # Always mark the invite accepted — even if the member row already existed
+        # (heals stuck invites from previous partial failures).
         db.table("team_invites").update({
             "status": "accepted",
             "accepted_user_id": body.user_id,
@@ -396,8 +413,21 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
 
 
 @router.delete("/{team_id}", status_code=204)
-def delete_team(team_id: str):
+def delete_team(team_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
+    member = (
+        db.table("team_members")
+        .select("role")
+        .eq("team_id", team_id)
+        .eq("user_id", requester_id)
+        .limit(1)
+        .execute()
+    )
+    if not member.data:
+        raise HTTPException(403, "Not a member of this team")
+    requester_role = ROLE_NAMES.get(member.data[0]["role"], "member")
+    if requester_role != "owner":
+        raise HTTPException(403, "Only the team owner can delete the team")
     db.table("team_members").delete().eq("team_id", team_id).execute()
     db.table("team_invites").delete().eq("team_id", team_id).execute()
     db.table("teams").delete().eq("id", team_id).execute()

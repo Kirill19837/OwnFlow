@@ -80,7 +80,7 @@ def test_invite_new_email_sends_invite(client):
 
     # inviter is a member
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
-        [{"user_id": OWNER_ID}]
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
 
     # list_users: only owner exists, invitee does NOT exist
@@ -132,7 +132,7 @@ def test_invite_confirmed_existing_user_goes_through_pending_flow(client):
 
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
-        [{"user_id": OWNER_ID}]
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
 
     existing = _user(INVITEE_ID, INVITEE_EMAIL, confirmed=True)
@@ -176,7 +176,7 @@ def test_invite_unconfirmed_user_goes_through_invite_flow(client):
 
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
-        [{"user_id": OWNER_ID}]
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
 
     # Invitee exists in auth but email_confirmed_at is None
@@ -225,7 +225,7 @@ def test_invite_invalid_email_returns_400(client):
     db = MagicMock()
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
-        [{"user_id": OWNER_ID}]
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
     db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
 
@@ -360,7 +360,7 @@ def test_invite_stores_role_as_uuid(client):
 
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
-        [{"user_id": OWNER_ID}]
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
     db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
     db.table.return_value.upsert.return_value.execute.return_value = _resp([])
@@ -389,3 +389,115 @@ def test_invite_stores_role_as_uuid(client):
     assert upsert_calls[0]["role"] == ROLE_MEMBER, (
         f"Expected UUID {ROLE_MEMBER!r}, got {upsert_calls[0]['role']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 10. member cannot invite (403)
+# ---------------------------------------------------------------------------
+
+def test_member_cannot_invite(client):
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+
+    # inviter exists but has ROLE_MEMBER (not admin/owner)
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"user_id": INVITEE_ID, "role": ROLE_MEMBER}]
+    )
+    db.auth.admin.list_users.return_value = [_user(INVITEE_ID, INVITEE_EMAIL)]
+
+    with _patch_db(db):
+        with patch("app.api.teams.get_settings") as mock_settings:
+            s = MagicMock()
+            s.postmark_enabled = False
+            mock_settings.return_value = s
+
+            resp = client.post(f"/teams/{ORG_ID}/invites", json={
+                "email": "new@example.com",
+                "role": "member",
+                "invited_by_user_id": INVITEE_ID,
+            })
+
+    assert resp.status_code == 403
+    assert "admin" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 11. admin can invite (201)
+# ---------------------------------------------------------------------------
+
+def test_admin_can_invite(client):
+    ADMIN_ID = str(uuid.uuid4())
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"user_id": ADMIN_ID, "role": ROLE_ADMIN}]
+    )
+    db.auth.admin.list_users.return_value = [_user(ADMIN_ID, "admin@example.com")]
+    db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+    db.auth.admin.invite_user_by_email.return_value = None
+
+    with _patch_db(db):
+        with patch("app.api.teams.get_settings") as mock_settings:
+            s = MagicMock()
+            s.postmark_enabled = False
+            mock_settings.return_value = s
+
+            resp = client.post(f"/teams/{ORG_ID}/invites", json={
+                "email": "new@example.com",
+                "role": "member",
+                "invited_by_user_id": ADMIN_ID,
+            })
+
+    assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# 12. non-owner cannot delete team (403)
+# ---------------------------------------------------------------------------
+
+def test_non_owner_cannot_delete_team(client):
+    db = MagicMock()
+
+    # admin member — not owner
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"role": ROLE_ADMIN}]
+    )
+
+    from app.main import app
+    from app.auth_deps import current_user_id
+    app.dependency_overrides[current_user_id] = lambda: INVITEE_ID
+    try:
+        with _patch_db(db):
+            resp = client.delete(f"/teams/{ORG_ID}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+    assert "owner" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 13. owner can delete team (204)
+# ---------------------------------------------------------------------------
+
+def test_owner_can_delete_team(client):
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"role": ROLE_OWNER}]
+    )
+    db.table.return_value.delete.return_value.eq.return_value.execute.return_value = _resp([])
+
+    from app.main import app
+    from app.auth_deps import current_user_id
+    app.dependency_overrides[current_user_id] = lambda: OWNER_ID
+    try:
+        with _patch_db(db):
+            resp = client.delete(f"/teams/{ORG_ID}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 204

@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-26 | `1384389` — Fix 500 on accept-invites; guard company/new redirect on join flow
+
+- `frontend/src/components/Auth.tsx` — `accept-invites` is now only called when the URL contains `?invite_org=...`; regular sign-ins never touch the endpoint
+- `backend/app/api/teams.py` — wrapped `accept_pending_invites` in try/except so any unexpected error logs and returns `{"accepted": 0}` instead of 500
+- `frontend/src/components/AppLayout.tsx` — skip `/company/new` redirect when `linkType === 'join_company'` (user is mid-invite-acceptance, company membership is being created)
+
+---
+
 ## 2026-04-26 | `6a336e0` — Never show name-only modal
 
 - `frontend/src/components/Auth.tsx` — removed all standalone `setNeedsName` calls; name is now only collected together with the password modal for brand-new invited users (no password set). Existing users without a name can update it via the Profile page.

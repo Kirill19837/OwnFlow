@@ -83,7 +83,7 @@ export default function ProfilePage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const deleteAccount = useMutation({
-    mutationFn: () => api.delete(`/auth/account?user_id=${session!.user.id}`),
+    mutationFn: () => api.delete(`/auth/account`),
     onSuccess: async () => {
       await supabase.auth.signOut()
       signOut()

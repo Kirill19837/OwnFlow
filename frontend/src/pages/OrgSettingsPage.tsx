@@ -126,6 +126,10 @@ export default function OrgSettingsPage() {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading…</div>
   }
 
+  const myRole = org.my_role ?? 'member'
+  const canInvite = myRole === 'owner' || myRole === 'admin'
+  const canDelete = myRole === 'owner'
+
   return (
     <div className="max-w-2xl mx-auto w-full px-6 py-10">
       <button onClick={() => navigate('/')} className="flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
@@ -282,7 +286,8 @@ export default function OrgSettingsPage() {
             )
           })()}
 
-          {/* Invite by email */}
+          {/* Invite by email — admins and owners only */}
+          {canInvite && (
           <div className="border-t border-gray-800 pt-4">
             <p className="text-sm text-gray-400 mb-2">Invite member by email</p>
             <div className="flex gap-2">
@@ -312,9 +317,11 @@ export default function OrgSettingsPage() {
             </div>
             {inviteMessage && <p className="text-xs text-green-400 mt-2">{inviteMessage}</p>}
           </div>
+          )}
         </section>
 
-        {/* Danger zone */}
+        {/* Danger zone — owners only */}
+        {canDelete && (
         <section className="bg-gray-900 border border-red-900/50 rounded-xl p-5">
           <h2 className="font-semibold text-red-400 mb-1">Danger zone</h2>
           <p className="text-gray-500 text-sm mb-4">Permanently delete this team and all its projects. This cannot be undone.</p>
@@ -340,6 +347,7 @@ export default function OrgSettingsPage() {
             </div>
           )}
         </section>
+        )}
       </div>
     </div>
   )

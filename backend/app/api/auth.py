@@ -1,12 +1,13 @@
 import secrets
 import string
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.db import get_supabase
 from app.config import get_settings
 from app.email import send_signup_confirmation_email, send_magic_link_email
+from app.auth_deps import current_user_id
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -167,12 +168,8 @@ def create_company_invite(body: CreateCompanyInviteBody):
         raise HTTPException(400, f"Failed to generate invite: {exc}")
 
 
-class DeleteAccountBody(BaseModel):
-    user_id: str
-
-
 @router.delete("/account", status_code=204)
-def delete_account(user_id: str):
+def delete_account(user_id: str = Depends(current_user_id)):
     """
     Permanently delete the calling user's account.
     Blocked if the user is the owner of any company — they must transfer
