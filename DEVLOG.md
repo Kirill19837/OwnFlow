@@ -363,3 +363,8 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - `AppLayout`: skips `/company/new` redirect while `needsPassword || needsName` modal is open
 - Backend: new `POST /auth/create-company-invite` endpoint for inviting users to start their own company
 - Fix: `has-password` API check now prevents false-positive password modal for regular signup confirmations
+
+## 2026-04-26 — supabase upgrade + lint fix (0d21adc)
+
+- Upgraded `supabase` from 2.7.4 → 2.29.0 — eliminates `gotrue` deprecation warning (package now uses `supabase_auth` internally)
+- Removed unused `action_link` variable in `send_magic_link` endpoint (ruff lint error 841)
