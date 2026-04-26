@@ -17,6 +17,14 @@ AI_MODELS = [
     "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
 ]
 
+# Fixed UUIDs seeded in the roles table
+ROLE_IDS = {
+    "owner":  "00000000-0000-0000-0000-000000000001",
+    "admin":  "00000000-0000-0000-0000-000000000002",
+    "member": "00000000-0000-0000-0000-000000000003",
+}
+ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
+
 
 class TeamCreate(BaseModel):
     name: str
@@ -92,7 +100,7 @@ def create_team(body: TeamCreate):
     db.table("team_members").insert({
         "team_id": team_id,
         "user_id": body.owner_id,
-        "role": "owner",
+        "role": ROLE_IDS["owner"],
     }).execute()
     return {**row, "my_role": "owner"}
 
@@ -105,7 +113,7 @@ def my_teams(user_id: str):
     if not items:
         return []
     team_ids = [m["team_id"] for m in items]
-    role_map = {m["team_id"]: m["role"] for m in items}
+    role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in items}
     teams = db.table("teams").select("*").in_("id", team_ids).execute()
     result = teams.data or []
     for t in result:
@@ -172,9 +180,12 @@ def add_member(team_id: str, body: TeamMemberInvite):
     db = get_supabase()
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "role must be owner, admin, or member")
-    row = {"team_id": team_id, "user_id": body.user_id, "role": body.role}
-    db.table("team_members").upsert(row).execute()
-    return row
+    db.table("team_members").upsert({
+        "team_id": team_id,
+        "user_id": body.user_id,
+        "role": ROLE_IDS[body.role],
+    }).execute()
+    return {"team_id": team_id, "user_id": body.user_id, "role": body.role}
 
 
 @router.post("/{team_id}/invites", status_code=201)
@@ -215,7 +226,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
         db.table("team_invites").upsert({
             "team_id": team_id,
             "email": email,
-            "role": body.role,
+            "role": ROLE_IDS[body.role],
             "invited_by_user_id": body.invited_by_user_id,
             "invited_by_email": inviter_email,
             "status": "pending",
@@ -352,13 +363,14 @@ def accept_pending_invites(body: AcceptInvitesBody):
         db.table("company_members").upsert({
             "company_id": target_company_id,
             "user_id": body.user_id,
-            "role": "member",
+            "role": ROLE_IDS["member"],
         }).execute()
     else:
         db.table("team_members").delete().eq("user_id", body.user_id).execute()
 
     accepted_team_ids: list[str] = []
     for row in rows:
+        # row["role"] is already a UUID from team_invites.role
         db.table("team_members").upsert({
             "team_id": row["team_id"],
             "user_id": body.user_id,

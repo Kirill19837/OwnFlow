@@ -16,6 +16,13 @@ AI_MODELS = [
     "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
 ]
 
+ROLE_IDS = {
+    "owner":  "00000000-0000-0000-0000-000000000001",
+    "admin":  "00000000-0000-0000-0000-000000000002",
+    "member": "00000000-0000-0000-0000-000000000003",
+}
+ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
+
 
 def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -54,7 +61,7 @@ def create_company(body: CompanyCreate):
     db.table("company_members").insert({
         "company_id": company_id,
         "user_id": body.owner_id,
-        "role": "owner",
+        "role": ROLE_IDS["owner"],
     }).execute()
 
     # Auto-create first team with same name
@@ -74,7 +81,7 @@ def create_company(body: CompanyCreate):
     db.table("team_members").insert({
         "team_id": team_id,
         "user_id": body.owner_id,
-        "role": "owner",
+        "role": ROLE_IDS["owner"],
     }).execute()
 
     return {**company_row, "my_role": "owner", "default_team_id": team_id}
@@ -97,7 +104,7 @@ def my_company(user_id: str):
     company = db.table("companies").select("*").eq("id", m["company_id"]).single().execute()
     if not company.data:
         return None
-    return {**company.data, "my_role": m["role"]}
+    return {**company.data, "my_role": ROLE_NAMES.get(m["role"], m["role"])}
 
 
 @router.get("/{company_id}/teams")
@@ -116,7 +123,7 @@ def list_teams(company_id: str, user_id: Optional[str] = None):
             .in_("team_id", team_ids)
             .execute()
         )
-        role_map = {m["team_id"]: m["role"] for m in (members.data or [])}
+        role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in (members.data or [])}
         for t in result:
             t["my_role"] = role_map.get(t["id"])
 
@@ -152,6 +159,6 @@ def create_team(company_id: str, body: TeamCreate):
     db.table("team_members").insert({
         "team_id": team_id,
         "user_id": body.owner_id,
-        "role": "owner",
+        "role": ROLE_IDS["owner"],
     }).execute()
     return {**row, "my_role": "owner"}

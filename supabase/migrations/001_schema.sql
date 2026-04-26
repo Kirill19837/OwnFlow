@@ -2,6 +2,27 @@
 -- Drop everything and recreate cleanly.
 -- Run against an empty Supabase project.
 
+-- ─── Drop old tables (if migrating from previous schema) ─────────────────────
+drop table if exists github_connections cascade;
+drop table if exists ai_messages        cascade;
+drop table if exists ai_logs            cascade;
+drop table if exists deliverables       cascade;
+drop table if exists assignments        cascade;
+drop table if exists tasks              cascade;
+drop table if exists sprints            cascade;
+drop table if exists project_members    cascade;
+drop table if exists projects           cascade;
+drop table if exists actors             cascade;
+drop table if exists org_invites        cascade;
+drop table if exists org_members        cascade;
+drop table if exists organizations      cascade;
+drop table if exists team_invites       cascade;
+drop table if exists team_members       cascade;
+drop table if exists teams              cascade;
+drop table if exists company_members    cascade;
+drop table if exists companies          cascade;
+drop table if exists roles              cascade;
+
 create extension if not exists "pgcrypto";
 
 -- ─── Roles (lookup table) ────────────────────────────────────────────────────
@@ -196,11 +217,11 @@ create table if not exists github_connections (
 
 -- ─── Realtime ────────────────────────────────────────────────────────────────
 
-alter publication supabase_realtime add table tasks;
-alter publication supabase_realtime add table assignments;
-alter publication supabase_realtime add table deliverables;
-alter publication supabase_realtime add table projects;
-alter publication supabase_realtime add table ai_logs;
+do $$ begin alter publication supabase_realtime add table tasks;        exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table assignments;  exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table deliverables; exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table projects;     exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table ai_logs;      exception when duplicate_object then null; end $$;
 
 -- ─── Row-level security (service role bypasses all) ──────────────────────────
 

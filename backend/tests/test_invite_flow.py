@@ -23,6 +23,11 @@ INVITEE_ID = str(uuid.uuid4())
 INVITEE_EMAIL = "invitee@example.com"
 OWNER_EMAIL = "owner@example.com"
 
+# Role UUIDs must match the seeded roles table
+ROLE_OWNER  = "00000000-0000-0000-0000-000000000001"
+ROLE_ADMIN  = "00000000-0000-0000-0000-000000000002"
+ROLE_MEMBER = "00000000-0000-0000-0000-000000000003"
+
 _ORG_ROW = {
     "id": ORG_ID,
     "name": "Test Org",
@@ -274,8 +279,9 @@ def test_accept_invites_adds_member_and_marks_accepted(client):
     db = MagicMock()
 
     invite_id = str(uuid.uuid4())
+    # role is UUID (as stored in team_invites.role)
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = _resp([
-        {"id": invite_id, "team_id": ORG_ID, "role": "member"},
+        {"id": invite_id, "team_id": ORG_ID, "role": ROLE_MEMBER},
     ])
     db.table.return_value.upsert.return_value.execute.return_value = _resp([])
     db.table.return_value.update.return_value.eq.return_value.execute.return_value = _resp([])
@@ -308,3 +314,78 @@ def test_accept_invites_no_pending(client):
 
     assert resp.status_code == 200
     assert resp.json()["accepted"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 8. create_team: response my_role is readable text, not UUID
+# ---------------------------------------------------------------------------
+
+def test_create_team_inserts_owner_role_as_uuid(client):
+    db = MagicMock()
+
+    # slug uniqueness check: no conflict
+    db.table.return_value.select.return_value.eq.return_value.execute.return_value = _resp([])
+    db.table.return_value.insert.return_value.execute.return_value = _resp([])
+
+    with _patch_db(db):
+        resp = client.post("/teams", json={
+            "name": "My Team",
+            "owner_id": OWNER_ID,
+            "default_ai_model": "gpt-4o",
+        })
+
+    assert resp.status_code == 201
+    body = resp.json()
+    # my_role returned to client is still readable text
+    assert body["my_role"] == "owner"
+
+    # Find the team_members insert call and verify UUID role was used
+    member_calls = [
+        call.args[0]
+        for call in db.table.return_value.insert.call_args_list
+        if isinstance(call.args[0], dict) and "team_id" in call.args[0]
+    ]
+    assert member_calls, "Expected a team_members insert call"
+    assert member_calls[0]["role"] == ROLE_OWNER, (
+        f"Expected UUID {ROLE_OWNER!r}, got {member_calls[0]['role']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. invite_member_by_email: role stored as UUID in team_invites
+# ---------------------------------------------------------------------------
+
+def test_invite_stores_role_as_uuid(client):
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"user_id": OWNER_ID}]
+    )
+    db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
+    db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+    db.auth.admin.invite_user_by_email.return_value = None
+
+    with _patch_db(db):
+        with patch("app.api.teams.get_settings") as mock_settings:
+            s = MagicMock()
+            s.postmark_enabled = False
+            mock_settings.return_value = s
+
+            resp = client.post(f"/teams/{ORG_ID}/invites", json={
+                "email": INVITEE_EMAIL,
+                "role": "member",
+                "invited_by_user_id": OWNER_ID,
+            })
+
+    assert resp.status_code == 201
+    # Find the team_invites upsert — it's the call whose row has "email" key
+    upsert_calls = [
+        call.args[0]
+        for call in db.table.return_value.upsert.call_args_list
+        if isinstance(call.args[0], dict) and "email" in call.args[0]
+    ]
+    assert upsert_calls, "Expected a team_invites upsert call"
+    assert upsert_calls[0]["role"] == ROLE_MEMBER, (
+        f"Expected UUID {ROLE_MEMBER!r}, got {upsert_calls[0]['role']!r}"
+    )
