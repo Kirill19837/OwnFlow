@@ -325,7 +325,16 @@ class AcceptInvitesBody(BaseModel):
 @router.post("/accept-invites")
 def accept_pending_invites(body: AcceptInvitesBody):
     db = get_supabase()
+    try:
+        return _do_accept_invites(db, body)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("accept-invites failed: %s", exc, exc_info=True)
+        # Return a safe response — the frontend already treats this as non-blocking.
+        return {"accepted": 0, "team_ids": [], "error": str(exc)}
 
+
+def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
     email = body.email.strip().lower()
     query = (
         db.table("team_invites")

@@ -46,7 +46,12 @@ export function AuthProvider() {
         const inviteOrg = params.get('invite_org') ?? undefined
         const linkType = params.get('link_type') as 'create_company' | 'join_company' | 'set_password' | null
         if (linkType) useAuthStore.getState().setLinkType(linkType)
-        await acceptInvitesIfNeeded(session, inviteOrg)
+        // Only accept invites when the user arrived via an invite link.
+        // Do NOT call accept-invites on regular sign-ins — it causes 500s
+        // for users who are already members and have no pending invites.
+        if (inviteOrg) {
+          await acceptInvitesIfNeeded(session, inviteOrg)
+        }
 
         // Decode JWT AMR to detect OTP sign-ins (magic link / invite / email confirm).
         // Email confirmation also comes in as method "otp", but the user already has a

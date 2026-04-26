@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-26 | `6a336e0` — Never show name-only modal
+
+- `frontend/src/components/Auth.tsx` — removed all standalone `setNeedsName` calls; name is now only collected together with the password modal for brand-new invited users (no password set). Existing users without a name can update it via the Profile page.
+
+---
+
 ## 2026-04-26 | `e250c72` — Profile page, delete account, revoke invite, fix invite modal
 
 - `backend/app/api/teams.py` — `DELETE /teams/{team_id}/invites/{invite_id}` sets invite status to `revoked`

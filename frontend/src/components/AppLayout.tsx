@@ -11,7 +11,7 @@ import CompleteProfileModal from './CompleteProfileModal'
 import { useThemeStore } from '../store/themeStore'
 
 export default function AppLayout() {
-  const { signOut, session, needsPassword, needsName } = useAuthStore()
+  const { signOut, session, needsPassword, needsName, linkType } = useAuthStore()
   const { theme, toggle: toggleTheme } = useThemeStore()
   const { teams, activeTeam, setTeams, setActiveTeam } = useTeamStore()
   const { company, setCompany } = useCompanyStore()
@@ -88,6 +88,9 @@ export default function AppLayout() {
     if (teamsData.length > 0) return
     // Don't redirect while the profile-completion modal is still open
     if (needsPassword || needsName) return
+    // Don't redirect if the user is in the middle of an invite acceptance flow —
+    // their company membership is being created right now.
+    if (linkType === 'join_company') return
     // No teams and no company → send to company setup
     if (!companyData) {
       navigate('/company/new')
