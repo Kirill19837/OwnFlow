@@ -37,10 +37,10 @@ class ProjectCreate(BaseModel):
     name: str
     prompt: str
     owner_id: str
-    org_id: Optional[str] = None
-    ai_model: Optional[str] = None  # override org default
-    auto_plan: bool = True  # set False to stream planning manually
-    sprint_days: int = 3  # sprint length in calendar days
+    team_id: Optional[str] = None
+    ai_model: Optional[str] = None  # override team default
+    auto_plan: bool = True
+    sprint_days: int = 3
 
 
 class Project(BaseModel):
@@ -48,7 +48,7 @@ class Project(BaseModel):
     name: str
     prompt: str
     owner_id: str
-    org_id: Optional[str]
+    team_id: Optional[str]
     status: str
     sprint_days: int = 3
     roadmap: Optional[List] = None

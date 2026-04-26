@@ -76,8 +76,7 @@ def create_team(body: TeamCreate):
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
     db = get_supabase()
     slug = _slug(body.name)
-    existing = db.table("organizations").select("id").eq("slug", slug).execute()
-    if existing.data:
+    if db.table("teams").select("id").eq("slug", slug).execute().data:
         slug = f"{slug}-{str(uuid.uuid4())[:6]}"
     team_id = str(uuid.uuid4())
     row = {
@@ -89,9 +88,9 @@ def create_team(body: TeamCreate):
     }
     if body.company_id:
         row["company_id"] = body.company_id
-    db.table("organizations").insert(row).execute()
-    db.table("org_members").insert({
-        "org_id": team_id,
+    db.table("teams").insert(row).execute()
+    db.table("team_members").insert({
+        "team_id": team_id,
         "user_id": body.owner_id,
         "role": "owner",
     }).execute()
@@ -101,13 +100,13 @@ def create_team(body: TeamCreate):
 @router.get("/my")
 def my_teams(user_id: str):
     db = get_supabase()
-    members = db.table("org_members").select("org_id, role").eq("user_id", user_id).execute()
+    members = db.table("team_members").select("team_id, role").eq("user_id", user_id).execute()
     items = members.data or []
     if not items:
         return []
-    team_ids = [m["org_id"] for m in items]
-    role_map = {m["org_id"]: m["role"] for m in items}
-    teams = db.table("organizations").select("*").in_("id", team_ids).execute()
+    team_ids = [m["team_id"] for m in items]
+    role_map = {m["team_id"]: m["role"] for m in items}
+    teams = db.table("teams").select("*").in_("id", team_ids).execute()
     result = teams.data or []
     for t in result:
         t["my_role"] = role_map.get(t["id"])
@@ -122,10 +121,10 @@ def list_models():
 @router.get("/{team_id}")
 def get_team(team_id: str):
     db = get_supabase()
-    team = db.table("organizations").select("*").eq("id", team_id).single().execute()
+    team = db.table("teams").select("*").eq("id", team_id).single().execute()
     if not team.data:
         raise HTTPException(404, "Team not found")
-    members_resp = db.table("org_members").select("*").eq("org_id", team_id).execute()
+    members_resp = db.table("team_members").select("*").eq("team_id", team_id).execute()
     members = members_resp.data or []
 
     if members:
@@ -142,9 +141,9 @@ def get_team(team_id: str):
     pending_invites = []
     try:
         pending_resp = (
-            db.table("org_invites")
+            db.table("team_invites")
             .select("id,email,role,invited_by_email,status,invited_at")
-            .eq("org_id", team_id)
+            .eq("team_id", team_id)
             .eq("status", "pending")
             .order("invited_at", desc=True)
             .execute()
@@ -164,7 +163,7 @@ def update_team(team_id: str, body: TeamUpdate):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No valid fields to update")
-    db.table("organizations").update(update).eq("id", team_id).execute()
+    db.table("teams").update(update).eq("id", team_id).execute()
     return {"team_id": team_id, **update}
 
 
@@ -173,8 +172,8 @@ def add_member(team_id: str, body: TeamMemberInvite):
     db = get_supabase()
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "role must be owner, admin, or member")
-    row = {"org_id": team_id, "user_id": body.user_id, "role": body.role}
-    db.table("org_members").upsert(row).execute()
+    row = {"team_id": team_id, "user_id": body.user_id, "role": body.role}
+    db.table("team_members").upsert(row).execute()
     return row
 
 
@@ -190,14 +189,14 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     if not _is_valid_email(email):
         raise HTTPException(400, "Invalid email")
 
-    team = db.table("organizations").select("id,name,company_id").eq("id", team_id).single().execute()
+    team = db.table("teams").select("id,name,company_id").eq("id", team_id).single().execute()
     if not team.data:
         raise HTTPException(404, "Team not found")
 
     inviter_member = (
-        db.table("org_members")
+        db.table("team_members")
         .select("user_id")
-        .eq("org_id", team_id)
+        .eq("team_id", team_id)
         .eq("user_id", body.invited_by_user_id)
         .limit(1)
         .execute()
@@ -213,8 +212,8 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     # Always use the pending invite flow — even for confirmed existing users.
     # They will be added to the team when they next log in and accept-invites runs.
     try:
-        db.table("org_invites").upsert({
-            "org_id": team_id,
+        db.table("team_invites").upsert({
+            "team_id": team_id,
             "email": email,
             "role": body.role,
             "invited_by_user_id": body.invited_by_user_id,
@@ -309,7 +308,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
 class AcceptInvitesBody(BaseModel):
     user_id: str
     email: str
-    org_id: Optional[str] = None  # team_id; kept as org_id for DB compatibility
+    team_id: Optional[str] = None
 
 
 @router.post("/accept-invites")
@@ -318,21 +317,21 @@ def accept_pending_invites(body: AcceptInvitesBody):
 
     email = body.email.strip().lower()
     query = (
-        db.table("org_invites")
-        .select("id,org_id,role")
+        db.table("team_invites")
+        .select("id,team_id,role")
         .eq("email", email)
         .eq("status", "pending")
     )
-    if body.org_id:
-        query = query.eq("org_id", body.org_id)
+    if body.team_id:
+        query = query.eq("team_id", body.team_id)
     pending = query.execute()
     rows = pending.data or []
 
     if not rows:
         return {"accepted": 0, "team_ids": []}
 
-    target_team_ids = [r["org_id"] for r in rows]
-    teams = db.table("organizations").select("id,company_id").in_("id", target_team_ids).execute()
+    target_team_ids = [r["team_id"] for r in rows]
+    teams = db.table("teams").select("id,company_id").in_("id", target_team_ids).execute()
     company_ids = list({t["company_id"] for t in (teams.data or []) if t.get("company_id")})
 
     if company_ids:
@@ -346,9 +345,9 @@ def accept_pending_invites(body: AcceptInvitesBody):
         )
         for cm in (other_memberships.data or []):
             old_cid = cm["company_id"]
-            old_teams = db.table("organizations").select("id").eq("company_id", old_cid).execute()
+            old_teams = db.table("teams").select("id").eq("company_id", old_cid).execute()
             for ot in (old_teams.data or []):
-                db.table("org_members").delete().eq("user_id", body.user_id).eq("org_id", ot["id"]).execute()
+                db.table("team_members").delete().eq("user_id", body.user_id).eq("team_id", ot["id"]).execute()
             db.table("company_members").delete().eq("user_id", body.user_id).eq("company_id", old_cid).execute()
         db.table("company_members").upsert({
             "company_id": target_company_id,
@@ -356,21 +355,21 @@ def accept_pending_invites(body: AcceptInvitesBody):
             "role": "member",
         }).execute()
     else:
-        db.table("org_members").delete().eq("user_id", body.user_id).execute()
+        db.table("team_members").delete().eq("user_id", body.user_id).execute()
 
     accepted_team_ids: list[str] = []
     for row in rows:
-        db.table("org_members").upsert({
-            "org_id": row["org_id"],
+        db.table("team_members").upsert({
+            "team_id": row["team_id"],
             "user_id": body.user_id,
             "role": row["role"],
         }).execute()
-        db.table("org_invites").update({
+        db.table("team_invites").update({
             "status": "accepted",
             "accepted_user_id": body.user_id,
             "accepted_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", row["id"]).execute()
-        accepted_team_ids.append(row["org_id"])
+        accepted_team_ids.append(row["team_id"])
 
     return {"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids}
 
@@ -378,12 +377,12 @@ def accept_pending_invites(body: AcceptInvitesBody):
 @router.delete("/{team_id}", status_code=204)
 def delete_team(team_id: str):
     db = get_supabase()
-    db.table("org_members").delete().eq("org_id", team_id).execute()
-    db.table("org_invites").delete().eq("org_id", team_id).execute()
-    db.table("organizations").delete().eq("id", team_id).execute()
+    db.table("team_members").delete().eq("team_id", team_id).execute()
+    db.table("team_invites").delete().eq("team_id", team_id).execute()
+    db.table("teams").delete().eq("id", team_id).execute()
 
 
 @router.delete("/{team_id}/members/{user_id}", status_code=204)
 def remove_member(team_id: str, user_id: str):
     db = get_supabase()
-    db.table("org_members").delete().eq("org_id", team_id).eq("user_id", user_id).execute()
+    db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()

@@ -59,7 +59,7 @@ def create_company(body: CompanyCreate):
 
     # Auto-create first team with same name
     team_slug = f"{slug}-team"
-    if db.table("organizations").select("id").eq("slug", team_slug).execute().data:
+    if db.table("teams").select("id").eq("slug", team_slug).execute().data:
         team_slug = f"{team_slug}-{str(uuid.uuid4())[:6]}"
     team_id = str(uuid.uuid4())
     team_row = {
@@ -70,9 +70,9 @@ def create_company(body: CompanyCreate):
         "default_ai_model": body.default_ai_model,
         "company_id": company_id,
     }
-    db.table("organizations").insert(team_row).execute()
-    db.table("org_members").insert({
-        "org_id": team_id,
+    db.table("teams").insert(team_row).execute()
+    db.table("team_members").insert({
+        "team_id": team_id,
         "user_id": body.owner_id,
         "role": "owner",
     }).execute()
@@ -104,19 +104,19 @@ def my_company(user_id: str):
 def list_teams(company_id: str, user_id: Optional[str] = None):
     """List teams within a company, optionally annotating with the user's role."""
     db = get_supabase()
-    teams = db.table("organizations").select("*").eq("company_id", company_id).execute()
+    teams = db.table("teams").select("*").eq("company_id", company_id).execute()
     result = teams.data or []
 
     if user_id and result:
         team_ids = [t["id"] for t in result]
         members = (
-            db.table("org_members")
-            .select("org_id, role")
+            db.table("team_members")
+            .select("team_id, role")
             .eq("user_id", user_id)
-            .in_("org_id", team_ids)
+            .in_("team_id", team_ids)
             .execute()
         )
-        role_map = {m["org_id"]: m["role"] for m in (members.data or [])}
+        role_map = {m["team_id"]: m["role"] for m in (members.data or [])}
         for t in result:
             t["my_role"] = role_map.get(t["id"])
 
@@ -136,7 +136,7 @@ def create_team(company_id: str, body: TeamCreate):
         raise HTTPException(404, "Company not found")
 
     slug = _slug(body.name)
-    if db.table("organizations").select("id").eq("slug", slug).execute().data:
+    if db.table("teams").select("id").eq("slug", slug).execute().data:
         slug = f"{slug}-{str(uuid.uuid4())[:6]}"
 
     team_id = str(uuid.uuid4())
@@ -148,9 +148,9 @@ def create_team(company_id: str, body: TeamCreate):
         "default_ai_model": body.default_ai_model,
         "company_id": company_id,
     }
-    db.table("organizations").insert(row).execute()
-    db.table("org_members").insert({
-        "org_id": team_id,
+    db.table("teams").insert(row).execute()
+    db.table("team_members").insert({
+        "team_id": team_id,
         "user_id": body.owner_id,
         "role": "owner",
     }).execute()

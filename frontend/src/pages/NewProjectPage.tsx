@@ -120,7 +120,7 @@ export default function NewProjectPage() {
         name,
         prompt,
         owner_id: session!.user.id,
-        org_id: activeOrg?.id ?? null,
+        team_id: activeOrg?.id ?? null,
         ai_model: aiModel,
         sprint_days: sprintDays,
         auto_plan: false,

@@ -36,7 +36,7 @@ export default function DashboardPage() {
     queryKey: ['projects', activeOrg?.id, session?.user.id],
     queryFn: () => {
       const params = activeOrg
-        ? { org_id: activeOrg.id }
+        ? { team_id: activeOrg.id }
         : { owner_id: session!.user.id }
       return api.get<Project[]>('/projects', { params }).then((r) => r.data)
     },

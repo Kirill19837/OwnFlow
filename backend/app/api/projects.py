@@ -21,8 +21,8 @@ async def create_project(body: ProjectCreate, background_tasks: BackgroundTasks)
 
     # Resolve AI model: explicit override > org default > system default
     ai_model = body.ai_model or "gpt-4o"
-    if body.org_id:
-        org = db.table("organizations").select("default_ai_model").eq("id", body.org_id).single().execute()
+    if body.team_id:
+        org = db.table("teams").select("default_ai_model").eq("id", body.team_id).single().execute()
         if org.data:
             ai_model = body.ai_model or org.data["default_ai_model"]
 
@@ -31,7 +31,7 @@ async def create_project(body: ProjectCreate, background_tasks: BackgroundTasks)
         "name": body.name,
         "prompt": body.prompt,
         "owner_id": body.owner_id,
-        "org_id": body.org_id,
+        "team_id": body.team_id,
         "sprint_days": body.sprint_days,
         "status": "planning",
     }
@@ -160,11 +160,11 @@ def get_project(project_id: str):
 
 
 @router.get("")
-def list_projects(owner_id: str = "", org_id: str = ""):
+def list_projects(owner_id: str = "", team_id: str = ""):
     db = get_supabase()
     q = db.table("projects").select("*").order("created_at", desc=True)
-    if org_id:
-        q = q.eq("org_id", org_id)
+    if team_id:
+        q = q.eq("team_id", team_id)
     elif owner_id:
         q = q.eq("owner_id", owner_id)
     else:

@@ -22,7 +22,7 @@ export interface Organization {
 }
 
 export interface OrgMember {
-  org_id: string
+  team_id: string
   user_id: string
   email?: string
   role: 'owner' | 'admin' | 'member'
@@ -110,7 +110,7 @@ export interface Project {
   name: string
   prompt: string
   owner_id: string
-  org_id?: string
+  team_id?: string
   status: 'planning' | 'active' | 'error'
   created_at: string
   sprint_days?: number

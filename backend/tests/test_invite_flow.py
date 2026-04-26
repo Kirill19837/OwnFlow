@@ -267,7 +267,7 @@ def test_non_member_cannot_invite(client):
 
 
 # ---------------------------------------------------------------------------
-# 6. accept-invites: marks pending invites accepted and adds to org_members
+# 6. accept-invites: marks pending invites accepted and adds to team_members
 # ---------------------------------------------------------------------------
 
 def test_accept_invites_adds_member_and_marks_accepted(client):
@@ -275,7 +275,7 @@ def test_accept_invites_adds_member_and_marks_accepted(client):
 
     invite_id = str(uuid.uuid4())
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = _resp([
-        {"id": invite_id, "org_id": ORG_ID, "role": "member"},
+        {"id": invite_id, "team_id": ORG_ID, "role": "member"},
     ])
     db.table.return_value.upsert.return_value.execute.return_value = _resp([])
     db.table.return_value.update.return_value.eq.return_value.execute.return_value = _resp([])
