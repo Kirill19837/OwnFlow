@@ -333,3 +333,9 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Backend writes full_name to user_metadata on signup
 - SetNameModal prompts existing users missing a name after sign-in
 - GET /auth/has-password replaces URL hash detection for SetPasswordModal
+
+## 2026-04-22 — CompleteProfileModal + AMR-based password detection (89d364e)
+
+- Single combined modal for name + password (replaces two separate modals)
+- JWT AMR claim detection: method=otp triggers password prompt; existing password users unaffected
+- Fixed apostrophe parse error in JSX string literals

@@ -54,7 +54,7 @@ export default function CompleteProfileModal() {
     ? 'Complete your profile'
     : needsPassword
     ? 'Set your password'
-    : 'What’s your name?'
+    : "What’s your name?"
   const subtitle = both
     ? 'You signed in via a link — set a password and tell us your name to get started.'
     : needsPassword

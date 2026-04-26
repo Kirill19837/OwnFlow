@@ -6,11 +6,13 @@ import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Organization } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings, Building2 } from 'lucide-react'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
+import { useThemeStore } from '../store/themeStore'
 
 export default function AppLayout() {
   const { signOut, session, needsPassword, needsName } = useAuthStore()
+  const { theme, toggle: toggleTheme } = useThemeStore()
   const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore()
   const { company, setCompany } = useCompanyStore()
   const navigate = useNavigate()
@@ -173,7 +175,14 @@ export default function AppLayout() {
         </div>
 
         <div className="flex items-center gap-4 text-sm text-gray-400 ml-auto">
-          <span className="hidden sm:block">{session?.user.email}</span>
+          <span className="hidden sm:block">{session?.user?.user_metadata?.full_name || session?.user.email}</span>
+          <button
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
           <button onClick={handleSignOut} className="flex items-center gap-1 hover:text-white transition-colors">
             <LogOut size={16} />
             Sign out

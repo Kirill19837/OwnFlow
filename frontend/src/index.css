@@ -4,3 +4,69 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background-color: #030712; color: #f9fafb; }
+
+/* ─── Light-mode overrides ───────────────────────────────────────────────────
+   When the <html> element does NOT carry the `dark` class, these selectors
+   override Tailwind's compiled gray utility classes so all components flip to
+   a light palette without needing any JSX changes.
+   Specificity: html:not(.dark) .utility = (0,2,1) > plain .utility = (0,1,0)
+──────────────────────────────────────────────────────────────────────────── */
+
+html:not(.dark) body { background-color: #ffffff; color: #111827; }
+
+/* Backgrounds */
+html:not(.dark) .bg-gray-950  { background-color: #ffffff !important; }
+html:not(.dark) .bg-gray-900  { background-color: #f9fafb !important; }
+html:not(.dark) .bg-gray-800  { background-color: #f3f4f6 !important; }
+html:not(.dark) .bg-gray-700  { background-color: #e5e7eb !important; }
+
+/* Semi-transparent backgrounds (opacity variants) */
+html:not(.dark) .bg-gray-950\/50 { background-color: rgb(255 255 255 / 0.5) !important; }
+html:not(.dark) .bg-gray-900\/40 { background-color: rgb(249 250 251 / 0.4) !important; }
+html:not(.dark) .bg-gray-800\/60 { background-color: rgb(243 244 246 / 0.6) !important; }
+
+/* Hover backgrounds */
+html:not(.dark) .hover\:bg-gray-900:hover { background-color: #f9fafb !important; }
+html:not(.dark) .hover\:bg-gray-800:hover { background-color: #f3f4f6 !important; }
+html:not(.dark) .hover\:bg-gray-700:hover { background-color: #e5e7eb !important; }
+
+/* Borders */
+html:not(.dark) .border-gray-800 { border-color: #e5e7eb !important; }
+html:not(.dark) .border-gray-700 { border-color: #d1d5db !important; }
+html:not(.dark) .border-gray-600 { border-color: #9ca3af !important; }
+
+html:not(.dark) .hover\:border-gray-700:hover { border-color: #d1d5db !important; }
+html:not(.dark) .hover\:border-gray-600:hover { border-color: #9ca3af !important; }
+
+/* Text */
+html:not(.dark) .text-white   { color: #111827 !important; }
+html:not(.dark) .text-gray-100 { color: #111827 !important; }
+html:not(.dark) .text-gray-200 { color: #1f2937 !important; }
+html:not(.dark) .text-gray-300 { color: #374151 !important; }
+html:not(.dark) .text-gray-400 { color: #6b7280 !important; }
+html:not(.dark) .text-gray-500 { color: #9ca3af !important; }
+html:not(.dark) .text-gray-600 { color: #d1d5db !important; }
+html:not(.dark) .text-gray-700 { color: #e5e7eb !important; }
+
+html:not(.dark) .hover\:text-white:hover   { color: #111827 !important; }
+html:not(.dark) .hover\:text-gray-200:hover { color: #1f2937 !important; }
+html:not(.dark) .hover\:text-gray-100:hover { color: #111827 !important; }
+html:not(.dark) .group:hover .group-hover\:text-purple-300 { color: #7c3aed !important; }
+
+/* Placeholder */
+html:not(.dark) .placeholder-gray-600::placeholder { color: #9ca3af !important; }
+
+/* Dividers */
+html:not(.dark) .divide-gray-800 > :not([hidden]) ~ :not([hidden]) { border-color: #e5e7eb !important; }
+
+/* Shadows — lighten in light mode */
+html:not(.dark) .shadow-xl { box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.04) !important; }
+html:not(.dark) .shadow-2xl { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.12) !important; }
+
+/* Input / select focus ring stays purple — no override needed */
+
+/* Scrollbar (webkit) */
+html:not(.dark) ::-webkit-scrollbar-track { background: #f3f4f6; }
+html:not(.dark) ::-webkit-scrollbar-thumb { background: #d1d5db; }
+html:not(.dark) ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
