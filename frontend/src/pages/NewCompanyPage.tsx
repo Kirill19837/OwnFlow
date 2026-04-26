@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useCompanyStore } from '../store/companyStore'
-import { useOrgStore } from '../store/orgStore'
+import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import {
   Layers,
@@ -16,7 +16,7 @@ import {
   Building2,
   Star,
 } from 'lucide-react'
-import type { Organization } from '../types'
+import type { Team } from '../types'
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', sub: 'OpenAI · Best overall' },
@@ -52,8 +52,9 @@ const PERKS = [
 export default function NewCompanyPage() {
   const { session } = useAuthStore()
   const { setCompany } = useCompanyStore()
-  const { setOrgs, setActiveOrg } = useOrgStore()
+  const { setTeams, setActiveTeam } = useTeamStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // Guard: if the user already belongs to a company, send them to the dashboard.
   // This prevents invited members from creating duplicate companies.
@@ -84,9 +85,11 @@ export default function NewCompanyPage() {
         })
         .then((r) => r.data),
     onSuccess: (data) => {
+      // Seed the company cache so AppLayout sees the real company immediately
+      queryClient.setQueryData(['company', session!.user.id], data)
       setCompany(data)
       if (data.default_team_id) {
-        const team: Organization = {
+        const team: Team = {
           id: data.default_team_id,
           name: data.name,
           slug: `${data.slug}-team`,
@@ -96,8 +99,8 @@ export default function NewCompanyPage() {
           created_at: data.created_at,
           my_role: 'owner',
         }
-        setOrgs([team])
-        setActiveOrg(team)
+        setTeams([team])
+        setActiveTeam(team)
       }
       navigate('/')
     },

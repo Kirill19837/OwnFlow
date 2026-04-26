@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
-import { useOrgStore } from '../store/orgStore'
+import { useTeamStore } from '../store/teamStore'
 import { useCompanyStore } from '../store/companyStore'
 import api from '../lib/api'
-import type { Organization } from '../types'
+import type { Team } from '../types'
 import { ChevronLeft, Users } from 'lucide-react'
 
 const AI_MODELS = [
@@ -18,7 +18,7 @@ const AI_MODELS = [
 
 export default function NewOrgPage() {
   const { session } = useAuthStore()
-  const { setActiveOrg } = useOrgStore()
+  const { setActiveTeam } = useTeamStore()
   const { company } = useCompanyStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -27,14 +27,14 @@ export default function NewOrgPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<Organization>('/teams', {
+      api.post<Team>('/teams', {
         name,
         owner_id: session!.user.id,
         default_ai_model: model,
         company_id: company?.id,
       }).then((r) => r.data),
-    onSuccess: (org) => {
-      setActiveOrg(org)
+    onSuccess: (team) => {
+      setActiveTeam(team)
       qc.invalidateQueries({ queryKey: ['teams'] })
       navigate('/')
     },

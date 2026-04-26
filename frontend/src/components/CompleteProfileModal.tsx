@@ -29,6 +29,8 @@ export default function CompleteProfileModal() {
       const update: Parameters<typeof supabase.auth.updateUser>[0] = {}
       if (needsPassword) update.password = password
       if (needsName) update.data = { full_name: name.trim() }
+      // Mark password as set in metadata so we never prompt again
+      if (needsPassword) update.data = { ...(update.data ?? {}), password_set: true }
 
       const { error: updateError } = await supabase.auth.updateUser(update)
       if (updateError) throw updateError

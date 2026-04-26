@@ -8,7 +8,7 @@ export interface Company {
   default_team_id?: string
 }
 
-export interface Organization {
+export interface Team {
   id: string
   name: string
   slug: string
@@ -17,11 +17,11 @@ export interface Organization {
   default_ai_model: string
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'
-  members?: OrgMember[]
-  pending_invites?: OrgPendingInvite[]
+  members?: TeamMember[]
+  pending_invites?: TeamPendingInvite[]
 }
 
-export interface OrgMember {
+export interface TeamMember {
   team_id: string
   user_id: string
   email?: string
@@ -29,7 +29,7 @@ export interface OrgMember {
   joined_at: string
 }
 
-export interface OrgPendingInvite {
+export interface TeamPendingInvite {
   id: string
   email: string
   role: 'owner' | 'admin' | 'member'

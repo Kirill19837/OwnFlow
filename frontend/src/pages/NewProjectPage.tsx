@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
-import { useOrgStore } from '../store/orgStore'
+import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 
@@ -87,13 +87,13 @@ interface ActorDraft {
 
 export default function NewProjectPage() {
   const { session } = useAuthStore()
-  const { activeOrg } = useOrgStore()
+  const { activeTeam } = useTeamStore()
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [aiModel, setAiModel] = useState(activeOrg?.default_ai_model ?? 'gpt-4o')
+  const [aiModel, setAiModel] = useState(activeTeam?.default_ai_model ?? 'gpt-4o')
   const [sprintDays, setSprintDays] = useState(3)
-  const defaultActorModel = activeOrg?.default_ai_model ?? 'gpt-4o'
+  const defaultActorModel = activeTeam?.default_ai_model ?? 'gpt-4o'
   const [actors, setActors] = useState<ActorDraft[]>(() => {
     _usedNames = []
     const pm = ROLE_TEMPLATES.find((r) => r.name === 'AI Project Manager')!
@@ -120,7 +120,7 @@ export default function NewProjectPage() {
         name,
         prompt,
         owner_id: session!.user.id,
-        team_id: activeOrg?.id ?? null,
+        team_id: activeTeam?.id ?? null,
         ai_model: aiModel,
         sprint_days: sprintDays,
         auto_plan: false,
@@ -413,7 +413,7 @@ export default function NewProjectPage() {
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">AI model for this project</label>
           <p className="text-xs text-gray-500 mb-2">
-            Org default: <span className="text-purple-400">{activeOrg?.default_ai_model ?? 'gpt-4o'}</span>. Override below if needed.
+            Team default: <span className="text-purple-400">{activeTeam?.default_ai_model ?? 'gpt-4o'}</span>. Override below if needed.
           </p>
           <select
             value={aiModel}

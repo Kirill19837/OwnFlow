@@ -31,7 +31,7 @@ export default function App() {
                 <Route path="/projects/:projectId" element={<ProjectBoardPage />} />
                 <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
                 <Route path="/teams/new" element={<NewOrgPage />} />
-                <Route path="/teams/:orgId/settings" element={<OrgSettingsPage />} />
+                <Route path="/teams/:teamId/settings" element={<OrgSettingsPage />} />
               </Route>
             </Route>
           </Route>

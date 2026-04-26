@@ -60,7 +60,8 @@ export function AuthProvider() {
             const payload = JSON.parse(atob(token.split('.')[1]))
             const amr: Array<{ method: string }> = payload.amr ?? []
             const isOtp = amr.some((a) => a.method === 'otp')
-            if (isOtp && session?.user?.id) {
+            const alreadyMarked = session?.user?.user_metadata?.password_set === true
+            if (isOtp && !alreadyMarked && session?.user?.id) {
               const { data } = await api.get<{ has_password: boolean }>(
                 `/auth/has-password?user_id=${session.user.id}`
               )

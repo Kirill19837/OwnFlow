@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useOrgStore } from '../store/orgStore'
+import { useTeamStore } from '../store/teamStore'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
-import type { Organization, OrgPendingInvite } from '../types'
+import type { Team, TeamPendingInvite } from '../types'
 import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil } from 'lucide-react'
 
 const AI_MODELS = [
@@ -16,10 +16,10 @@ const AI_MODELS = [
 ]
 
 export default function OrgSettingsPage() {
-  const { orgId } = useParams<{ orgId: string }>()
+  const { teamId } = useParams<{ teamId: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { updateOrgModel } = useOrgStore()
+  const { updateTeamModel } = useTeamStore()
   const { session } = useAuthStore()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
@@ -32,16 +32,16 @@ export default function OrgSettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: org, isLoading } = useQuery({
-    queryKey: ['org', orgId],
-    queryFn: () => api.get<Organization>(`/teams/${orgId}`).then((r) => r.data),
-    enabled: !!orgId,
+    queryKey: ['team', teamId],
+    queryFn: () => api.get<Team>(`/teams/${teamId}`).then((r) => r.data),
+    enabled: !!teamId,
   })
 
   const updateModel = useMutation({
-    mutationFn: (model: string) => api.patch(`/teams/${orgId}`, { default_ai_model: model }),
+    mutationFn: (model: string) => api.patch(`/teams/${teamId}`, { default_ai_model: model }),
     onSuccess: (_, model) => {
-      updateOrgModel(orgId!, model)
-      qc.invalidateQueries({ queryKey: ['org', orgId] })
+      updateTeamModel(teamId!, model)
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
       qc.invalidateQueries({ queryKey: ['teams'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -49,26 +49,25 @@ export default function OrgSettingsPage() {
   })
 
   const renameTeam = useMutation({
-    mutationFn: (name: string) => api.patch(`/teams/${orgId}`, { name }),
+    mutationFn: (name: string) => api.patch(`/teams/${teamId}`, { name }),
     onSuccess: (_, name) => {
-      qc.invalidateQueries({ queryKey: ['org', orgId] })
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
       qc.invalidateQueries({ queryKey: ['teams'] })
-      // Update active org name in store if it's this one
-      const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
-      const updated = orgs.map((o) => o.id === orgId ? { ...o, name } : o)
-      setOrgs(updated)
-      if (activeOrg && activeOrg.id === orgId) setActiveOrg({ ...activeOrg, name })
+      const { teams, activeTeam, setTeams, setActiveTeam } = useTeamStore.getState()
+      const updated = teams.map((t) => t.id === teamId ? { ...t, name } : t)
+      setTeams(updated)
+      if (activeTeam && activeTeam.id === teamId) setActiveTeam({ ...activeTeam, name })
       setRenaming(false)
     },
   })
 
   const deleteTeam = useMutation({
-    mutationFn: () => api.delete(`/teams/${orgId}`),
+    mutationFn: () => api.delete(`/teams/${teamId}`),
     onSuccess: () => {
-      const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
-      const remaining = orgs.filter((o) => o.id !== orgId)
-      setOrgs(remaining)
-      if (activeOrg && activeOrg.id === orgId) setActiveOrg(remaining[0] ?? null)
+      const { teams, activeTeam, setTeams, setActiveTeam } = useTeamStore.getState()
+      const remaining = teams.filter((t) => t.id !== teamId)
+      setTeams(remaining)
+      if (activeTeam && activeTeam.id === teamId) setActiveTeam(remaining[0] ?? null)
       qc.invalidateQueries({ queryKey: ['teams'] })
       navigate('/')
     },
@@ -76,7 +75,7 @@ export default function OrgSettingsPage() {
 
   const invite = useMutation({
     mutationFn: () =>
-      api.post(`/teams/${orgId}/invites`, {
+      api.post(`/teams/${teamId}/invites`, {
         email: inviteEmail,
         role: inviteRole,
         invited_by_user_id: session!.user.id,
@@ -97,18 +96,18 @@ export default function OrgSettingsPage() {
         setInviteMessage(`Invite sent${who}${orgName}.`)
         setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: sentRole }])
       }
-      qc.invalidateQueries({ queryKey: ['org', orgId] })
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
     },
   })
 
   const removeMember = useMutation({
-    mutationFn: (userId: string) => api.delete(`/teams/${orgId}/members/${userId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['org', orgId] }),
+    mutationFn: (userId: string) => api.delete(`/teams/${teamId}/members/${userId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
   })
 
   const resendInvite = useMutation({
     mutationFn: ({ email, role }: { email: string; role: string }) =>
-      api.post(`/teams/${orgId}/invites`, {
+      api.post(`/teams/${teamId}/invites`, {
         email,
         role,
         invited_by_user_id: session!.user.id,
@@ -233,7 +232,7 @@ export default function OrgSettingsPage() {
               ...(org.pending_invites ?? []),
               ...localPendingInvites
                 .filter((i) => !serverEmails.has(i.email))
-                .map((i) => ({ id: i.email, email: i.email, role: i.role as OrgPendingInvite['role'], invited_by_email: undefined, invited_at: '', status: 'pending' as const })),
+                .map((i) => ({ id: i.email, email: i.email, role: i.role as TeamPendingInvite['role'], invited_by_email: undefined, invited_at: '', status: 'pending' as const })),
             ]
             if (merged.length === 0) return null
             return (

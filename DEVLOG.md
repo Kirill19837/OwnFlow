@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-04-26 | `67ac7d9` — UUID role FK, schema migration cleanup, org→team rename complete
+
+- `supabase/migrations/001_schema.sql` — single source-of-truth schema; adds `DROP TABLE IF EXISTS … CASCADE` for all tables (including old `organizations`/`org_members`); realtime publication additions wrapped in idempotent `DO $$ … EXCEPTION WHEN duplicate_object` blocks
+- `roles` table — UUID PK lookup with fixed seeds: `…0001`=owner, `…0002`=admin, `…0003`=member
+- `team_members`, `team_invites`, `company_members`, `project_members` — `role` column is now `uuid references roles(id)` instead of inline text
+- `backend/app/api/teams.py`, `companies.py` — added `ROLE_IDS`/`ROLE_NAMES` maps; all DB inserts/upserts write UUID role values; API responses still return readable text names
+- `backend/app/api/projects.py`, `models.py` — `org_id` → `team_id` throughout
+- `frontend/src` — `org_id` → `team_id` in `NewProjectPage`, `DashboardPage`, `Auth.tsx`, `types.ts`
+- `backend/tests/test_invite_flow.py` — 2 new tests verifying UUID roles are stored (`test_create_team_inserts_owner_role_as_uuid`, `test_invite_stores_role_as_uuid`); 9 tests total passing
+- Deleted old migration files (`002`–`006`, backend `003`–`004`) and `orgs.py`
+
+---
+
 ## 2026-04-22 | `d676497` — Python 3.13 upgrade, fix .env path resolution, fix accept-invites spam
 
 - `Dockerfile` — updated base image from `python:3.12-slim` → `python:3.13-slim`

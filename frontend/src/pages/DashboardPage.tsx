@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useProjectStore } from '../store/projectStore'
-import { useOrgStore } from '../store/orgStore'
+import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import type { Project } from '../types'
 import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, RefreshCw } from 'lucide-react'
@@ -18,7 +18,7 @@ const STATUS_ICON = {
 export default function DashboardPage() {
   const { session } = useAuthStore()
   const { setProjects, projects } = useProjectStore()
-  const { activeOrg } = useOrgStore()
+  const { activeTeam } = useTeamStore()
   const queryClient = useQueryClient()
 
   // Re-generate log panel state
@@ -33,10 +33,10 @@ export default function DashboardPage() {
   }, [regenLogs])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['projects', activeOrg?.id, session?.user.id],
+    queryKey: ['projects', activeTeam?.id, session?.user.id],
     queryFn: () => {
-      const params = activeOrg
-        ? { team_id: activeOrg.id }
+      const params = activeTeam
+        ? { team_id: activeTeam.id }
         : { owner_id: session!.user.id }
       return api.get<Project[]>('/projects', { params }).then((r) => r.data)
     },
@@ -59,7 +59,7 @@ export default function DashboardPage() {
     await api.post(`/projects/${p.id}/regenerate`)
     setRegenLogs((prev) => [...prev, '🚀 Re-running plan generation…'])
     const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    const es = new EventSource(`${apiBase}/projects/${p.id}/plan/stream?ai_model=${encodeURIComponent(activeOrg?.default_ai_model ?? 'gpt-4o')}`)
+    const es = new EventSource(`${apiBase}/projects/${p.id}/plan/stream?ai_model=${encodeURIComponent(activeTeam?.default_ai_model ?? 'gpt-4o')}`)
     esRef.current = es
     es.onmessage = (e) => {
       const payload = JSON.parse(e.data)
@@ -83,14 +83,14 @@ export default function DashboardPage() {
     }
   }
 
-  if (!activeOrg) {
+  if (!activeTeam) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
         <Building2 size={48} className="text-gray-700" />
-        <p className="text-white font-semibold text-lg">No organization selected</p>
-        <p className="text-gray-400 text-sm">Create or select an organization from the header to get started.</p>
+        <p className="text-white font-semibold text-lg">No team selected</p>
+        <p className="text-gray-400 text-sm">Create or select a team from the header to get started.</p>
         <Link to="/teams/new" className="mt-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-          Create organization
+          Create team
         </Link>
       </div>
     )
@@ -100,8 +100,8 @@ export default function DashboardPage() {
     <div className="max-w-5xl mx-auto w-full px-6 py-10">
       <div className="flex items-center justify-between mb-2">
         <div>
-          <h1 className="text-2xl font-bold text-white">{activeOrg.name}</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Default model: <span className="text-purple-400">{activeOrg.default_ai_model}</span></p>
+          <h1 className="text-2xl font-bold text-white">{activeTeam.name}</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Default model: <span className="text-purple-400">{activeTeam.default_ai_model}</span></p>
         </div>
         <Link
           to="/new"
