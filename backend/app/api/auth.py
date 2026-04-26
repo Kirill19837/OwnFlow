@@ -105,7 +105,7 @@ def send_magic_link(body: MagicLinkBody):
     email = body.email.strip().lower()
 
     try:
-        link_resp = db.auth.admin.generate_link({
+        db.auth.admin.generate_link({
             "type": "magiclink",
             "email": email,
             "options": {
