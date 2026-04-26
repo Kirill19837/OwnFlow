@@ -11,6 +11,7 @@ import NewOrgPage from './pages/NewOrgPage'
 import NewCompanyPage from './pages/NewCompanyPage'
 import OrgSettingsPage from './pages/OrgSettingsPage'
 import ProjectActivityPage from './pages/ProjectActivityPage'
+import ProfilePage from './pages/ProfilePage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -32,6 +33,7 @@ export default function App() {
                 <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
                 <Route path="/teams/new" element={<NewOrgPage />} />
                 <Route path="/teams/:teamId/settings" element={<OrgSettingsPage />} />
+                <Route path="/profile" element={<ProfilePage />} />
               </Route>
             </Route>
           </Route>

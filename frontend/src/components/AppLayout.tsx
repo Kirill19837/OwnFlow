@@ -6,7 +6,7 @@ import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Team } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon } from 'lucide-react'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
 import { useThemeStore } from '../store/themeStore'
 
@@ -182,7 +182,14 @@ export default function AppLayout() {
         </div>
 
         <div className="flex items-center gap-4 text-sm text-gray-400 ml-auto">
-          <span className="hidden sm:block">{session?.user?.user_metadata?.full_name || session?.user.email}</span>
+          <button
+            onClick={() => navigate('/profile')}
+            className="hidden sm:flex items-center gap-1.5 hover:text-white transition-colors"
+            title="Profile"
+          >
+            <UserCircle size={15} />
+            <span>{session?.user?.user_metadata?.full_name || session?.user.email}</span>
+          </button>
           <button
             onClick={toggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}

@@ -398,3 +398,9 @@ def delete_team(team_id: str):
 def remove_member(team_id: str, user_id: str):
     db = get_supabase()
     db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
+
+
+@router.delete("/{team_id}/invites/{invite_id}", status_code=204)
+def revoke_invite(team_id: str, invite_id: str):
+    db = get_supabase()
+    db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()

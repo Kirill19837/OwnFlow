@@ -2,6 +2,21 @@
 
 ---
 
+## 2026-04-26 | `ab90989` — Frontend rename Organization→Team; fix team auto-select & password re-prompt
+
+- `frontend/src/types.ts` — `Organization` → `Team`, `OrgMember` → `TeamMember`, `OrgPendingInvite` → `TeamPendingInvite`
+- `frontend/src/store/teamStore.ts` — new store replacing `orgStore.ts`; `useTeamStore`, `teams`/`activeTeam`/`setTeams`/`setActiveTeam`/`updateTeamModel`
+- `frontend/src/store/orgStore.ts` — deleted
+- All pages/components updated: `AppLayout`, `DashboardPage`, `NewProjectPage`, `NewOrgPage`, `NewCompanyPage`, `OrgSettingsPage`
+- Route `:orgId` → `:teamId` in `App.tsx` and `OrgSettingsPage`
+- UI copy: "No organization selected" → "No team selected", "Create organization" → "Create team"
+- `NewCompanyPage` — seeds React Query company cache after creation so `AppLayout` sees it immediately (fixes missing team selection)
+- `AppLayout` — explicitly calls `setActiveTeam(teamsData[0])` when `activeTeam` is null after data loads
+- `CompleteProfileModal` — stamps `password_set: true` in user metadata after setting password
+- `Auth.tsx` — skips `has-password` API call if `user_metadata.password_set` is already true (fixes password modal on every refresh)
+
+---
+
 ## 2026-04-26 | `67ac7d9` — UUID role FK, schema migration cleanup, org→team rename complete
 
 - `supabase/migrations/001_schema.sql` — single source-of-truth schema; adds `DROP TABLE IF EXISTS … CASCADE` for all tables (including old `organizations`/`org_members`); realtime publication additions wrapped in idempotent `DO $$ … EXCEPTION WHEN duplicate_object` blocks

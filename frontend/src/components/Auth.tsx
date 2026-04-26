@@ -29,12 +29,15 @@ export function AuthProvider() {
       if (data.session) {
         const params = new URLSearchParams(window.location.search)
         const inviteOrg = params.get('invite_org') ?? undefined
+        const isInviteLanding = !!params.get('invite_org') || !!params.get('link_type')
         if (inviteOrg) {
           await acceptInvitesIfNeeded(data.session, inviteOrg)
         }
-        // Check name on session restore (existing sessions)
+        // Check name on session restore (existing sessions).
+        // Skip on invite landings — SIGNED_IN will handle name + password together
+        // once the password check completes, so both fields appear in one modal.
         const name = data.session.user?.user_metadata?.full_name
-        if (!name || !String(name).trim()) {
+        if (!isInviteLanding && (!name || !String(name).trim())) {
           useAuthStore.getState().setNeedsName(true)
         }
       }

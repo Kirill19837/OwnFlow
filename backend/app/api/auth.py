@@ -165,3 +165,29 @@ def create_company_invite(body: CreateCompanyInviteBody):
         return {"status": "sent", "email": email}
     except Exception as exc:
         raise HTTPException(400, f"Failed to generate invite: {exc}")
+
+
+class DeleteAccountBody(BaseModel):
+    user_id: str
+
+
+@router.delete("/account", status_code=204)
+def delete_account(user_id: str):
+    """
+    Permanently delete the calling user's account.
+    Blocked if the user is the owner of any company — they must transfer
+    ownership or delete the company first.
+    """
+    db = get_supabase()
+    owned = db.table("companies").select("id").eq("owner_id", user_id).execute()
+    if owned.data:
+        raise HTTPException(
+            403,
+            "You are the owner of a company. Delete the company or transfer ownership before deleting your account.",
+        )
+    db.table("team_members").delete().eq("user_id", user_id).execute()
+    db.table("company_members").delete().eq("user_id", user_id).execute()
+    try:
+        db.auth.admin.delete_user(user_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to delete auth user: {exc}")

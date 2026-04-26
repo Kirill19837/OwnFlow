@@ -117,6 +117,11 @@ export default function OrgSettingsPage() {
     onSuccess: (_, { email }) => setInviteMessage(`Invite re-sent to ${email}.`),
   })
 
+  const revokeInvite = useMutation({
+    mutationFn: (inviteId: string) => api.delete(`/teams/${teamId}/invites/${inviteId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
+  })
+
   if (isLoading || !org) {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading…</div>
   }
@@ -259,6 +264,16 @@ export default function OrgSettingsPage() {
                         <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
                           invite sent
                         </span>
+                        {inv.id !== inv.email && (
+                          <button
+                            onClick={() => revokeInvite.mutate(inv.id)}
+                            disabled={revokeInvite.isPending}
+                            title="Revoke invite"
+                            className="text-gray-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
