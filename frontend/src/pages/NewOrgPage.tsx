@@ -27,7 +27,7 @@ export default function NewOrgPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<Organization>('/orgs', {
+      api.post<Organization>('/teams', {
         name,
         owner_id: session!.user.id,
         default_ai_model: model,

@@ -368,3 +368,9 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 
 - Upgraded `supabase` from 2.7.4 → 2.29.0 — eliminates `gotrue` deprecation warning (package now uses `supabase_auth` internally)
 - Removed unused `action_link` variable in `send_magic_link` endpoint (ruff lint error 841)
+
+## 2026-04-26 — lint + CI fixes (7d963d8)
+
+- Fix ruff F841: removed unused `link_resp` variable in `send_magic_link` endpoint (`auth.py`)
+- Fix CI: bumped pydantic 2.9.2 → 2.13.3 to satisfy `realtime==2.29.0` constraint (requires `pydantic>=2.11.7`)
+- Memory: commit discipline recorded — never auto-commit; always run checks first, only commit on "tested"

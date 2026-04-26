@@ -89,7 +89,7 @@ export default function DashboardPage() {
         <Building2 size={48} className="text-gray-700" />
         <p className="text-white font-semibold text-lg">No organization selected</p>
         <p className="text-gray-400 text-sm">Create or select an organization from the header to get started.</p>
-        <Link to="/orgs/new" className="mt-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+        <Link to="/teams/new" className="mt-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           Create organization
         </Link>
       </div>

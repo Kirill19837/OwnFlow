@@ -40,7 +40,7 @@ export default function AppLayout() {
     queryFn: () =>
       companyData
         ? api.get<Organization[]>(`/companies/${companyData.id}/teams`, { params: { user_id: session!.user.id } }).then((r) => r.data)
-        : api.get<Organization[]>('/orgs/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
+        : api.get<Organization[]>('/teams/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
     enabled: !!session && companyLoaded,
   })
 
@@ -61,7 +61,7 @@ export default function AppLayout() {
       const emailPrefix = session?.user.email?.split('@')[0]?.trim() || 'My'
       const first = emailPrefix[0]?.toUpperCase() || 'M'
       const name = `${first}${emailPrefix.slice(1)} Organization`
-      const { data } = await api.post<Organization>('/orgs', {
+      const { data } = await api.post<Organization>('/teams', {
         name,
         owner_id: session!.user.id,
         default_ai_model: 'gpt-4o',
@@ -164,7 +164,7 @@ export default function AppLayout() {
                 </button>
                 {activeOrg && (
                   <button
-                    onClick={() => { navigate(`/orgs/${activeOrg.id}/settings`); setDropOpen(false) }}
+                    onClick={() => { navigate(`/teams/${activeOrg.id}/settings`); setDropOpen(false) }}
                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                   >
                     <Settings size={14} />

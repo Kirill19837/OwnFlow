@@ -34,6 +34,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  // password is only used for login
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -65,7 +66,7 @@ export default function LoginPage() {
         await signIn(email, password)
         navigate('/')
       } else {
-        await signUp(email, password, name)
+        await signUp(email, name)
         setSignedUpEmail(email)
       }
     } catch (err: unknown) {
@@ -165,16 +166,18 @@ export default function LoginPage() {
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Password</label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
+              {mode === 'login' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              )}
               {error && <p className="text-red-400 text-sm">{error}</p>}
 
               {showMagicLink && (

@@ -16,7 +16,7 @@ export function AuthProvider() {
     const userId = session?.user?.id
     if (!email || !userId) return
     try {
-      await api.post('/orgs/accept-invites', { user_id: userId, email, org_id: orgId })
+      await api.post('/teams/accept-invites', { user_id: userId, email, org_id: orgId })
     } catch {
       // Non-blocking: auth flow should continue even if invite sync fails.
     }

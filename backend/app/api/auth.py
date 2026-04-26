@@ -1,3 +1,5 @@
+import secrets
+import string
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -9,9 +11,14 @@ from app.email import send_signup_confirmation_email, send_magic_link_email
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _generate_password(length: int = 32) -> str:
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
 class SignupBody(BaseModel):
     email: str
-    password: str
+    password: Optional[str] = None
     name: Optional[str] = None
 
 
@@ -24,11 +31,13 @@ def signup(body: SignupBody):
     db = get_supabase()
     settings = get_settings()
 
+    password = body.password or _generate_password()
+
     try:
         link_resp = db.auth.admin.generate_link({
             "type": "signup",
             "email": body.email,
-            "password": body.password,
+            "password": password,
             "options": {
                 "redirect_to": f"{settings.frontend_url.rstrip('/')}/",
             },

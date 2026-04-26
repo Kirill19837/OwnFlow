@@ -33,12 +33,12 @@ export default function OrgSettingsPage() {
 
   const { data: org, isLoading } = useQuery({
     queryKey: ['org', orgId],
-    queryFn: () => api.get<Organization>(`/orgs/${orgId}`).then((r) => r.data),
+    queryFn: () => api.get<Organization>(`/teams/${orgId}`).then((r) => r.data),
     enabled: !!orgId,
   })
 
   const updateModel = useMutation({
-    mutationFn: (model: string) => api.patch(`/orgs/${orgId}`, { default_ai_model: model }),
+    mutationFn: (model: string) => api.patch(`/teams/${orgId}`, { default_ai_model: model }),
     onSuccess: (_, model) => {
       updateOrgModel(orgId!, model)
       qc.invalidateQueries({ queryKey: ['org', orgId] })
@@ -49,7 +49,7 @@ export default function OrgSettingsPage() {
   })
 
   const renameTeam = useMutation({
-    mutationFn: (name: string) => api.patch(`/orgs/${orgId}`, { name }),
+    mutationFn: (name: string) => api.patch(`/teams/${orgId}`, { name }),
     onSuccess: (_, name) => {
       qc.invalidateQueries({ queryKey: ['org', orgId] })
       qc.invalidateQueries({ queryKey: ['teams'] })
@@ -63,7 +63,7 @@ export default function OrgSettingsPage() {
   })
 
   const deleteTeam = useMutation({
-    mutationFn: () => api.delete(`/orgs/${orgId}`),
+    mutationFn: () => api.delete(`/teams/${orgId}`),
     onSuccess: () => {
       const { orgs, activeOrg, setOrgs, setActiveOrg } = useOrgStore.getState()
       const remaining = orgs.filter((o) => o.id !== orgId)
@@ -76,7 +76,7 @@ export default function OrgSettingsPage() {
 
   const invite = useMutation({
     mutationFn: () =>
-      api.post(`/orgs/${orgId}/invites`, {
+      api.post(`/teams/${orgId}/invites`, {
         email: inviteEmail,
         role: inviteRole,
         invited_by_user_id: session!.user.id,
@@ -102,13 +102,13 @@ export default function OrgSettingsPage() {
   })
 
   const removeMember = useMutation({
-    mutationFn: (userId: string) => api.delete(`/orgs/${orgId}/members/${userId}`),
+    mutationFn: (userId: string) => api.delete(`/teams/${orgId}/members/${userId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org', orgId] }),
   })
 
   const resendInvite = useMutation({
     mutationFn: ({ email, role }: { email: string; role: string }) =>
-      api.post(`/orgs/${orgId}/invites`, {
+      api.post(`/teams/${orgId}/invites`, {
         email,
         role,
         invited_by_user_id: session!.user.id,

@@ -60,7 +60,7 @@ def client():
 
 def _patch_db(db_mock):
     """Patch get_supabase to return db_mock everywhere."""
-    return patch("app.api.orgs.get_supabase", return_value=db_mock)
+    return patch("app.api.teams.get_supabase", return_value=db_mock)
 
 
 # ---------------------------------------------------------------------------
@@ -94,14 +94,14 @@ def test_invite_new_email_sends_invite(client):
     db.auth.admin.generate_link.return_value = link_resp
 
     with _patch_db(db):
-        with patch("app.api.orgs.send_invite_email") as mock_send:
-            with patch("app.api.orgs.get_settings") as mock_settings:
+        with patch("app.api.teams.send_invite_email") as mock_send:
+            with patch("app.api.teams.get_settings") as mock_settings:
                 s = MagicMock()
                 s.postmark_enabled = True
                 s.frontend_url = "http://localhost:5173"
                 mock_settings.return_value = s
 
-                resp = client.post(f"/orgs/{ORG_ID}/invites", json={
+                resp = client.post(f"/teams/{ORG_ID}/invites", json={
                     "email": INVITEE_EMAIL,
                     "role": "member",
                     "invited_by_user_id": OWNER_ID,
@@ -140,14 +140,14 @@ def test_invite_confirmed_existing_user_goes_through_pending_flow(client):
     db.auth.admin.generate_link.side_effect = Exception("User already registered")
 
     with _patch_db(db):
-        with patch("app.api.orgs.send_added_to_org_email") as mock_notify:
-            with patch("app.api.orgs.get_settings") as mock_settings:
+        with patch("app.api.teams.send_added_to_org_email") as mock_notify:
+            with patch("app.api.teams.get_settings") as mock_settings:
                 s = MagicMock()
                 s.postmark_enabled = True
                 s.frontend_url = "http://localhost:5173"
                 mock_settings.return_value = s
 
-                resp = client.post(f"/orgs/{ORG_ID}/invites", json={
+                resp = client.post(f"/teams/{ORG_ID}/invites", json={
                     "email": INVITEE_EMAIL,
                     "role": "member",
                     "invited_by_user_id": OWNER_ID,
@@ -189,15 +189,15 @@ def test_invite_unconfirmed_user_goes_through_invite_flow(client):
     db.auth.admin.generate_link.return_value = link_resp
 
     with _patch_db(db):
-        with patch("app.api.orgs.send_invite_email") as mock_send:
-            with patch("app.api.orgs.send_added_to_org_email") as mock_notify:
-                with patch("app.api.orgs.get_settings") as mock_settings:
+        with patch("app.api.teams.send_invite_email") as mock_send:
+            with patch("app.api.teams.send_added_to_org_email") as mock_notify:
+                with patch("app.api.teams.get_settings") as mock_settings:
                     s = MagicMock()
                     s.postmark_enabled = True
                     s.frontend_url = "http://localhost:5173"
                     mock_settings.return_value = s
 
-                    resp = client.post(f"/orgs/{ORG_ID}/invites", json={
+                    resp = client.post(f"/teams/{ORG_ID}/invites", json={
                         "email": INVITEE_EMAIL,
                         "role": "member",
                         "invited_by_user_id": OWNER_ID,
@@ -225,12 +225,12 @@ def test_invite_invalid_email_returns_400(client):
     db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
 
     with _patch_db(db):
-        with patch("app.api.orgs.get_settings") as mock_settings:
+        with patch("app.api.teams.get_settings") as mock_settings:
             s = MagicMock()
             s.postmark_enabled = False
             mock_settings.return_value = s
 
-            resp = client.post(f"/orgs/{ORG_ID}/invites", json={
+            resp = client.post(f"/teams/{ORG_ID}/invites", json={
                 "email": "not-an-email",
                 "role": "member",
                 "invited_by_user_id": OWNER_ID,
@@ -252,12 +252,12 @@ def test_non_member_cannot_invite(client):
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp([])
 
     with _patch_db(db):
-        with patch("app.api.orgs.get_settings") as mock_settings:
+        with patch("app.api.teams.get_settings") as mock_settings:
             s = MagicMock()
             s.postmark_enabled = False
             mock_settings.return_value = s
 
-            resp = client.post(f"/orgs/{ORG_ID}/invites", json={
+            resp = client.post(f"/teams/{ORG_ID}/invites", json={
                 "email": INVITEE_EMAIL,
                 "role": "member",
                 "invited_by_user_id": str(uuid.uuid4()),
@@ -281,7 +281,7 @@ def test_accept_invites_adds_member_and_marks_accepted(client):
     db.table.return_value.update.return_value.eq.return_value.execute.return_value = _resp([])
 
     with _patch_db(db):
-        resp = client.post("/orgs/accept-invites", json={
+        resp = client.post("/teams/accept-invites", json={
             "user_id": INVITEE_ID,
             "email": INVITEE_EMAIL,
         })
@@ -289,7 +289,7 @@ def test_accept_invites_adds_member_and_marks_accepted(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["accepted"] == 1
-    assert ORG_ID in body["org_ids"]
+    assert ORG_ID in body["team_ids"]
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +301,7 @@ def test_accept_invites_no_pending(client):
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = _resp([])
 
     with _patch_db(db):
-        resp = client.post("/orgs/accept-invites", json={
+        resp = client.post("/teams/accept-invites", json={
             "user_id": INVITEE_ID,
             "email": "nobody@example.com",
         })
