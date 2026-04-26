@@ -1,11 +1,13 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { User, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 
 export default function CompleteProfileModal() {
-  const { needsPassword, needsName, setNeedsPassword, setNeedsName, setSession } = useAuthStore()
+  const { needsPassword, needsName, setNeedsPassword, setNeedsName, setSession, linkType } = useAuthStore()
+  const navigate = useNavigate()
 
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
@@ -42,6 +44,11 @@ export default function CompleteProfileModal() {
       if (needsPassword) messages.push('password set')
       if (needsName) messages.push(`welcome, ${name.trim()}!`)
       toast.success(messages.join(' — ') || 'Profile updated')
+
+      // Direct user to the right place based on why they signed in via link
+      if (linkType === 'create_company') {
+        navigate('/company/new')
+      }
     } catch (err: unknown) {
       setError((err as Error).message ?? 'Failed to save — please try again')
     } finally {

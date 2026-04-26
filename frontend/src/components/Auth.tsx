@@ -44,21 +44,30 @@ export function AuthProvider() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       // Only accept invites on a real sign-in, not on every session restore/refresh.
       if (event === 'SIGNED_IN') {
-        // Read invite_org from the URL (embedded in the magic link redirect).
+        // Read invite_org and link_type from the URL (embedded in the magic link redirect).
         const params = new URLSearchParams(window.location.search)
         const inviteOrg = params.get('invite_org') ?? undefined
+        const linkType = params.get('link_type') as 'create_company' | 'join_company' | 'set_password' | null
+        if (linkType) useAuthStore.getState().setLinkType(linkType)
         await acceptInvitesIfNeeded(session, inviteOrg)
 
-        // Decode JWT AMR (Authentication Methods References) to detect OTP / invite
-        // sign-ins — these users have no password yet and need to set one.
-        // method "password" → already has a password; method "otp" → magic link / invite.
+        // Decode JWT AMR to detect OTP sign-ins (magic link / invite / email confirm).
+        // Email confirmation also comes in as method "otp", but the user already has a
+        // password — so we verify against the backend before showing the password modal.
         try {
           const token = session?.access_token
           if (token) {
             const payload = JSON.parse(atob(token.split('.')[1]))
             const amr: Array<{ method: string }> = payload.amr ?? []
             const isOtp = amr.some((a) => a.method === 'otp')
-            if (isOtp) useAuthStore.getState().setNeedsPassword(true)
+            if (isOtp && session?.user?.id) {
+              const { data } = await api.get<{ has_password: boolean }>(
+                `/auth/has-password?user_id=${session.user.id}`
+              )
+              if (!data.has_password) {
+                useAuthStore.getState().setNeedsPassword(true)
+              }
+            }
           }
         } catch {
           // Non-blocking

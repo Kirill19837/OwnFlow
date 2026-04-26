@@ -81,6 +81,8 @@ export default function AppLayout() {
     if (!teamsData || !session?.user.id || !companyLoaded) return
     setOrgs(teamsData)
     if (teamsData.length > 0) return
+    // Don't redirect while the profile-completion modal is still open
+    if (needsPassword || needsName) return
     // No teams and no company → send to company setup
     if (!companyData) {
       navigate('/company/new')

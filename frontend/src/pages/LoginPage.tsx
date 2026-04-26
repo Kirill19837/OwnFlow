@@ -85,7 +85,7 @@ export default function LoginPage() {
     if (magicLinkCooldown > 0 || magicLinkLoading) return
     setMagicLinkLoading(true)
     try {
-      await api.post('/auth/magic-link', { email })
+      await api.post('/auth/magic-link', { email, link_type: 'set_password' })
       localStorage.setItem(`ml_sent_${email}`, String(Date.now()))
       setMagicLinkCooldown(MAGIC_LINK_COOLDOWN_MS)
       setMagicLinkSent(true)

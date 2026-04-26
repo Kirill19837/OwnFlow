@@ -258,7 +258,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                         "org_name": org.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}&link_type=join_company",
                 },
             })
             action_link = (
@@ -276,7 +276,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
             msg = str(exc).lower()
             if "already registered" in msg or "already been invited" in msg:
                 # User has a confirmed account — send a login notification instead
-                login_url = f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}"
+                login_url = f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}&link_type=join_company"
                 try:
                     send_added_to_org_email(
                         to_email=email,
@@ -301,7 +301,7 @@ def invite_member_by_email(org_id: str, body: OrgEmailInvite):
                         "org_name": org.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={org_id}&link_type=join_company",
                 },
             )
         except Exception as exc:

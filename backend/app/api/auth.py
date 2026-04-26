@@ -90,6 +90,7 @@ def has_password(user_id: str):
 
 class MagicLinkBody(BaseModel):
     email: str
+    link_type: str = "set_password"
 
 
 @router.post("/magic-link", status_code=200)
@@ -108,7 +109,7 @@ def send_magic_link(body: MagicLinkBody):
             "type": "magiclink",
             "email": email,
             "options": {
-                "redirect_to": f"{settings.frontend_url.rstrip('/')}/",
+                "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?link_type={body.link_type}",
             },
         })
     except Exception as exc:
@@ -122,10 +123,40 @@ def send_magic_link(body: MagicLinkBody):
         getattr(link_resp, "action_link", None)
         or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
     )
-    if action_link:
-        try:
-            send_magic_link_email(to_email=email, magic_url=action_link)
-        except Exception as exc:
-            raise HTTPException(500, f"Failed to send magic link email: {exc}")
-
     return {"status": "sent", "email": email}
+
+
+class CreateCompanyInviteBody(BaseModel):
+    email: str
+
+
+@router.post("/create-company-invite", status_code=200)
+def create_company_invite(body: CreateCompanyInviteBody):
+    """
+    Invite a brand-new user to OwnFlow to create their own company.
+    Generates a Supabase invite link with link_type=create_company so the
+    frontend sends them to /company/new after they set their name and password.
+    """
+    db = get_supabase()
+    settings = get_settings()
+    email = body.email.strip().lower()
+    try:
+        link_resp = db.auth.admin.generate_link({
+            "type": "invite",
+            "email": email,
+            "options": {
+                "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?link_type=create_company",
+            },
+        })
+        action_link = (
+            getattr(link_resp, "action_link", None)
+            or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
+        )
+        if action_link and settings.postmark_enabled:
+            try:
+                send_magic_link_email(to_email=email, magic_url=action_link)
+            except Exception:
+                pass  # Non-blocking
+        return {"status": "sent", "email": email}
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to generate invite: {exc}")

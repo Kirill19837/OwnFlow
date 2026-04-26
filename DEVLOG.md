@@ -339,3 +339,14 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Single combined modal for name + password (replaces two separate modals)
 - JWT AMR claim detection: method=otp triggers password prompt; existing password users unaffected
 - Fixed apostrophe parse error in JSX string literals
+
+## 2026-04-26 — Dark/light theme toggle + bug fixes (d07add1)
+
+- Dark/light theme toggle: Zustand store with localStorage persistence (`themeStore.ts`)
+- CSS override approach — `html:not(.dark)` selectors in `index.css` flip all gray Tailwind utilities to light palette; zero JSX component changes needed
+- `tailwind.config.js`: added `darkMode: 'class'`
+- `main.tsx`: applies saved theme before first React render (no flash on reload)
+- `AppLayout.tsx`: Sun/Moon toggle button in header; user display name shown from `user_metadata.full_name`
+- Fix: removed `from __future__ import annotations` in `auth.py` — was causing Pydantic `PydanticUndefinedAnnotation: SignupBody` crash on startup
+- Fix: apostrophe parse error in `CompleteProfileModal.tsx` — `'What's your name?'` → `"What's your name?"`
+- Added `docs/auth-flow.md` — comprehensive auth flow documentation
