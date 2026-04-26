@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-04-26 | `4a82527` — Security: verify caller identity via JWT; add role-based permissions for invite/delete team
+
+- `backend/app/auth_deps.py` (NEW) — `current_user_id` FastAPI dependency: verifies Supabase JWT via `auth.get_user(token)` and returns the authenticated user's UUID; no client-supplied identity trusted
+- `backend/app/api/teams.py` — `delete_team` now uses `Depends(current_user_id)` instead of `?requester_id=` query param; only owners may delete a team (403 otherwise); only owners/admins may send invites
+- `backend/app/api/auth.py` — `delete_account` uses `Depends(current_user_id)`; removed `DeleteAccountBody` model
+- `frontend/src/lib/api.ts` — axios request interceptor attaches `Authorization: Bearer <supabase_jwt>` to every outbound request
+- `frontend/src/pages/OrgSettingsPage.tsx` — `deleteTeam` no longer sends `?requester_id=`; invite/delete sections gated by `canInvite` / `canDelete` role checks
+- `frontend/src/pages/ProfilePage.tsx` — `deleteAccount` call no longer sends user_id param
+- `backend/tests/test_invite_flow.py` — tests 12 & 13 updated to override `current_user_id` dependency via `app.dependency_overrides` instead of query param; all 13 tests pass
+
+---
+
 ## 2026-04-26 | `1384389` — Fix 500 on accept-invites; guard company/new redirect on join flow
 
 - `frontend/src/components/Auth.tsx` — `accept-invites` is now only called when the URL contains `?invite_org=...`; regular sign-ins never touch the endpoint

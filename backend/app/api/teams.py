@@ -128,13 +128,17 @@ def list_models():
 
 
 @router.get("/{team_id}")
-def get_team(team_id: str):
+def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
     db = get_supabase()
     team = db.table("teams").select("*").eq("id", team_id).single().execute()
     if not team.data:
         raise HTTPException(404, "Team not found")
     members_resp = db.table("team_members").select("*").eq("team_id", team_id).execute()
     members = members_resp.data or []
+
+    # Resolve caller's role
+    caller_member = next((m for m in members if str(m.get("user_id")) == caller_id), None)
+    my_role = ROLE_NAMES.get(caller_member["role"], "member") if caller_member else None
 
     if members:
         users = _extract_auth_users(db.auth.admin.list_users())
@@ -172,7 +176,7 @@ def get_team(team_id: str):
     except Exception:
         pending_invites = []
 
-    return {**team.data, "members": members, "pending_invites": pending_invites}
+    return {**team.data, "members": members, "pending_invites": pending_invites, "my_role": my_role}
 
 
 @router.patch("/{team_id}")
