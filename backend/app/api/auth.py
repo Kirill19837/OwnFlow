@@ -119,10 +119,6 @@ def send_magic_link(body: MagicLinkBody):
         logging.getLogger(__name__).warning("magic-link generate_link failed for %s: %s", email, exc)
         return {"status": "sent", "email": email}
 
-    action_link = (
-        getattr(link_resp, "action_link", None)
-        or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
-    )
     return {"status": "sent", "email": email}
 
 

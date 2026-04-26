@@ -350,3 +350,16 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Fix: removed `from __future__ import annotations` in `auth.py` — was causing Pydantic `PydanticUndefinedAnnotation: SignupBody` crash on startup
 - Fix: apostrophe parse error in `CompleteProfileModal.tsx` — `'What's your name?'` → `"What's your name?"`
 - Added `docs/auth-flow.md` — comprehensive auth flow documentation
+
+## 2026-04-26 — link_type routing for OTP links (c69b5ab)
+
+- All OTP/magic-link redirect URLs now carry `?link_type=` so the frontend knows what to do after sign-in
+- `create_company` — signup confirmation + `POST /auth/create-company-invite` → after profile modal navigates to `/company/new`
+- `join_company` — org invite links (both Postmark + Supabase fallback paths in `orgs.py`)
+- `set_password` — "Use magic link" button on login page (wrong password flow)
+- `authStore`: added `LinkType` type + `linkType` state + `setLinkType` action
+- `Auth.tsx`: reads `link_type` from URL on `SIGNED_IN` and stores it
+- `CompleteProfileModal`: navigates to `/company/new` after submit when `linkType === 'create_company'`
+- `AppLayout`: skips `/company/new` redirect while `needsPassword || needsName` modal is open
+- Backend: new `POST /auth/create-company-invite` endpoint for inviting users to start their own company
+- Fix: `has-password` API check now prevents false-positive password modal for regular signup confirmations
