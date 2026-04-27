@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-27 | `eec23a8` — Validate name ≥4 chars and password ≥8 chars on profile setup (FE + BE)
+
+- `frontend/src/components/CompleteProfileModal.tsx` — `nameValid` threshold raised from `> 0` to `>= 4`; inline red hint "Name must be at least 4 characters" appears while typing (mirrors existing password-mismatch hint)
+- `frontend/src/pages/InvitePage.tsx` — same name validation change in the inline profile step; removed stale duplicate `interface PendingInvite` at bottom of file
+- `backend/app/api/companies.py` — returns `400 "Full name must be at least 4 characters"` / `"Password must be at least 8 characters"` before any DB writes if either field is provided but too short
+- `backend/app/api/teams.py` — same early validation in `_do_accept_invites` before profile update and invite acceptance
+- Validation — `make check-backend` (18 tests) and `make check-frontend` both passed
+
+---
+
 ## 2026-04-27 | `75ab5b8` — Invite confirmation page: show accept/decline card before joining team
 
 - `frontend/src/pages/InvitePage.tsx` — rewritten: fetches pending invite details from `GET /teams/pending-invite`, shows a card with team name / role / inviter; Accept → calls accept-invites then goes to `/` (CompleteProfileModal handles name+password); Decline → signs out, goes to `/login`; handles no-pending-invite gracefully

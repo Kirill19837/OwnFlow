@@ -58,24 +58,29 @@ export default function InvitePage() {
     setStep('invite-card')
   }
 
-  const handleAccept = () => {
+  const handleAccept = async () => {
     if (!session || !invite) return
     setStep('accepting')
     setLinkType(null) // allow CompleteProfileModal to show for future flows
 
-    api
-      .post('/teams/accept-invites', {
+    try {
+      await api.post('/teams/accept-invites', {
         user_id: session.user.id,
         email: session.user.email,
         // Atomically save profile + accept invite in one call
         ...(needsPassword && password ? { password } : {}),
         ...(needsName && name.trim() ? { full_name: name.trim() } : {}),
       })
-      .then(() => {
-        setNeedsPassword(false)
-        setNeedsName(false)
-      })
-      .finally(() => navigate('/', { replace: true }))
+      // If the password was just set, the current JWT is invalidated by Supabase.
+      // Refresh the session so the new token is in the store before navigating.
+      if (needsPassword && password) {
+        await supabase.auth.refreshSession()
+      }
+      setNeedsPassword(false)
+      setNeedsName(false)
+    } finally {
+      navigate('/', { replace: true })
+    }
   }
 
   const handleDecline = async () => {

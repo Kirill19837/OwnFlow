@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore'
 import { useCompanyStore } from '../store/companyStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
+import { supabase } from '../lib/supabase'
 import {
   Layers,
   Bot,
@@ -87,7 +88,13 @@ export default function NewCompanyPage() {
           ...(pendingProfile?.name ? { full_name: pendingProfile.name } : {}),
         })
         .then((r) => r.data),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // If the password was just set for the first time, the current JWT is
+      // invalidated by Supabase. Refresh the session so the new token is in
+      // the store before any further authenticated requests are made.
+      if (pendingProfile?.password) {
+        await supabase.auth.refreshSession()
+      }
       // Profile is now saved in Supabase — clear the pending state
       setPendingProfile(null)
       setNeedsPassword(false)
