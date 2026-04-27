@@ -93,7 +93,7 @@ def create_company(body: CompanyCreate):
             "origin": "organic",
             "signup_status": "company_created",
             "completed_at": _now,
-        }).execute()
+        }, on_conflict="user_id").execute()
     except Exception:
         pass  # Non-blocking
 

@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-27 | `c49db2f` — Refactor invite flow: dedicated /invite page, clean URLs, simplified Auth
+
+- `frontend/src/pages/InvitePage.tsx` (new) — dedicated landing page for `/invite`; waits for Zustand session, calls `POST /teams/accept-invites`, then navigates to `/`; uses `useRef` to prevent double execution
+- `frontend/src/App.tsx` — `/invite` route now renders `InvitePage` instead of `LoginPage`
+- `frontend/src/components/Auth.tsx` — removed `acceptInvitesIfNeeded` entirely; `resolveLinkType` now checks `window.location.pathname === '/invite'` instead of `?invite_org` query param
+- `backend/app/api/teams.py` — all `redirect_to` values changed from `/invite?invite_org=…&link_type=join_company` to plain `/invite`
+- `docs/auth-flow.md` — fully rewritten with all 8 flows, JWT AMR claim explanation, `user_signups` funnel table, key files and email templates tables; old stale sections removed
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
 ## 2026-04-27 | `b687042` — Fix Supabase lock contention in axios interceptor
 
 - `frontend/src/lib/api.ts` — replaced `async` interceptor that called `supabase.auth.getSession()` with a synchronous read from `useAuthStore.getState().session`; eliminates the `Lock "lock:sb-…-auth-token" was released because another request stole it` error that fired when multiple parallel API calls (e.g. on AppLayout mount) all raced for the same storage lock simultaneously

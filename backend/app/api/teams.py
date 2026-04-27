@@ -340,7 +340,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                 "signup_status": "invited",
                 "team_id": team_id,
                 "invited_by_email": inviter_email,
-            }).execute()
+            }, on_conflict="user_id").execute()
     except Exception:
         pass  # Non-blocking
 
@@ -443,7 +443,7 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
                 "signup_status": "team_join",
                 "team_id": accepted_team_ids[0],
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
+            }, on_conflict="user_id").execute()
         except Exception:
             pass  # Non-blocking
 
