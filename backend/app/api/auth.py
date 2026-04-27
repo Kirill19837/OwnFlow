@@ -56,15 +56,27 @@ def signup(body: SignupBody):
     if not action_link:
         raise HTTPException(500, "Could not generate confirmation link.")
 
+    # Extract the newly-created user ID (shared by name metadata and origin tracking).
+    _new_user_obj = getattr(link_resp, "user", None) or getattr(getattr(link_resp, "properties", None), "user", None)
+    _new_user_id = getattr(_new_user_obj, "id", None)
+
     # Persist the display name in user_metadata if provided.
-    if body.name and body.name.strip():
+    if body.name and body.name.strip() and _new_user_id:
         try:
-            user_obj = getattr(link_resp, "user", None) or getattr(getattr(link_resp, "properties", None), "user", None)
-            user_id = getattr(user_obj, "id", None)
-            if user_id:
-                db.auth.admin.update_user_by_id(user_id, {"user_metadata": {"full_name": body.name.strip()}})
+            db.auth.admin.update_user_by_id(_new_user_id, {"user_metadata": {"full_name": body.name.strip()}})
         except Exception:
             pass  # Non-blocking — account still created
+
+    # Record this user's origin so the frontend knows to show the company-setup flow.
+    if _new_user_id:
+        try:
+            db.table("user_signups").insert({
+                "user_id": str(_new_user_id),
+                "origin": "organic",
+                # signup_status is null for organic users until they create a company
+            }).execute()
+        except Exception:
+            pass  # Non-blocking
 
     try:
         send_signup_confirmation_email(
@@ -188,3 +200,19 @@ def delete_account(user_id: str = Depends(current_user_id)):
         db.auth.admin.delete_user(user_id)
     except Exception as exc:
         raise HTTPException(500, f"Failed to delete auth user: {exc}")
+
+
+@router.get("/my-origin")
+def get_my_origin(user_id: str = Depends(current_user_id)):
+    """
+    Return how the calling user first entered the product.
+    'organic'     → self-signup; frontend should show company-setup flow.
+    'team_invite' → arrived via a team invitation; skip company creation.
+    Defaults to 'organic' for users who signed up before this feature.
+    """
+    db = get_supabase()
+    resp = db.table("user_signups").select("origin").eq("user_id", user_id).maybe_single().execute()
+    if resp.data:
+        return {"origin": resp.data["origin"]}
+    # Safe default: send unknown users through company-setup
+    return {"origin": "organic"}

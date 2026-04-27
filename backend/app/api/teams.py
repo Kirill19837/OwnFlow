@@ -325,6 +325,25 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     if invite_error == "rate_limit":
         status = "invite_queued"
 
+    # If the invited email already has an account, record that they've been invited
+    # so the funnel shows 'invited' until they accept.
+    try:
+        existing_user = db.auth.admin.list_users()
+        invited_user = next(
+            (u for u in (existing_user or []) if getattr(u, "email", "") == email),
+            None,
+        )
+        if invited_user:
+            db.table("user_signups").upsert({
+                "user_id": str(invited_user.id),
+                "origin": "team_invite",
+                "signup_status": "invited",
+                "team_id": team_id,
+                "invited_by_email": inviter_email,
+            }).execute()
+    except Exception:
+        pass  # Non-blocking
+
     return {
         "status": status,
         "email": email,
@@ -412,6 +431,21 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
             "accepted_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", row["id"]).execute()
         accepted_team_ids.append(row["team_id"])
+
+    # Upsert the signup record: mark the user as having joined via team invite.
+    # If the user was already tracked as 'organic' we still update signup_status
+    # to 'team_join' so the funnel stays accurate.
+    if accepted_team_ids:
+        try:
+            db.table("user_signups").upsert({
+                "user_id": str(body.user_id),
+                "origin": "team_invite",
+                "signup_status": "team_join",
+                "team_id": accepted_team_ids[0],
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception:
+            pass  # Non-blocking
 
     return {"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids}
 

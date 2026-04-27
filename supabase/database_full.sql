@@ -1,34 +1,42 @@
--- OwnFlow — full schema (single source of truth)
--- Drop everything and recreate cleanly.
--- Run against an empty Supabase project.
+-- OwnFlow — full database schema (single source of truth)
+-- Run this against a fresh Supabase project to bootstrap the entire schema.
+-- Idempotent: drops all existing OwnFlow tables and recreates them cleanly.
+--
+-- Usage (Supabase SQL editor or psql):
+--   \i database_full.sql
 
--- ─── Drop old tables (if migrating from previous schema) ─────────────────────
-drop table if exists task_interactions    cascade;
-drop table if exists github_connections cascade;
-drop table if exists ai_messages        cascade;
-drop table if exists ai_logs            cascade;
-drop table if exists deliverables       cascade;
-drop table if exists assignments        cascade;
-drop table if exists tasks              cascade;
-drop table if exists sprints            cascade;
-drop table if exists project_members    cascade;
-drop table if exists projects           cascade;
-drop table if exists actors             cascade;
-drop table if exists org_invites        cascade;
-drop table if exists org_members        cascade;
-drop table if exists organizations      cascade;
-drop table if exists team_invites       cascade;
-drop table if exists team_members       cascade;
-drop table if exists teams              cascade;
-drop table if exists company_members    cascade;
-drop table if exists companies          cascade;
-drop table if exists roles              cascade;
+-- ─── Extensions ──────────────────────────────────────────────────────────────
 
 create extension if not exists "pgcrypto";
 
--- ─── Roles (lookup table) ────────────────────────────────────────────────────
+-- ─── Drop existing tables (dependency order: children first) ─────────────────
 
-create table if not exists roles (
+drop table if exists user_signups        cascade;
+drop table if exists task_interactions   cascade;
+drop table if exists github_connections  cascade;
+drop table if exists ai_messages         cascade;
+drop table if exists ai_logs             cascade;
+drop table if exists deliverables        cascade;
+drop table if exists assignments         cascade;
+drop table if exists tasks               cascade;
+drop table if exists sprints             cascade;
+drop table if exists project_members     cascade;
+drop table if exists projects            cascade;
+drop table if exists actors              cascade;
+drop table if exists team_invites        cascade;
+drop table if exists team_members        cascade;
+drop table if exists teams               cascade;
+drop table if exists company_members     cascade;
+drop table if exists companies           cascade;
+drop table if exists roles               cascade;
+-- legacy tables from earlier schema revisions
+drop table if exists org_invites         cascade;
+drop table if exists org_members         cascade;
+drop table if exists organizations       cascade;
+
+-- ─── Roles ───────────────────────────────────────────────────────────────────
+
+create table roles (
   id          uuid primary key default gen_random_uuid(),
   name        text not null unique,
   description text
@@ -37,200 +45,228 @@ create table if not exists roles (
 insert into roles (id, name, description) values
   ('00000000-0000-0000-0000-000000000001', 'owner',  'Full control — can delete the entity and manage all members'),
   ('00000000-0000-0000-0000-000000000002', 'admin',  'Can manage members and settings but cannot delete the entity'),
-  ('00000000-0000-0000-0000-000000000003', 'member', 'Read/write access to projects and tasks')
-on conflict (id) do nothing;
+  ('00000000-0000-0000-0000-000000000003', 'member', 'Read/write access to projects and tasks');
 
--- ─── Companies (top-level tenant) ───────────────────────────────────────────
+-- ─── Companies ───────────────────────────────────────────────────────────────
 
-create table if not exists companies (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  slug       text not null unique,
-  owner_id   uuid not null,
+create table companies (
+  id         uuid        primary key default gen_random_uuid(),
+  name       text        not null,
+  slug       text        not null unique,
+  owner_id   uuid        not null,
   phone      text,
   created_at timestamptz not null default now()
 );
 
-create table if not exists company_members (
-  company_id uuid not null references companies(id) on delete cascade,
-  user_id    uuid not null,
-  role       uuid not null default '00000000-0000-0000-0000-000000000003' references roles(id),
+create table company_members (
+  company_id uuid        not null references companies(id) on delete cascade,
+  user_id    uuid        not null,
+  role       uuid        not null default '00000000-0000-0000-0000-000000000003' references roles(id),
   joined_at  timestamptz not null default now(),
   primary key (company_id, user_id)
 );
 
--- ─── Teams (a workspace inside a company) ───────────────────────────────────
+-- ─── Teams ───────────────────────────────────────────────────────────────────
 
-create table if not exists teams (
-  id                uuid primary key default gen_random_uuid(),
-  name              text not null,
-  slug              text not null unique,
-  owner_id          uuid not null,
-  company_id        uuid references companies(id) on delete cascade,
-  default_ai_model  text not null default 'gpt-4o',
-  created_at        timestamptz not null default now()
+create table teams (
+  id               uuid        primary key default gen_random_uuid(),
+  name             text        not null,
+  slug             text        not null unique,
+  owner_id         uuid        not null,
+  company_id       uuid        references companies(id) on delete cascade,
+  default_ai_model text        not null default 'gpt-4o',
+  created_at       timestamptz not null default now()
 );
 
-create table if not exists team_members (
-  team_id   uuid not null references teams(id) on delete cascade,
-  user_id   uuid not null,
-  role      uuid not null default '00000000-0000-0000-0000-000000000003' references roles(id),
+create table team_members (
+  team_id   uuid        not null references teams(id) on delete cascade,
+  user_id   uuid        not null,
+  role      uuid        not null default '00000000-0000-0000-0000-000000000003' references roles(id),
   joined_at timestamptz not null default now(),
   primary key (team_id, user_id)
 );
 
-create table if not exists team_invites (
-  id                  uuid primary key default gen_random_uuid(),
-  team_id             uuid not null references teams(id) on delete cascade,
-  company_id          uuid references companies(id),
-  email               text not null,
-  role                uuid not null default '00000000-0000-0000-0000-000000000003' references roles(id),
-  invited_by_user_id  uuid not null,
-  invited_by_email    text,
-  status              text not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
-  accepted_user_id    uuid,
-  invited_at          timestamptz not null default now(),
-  accepted_at         timestamptz
+create table team_invites (
+  id                 uuid        primary key default gen_random_uuid(),
+  team_id            uuid        not null references teams(id) on delete cascade,
+  company_id         uuid        references companies(id),
+  email              text        not null,
+  role               uuid        not null default '00000000-0000-0000-0000-000000000003' references roles(id),
+  invited_by_user_id uuid        not null,
+  invited_by_email   text,
+  status             text        not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
+  accepted_user_id   uuid,
+  invited_at         timestamptz not null default now(),
+  accepted_at        timestamptz
 );
 
-create unique index if not exists team_invites_team_email_status_uniq on team_invites (team_id, email, status);
-create index if not exists team_invites_email_status_idx on team_invites (email, status);
+create unique index team_invites_team_email_status_uniq on team_invites (team_id, email, status);
+create        index team_invites_email_status_idx       on team_invites (email, status);
 
--- ─── Projects ───────────────────────────────────────────────────────────────
+-- ─── User signups ─────────────────────────────────────────────────────────────
+--
+-- Tracks how each user first entered the product and where they are in
+-- the onboarding funnel.
+--
+-- origin
+--   'organic'     — self-signup via /auth/signup  → show company-setup flow
+--   'team_invite' — arrived through a team invite → skip company creation
+--
+-- signup_status (onboarding funnel stage)
+--   'invited'         — account created via team invite; setup not yet complete
+--   'company_created' — organic user created their company (onboarding complete)
+--   'team_join'       — invited user accepted the invite and joined a team
+--
+-- completed_at — timestamped when signup_status becomes 'company_created' or 'team_join'
 
-create table if not exists projects (
-  id          uuid primary key default gen_random_uuid(),
-  name        text not null,
-  prompt      text not null,
-  owner_id    uuid not null,
-  team_id     uuid references teams(id) on delete cascade,
-  status      text not null default 'planning',
-  sprint_days int  not null default 3,
+create table user_signups (
+  id               uuid        primary key default gen_random_uuid(),
+  user_id          uuid        not null unique,
+  origin           text        not null check (origin in ('organic', 'team_invite')),
+  signup_status    text        check (signup_status in ('invited', 'company_created', 'team_join')),
+  invited_by_email text,
+  team_id          uuid,
+  completed_at     timestamptz,
+  created_at       timestamptz not null default now()
+);
+
+create index user_signups_status_idx on user_signups (signup_status);
+
+-- ─── Projects ────────────────────────────────────────────────────────────────
+
+create table projects (
+  id          uuid        primary key default gen_random_uuid(),
+  name        text        not null,
+  prompt      text        not null,
+  owner_id    uuid        not null,
+  team_id     uuid        references teams(id) on delete cascade,
+  status      text        not null default 'planning',
+  sprint_days int         not null default 3,
   roadmap     jsonb,
   created_at  timestamptz not null default now()
 );
 
-create table if not exists project_members (
-  project_id uuid not null references projects(id) on delete cascade,
-  user_id    uuid not null,
-  role       uuid not null default '00000000-0000-0000-0000-000000000003' references roles(id),
+create table project_members (
+  project_id uuid        not null references projects(id) on delete cascade,
+  user_id    uuid        not null,
+  role       uuid        not null default '00000000-0000-0000-0000-000000000003' references roles(id),
   joined_at  timestamptz not null default now(),
   primary key (project_id, user_id)
 );
 
--- ─── Actors ─────────────────────────────────────────────────────────────────
+-- ─── Actors ──────────────────────────────────────────────────────────────────
 
-create table if not exists actors (
-  id           uuid primary key default gen_random_uuid(),
-  project_id   uuid not null references projects(id) on delete cascade,
-  name         text not null,
-  type         text not null check (type in ('human', 'ai')),
+create table actors (
+  id           uuid        primary key default gen_random_uuid(),
+  project_id   uuid        not null references projects(id) on delete cascade,
+  name         text        not null,
+  type         text        not null check (type in ('human', 'ai')),
   role         text,
   model        text,
-  capabilities text[] default '{}',
+  capabilities text[]      default '{}',
   avatar_url   text,
   created_at   timestamptz not null default now()
 );
 
 -- ─── Sprints ─────────────────────────────────────────────────────────────────
 
-create table if not exists sprints (
-  id            uuid primary key default gen_random_uuid(),
-  project_id    uuid not null references projects(id) on delete cascade,
-  sprint_number integer not null,
-  start_date    date not null,
-  end_date      date not null,
-  status        text not null default 'planned',
+create table sprints (
+  id            uuid        primary key default gen_random_uuid(),
+  project_id    uuid        not null references projects(id) on delete cascade,
+  sprint_number integer     not null,
+  start_date    date        not null,
+  end_date      date        not null,
+  status        text        not null default 'planned',
   created_at    timestamptz not null default now()
 );
 
 -- ─── Tasks ───────────────────────────────────────────────────────────────────
 
-create table if not exists tasks (
-  id               uuid primary key default gen_random_uuid(),
-  sprint_id        uuid not null references sprints(id) on delete cascade,
-  project_id       uuid not null references projects(id) on delete cascade,
-  title            text not null,
-  description      text not null default '',
-  type             text not null default 'code',
-  priority         text not null default 'medium',
-  status           text not null default 'todo',
-  estimated_hours  float not null default 4,
-  depends_on       uuid[] default '{}',
-  github_pr_url    text,
-  ai_ready         boolean not null default false,
-  is_ready         boolean not null default false,
-  task_details     jsonb,
-  created_at       timestamptz not null default now()
+create table tasks (
+  id              uuid        primary key default gen_random_uuid(),
+  sprint_id       uuid        not null references sprints(id)  on delete cascade,
+  project_id      uuid        not null references projects(id) on delete cascade,
+  title           text        not null,
+  description     text        not null default '',
+  type            text        not null default 'code',
+  priority        text        not null default 'medium',
+  status          text        not null default 'todo',
+  estimated_hours float       not null default 4,
+  depends_on      uuid[]      default '{}',
+  github_pr_url   text,
+  ai_ready        boolean     not null default false,
+  is_ready        boolean     not null default false,
+  task_details    jsonb,
+  created_at      timestamptz not null default now()
 );
 
--- ─── Task interactions (AI/human chat per task) ────────────────────────────────
+-- ─── Task interactions ────────────────────────────────────────────────────────
 
-create table if not exists task_interactions (
-  id         uuid primary key default gen_random_uuid(),
-  task_id    uuid not null references tasks(id) on delete cascade,
-  role       text not null check (role in ('user', 'assistant')),
-  content    text not null,
+create table task_interactions (
+  id         uuid        primary key default gen_random_uuid(),
+  task_id    uuid        not null references tasks(id) on delete cascade,
+  role       text        not null check (role in ('user', 'assistant')),
+  content    text        not null,
   created_at timestamptz not null default now()
 );
 
-create index if not exists task_interactions_task_idx on task_interactions (task_id, created_at);
+create index task_interactions_task_idx on task_interactions (task_id, created_at);
 
 -- ─── Assignments ─────────────────────────────────────────────────────────────
 
-create table if not exists assignments (
-  id          uuid primary key default gen_random_uuid(),
-  task_id     uuid not null references tasks(id) on delete cascade,
-  actor_id    uuid not null references actors(id) on delete cascade,
-  assigned_by text not null default 'system',
+create table assignments (
+  id          uuid        primary key default gen_random_uuid(),
+  task_id     uuid        not null references tasks(id)   on delete cascade,
+  actor_id    uuid        not null references actors(id)  on delete cascade,
+  assigned_by text        not null default 'system',
   assigned_at timestamptz not null default now(),
-  unique(task_id)
+  unique (task_id)
 );
 
 -- ─── Deliverables ────────────────────────────────────────────────────────────
 
-create table if not exists deliverables (
-  id             uuid primary key default gen_random_uuid(),
-  task_id        uuid not null references tasks(id) on delete cascade,
-  actor_id       uuid not null references actors(id) on delete cascade,
-  content        text not null,
-  tool_calls_log jsonb default '[]',
+create table deliverables (
+  id             uuid        primary key default gen_random_uuid(),
+  task_id        uuid        not null references tasks(id)   on delete cascade,
+  actor_id       uuid        not null references actors(id)  on delete cascade,
+  content        text        not null,
+  tool_calls_log jsonb       default '[]',
   created_at     timestamptz not null default now()
 );
 
 -- ─── AI context ──────────────────────────────────────────────────────────────
 
-create table if not exists ai_logs (
-  id         uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects(id) on delete cascade,
-  phase      text not null default 'planning',
-  message    text not null,
-  level      text not null default 'info',
+create table ai_logs (
+  id         uuid        primary key default gen_random_uuid(),
+  project_id uuid        not null references projects(id) on delete cascade,
+  phase      text        not null default 'planning',
+  message    text        not null,
+  level      text        not null default 'info',
   created_at timestamptz not null default now()
 );
 
-create table if not exists ai_messages (
-  id         uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects(id) on delete cascade,
-  task_id    uuid references tasks(id) on delete cascade,
-  actor_id   uuid references actors(id) on delete set null,
-  phase      text not null default 'planning',
-  model      text not null,
-  messages   jsonb not null default '[]',
-  response   text not null,
+create table ai_messages (
+  id         uuid        primary key default gen_random_uuid(),
+  project_id uuid        not null references projects(id) on delete cascade,
+  task_id    uuid        references tasks(id)   on delete cascade,
+  actor_id   uuid        references actors(id)  on delete set null,
+  phase      text        not null default 'planning',
+  model      text        not null,
+  messages   jsonb       not null default '[]',
+  response   text        not null,
   usage      jsonb,
   created_at timestamptz not null default now()
 );
 
 -- ─── GitHub integration ───────────────────────────────────────────────────────
 
-create table if not exists github_connections (
-  id          uuid primary key default gen_random_uuid(),
-  project_id  uuid references projects(id) on delete cascade unique,
-  github_token text not null,
-  repo_owner  text default '',
-  repo_name   text default '',
-  created_at  timestamptz default now()
+create table github_connections (
+  id           uuid        primary key default gen_random_uuid(),
+  project_id   uuid        references projects(id) on delete cascade unique,
+  github_token text        not null,
+  repo_owner   text        default '',
+  repo_name    text        default '',
+  created_at   timestamptz default now()
 );
 
 -- ─── Realtime ────────────────────────────────────────────────────────────────
@@ -241,40 +277,42 @@ do $$ begin alter publication supabase_realtime add table deliverables; exceptio
 do $$ begin alter publication supabase_realtime add table projects;     exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table ai_logs;      exception when duplicate_object then null; end $$;
 
--- ─── Row-level security (service role bypasses all) ──────────────────────────
+-- ─── Row-level security ───────────────────────────────────────────────────────
 
-alter table roles             enable row level security;
-alter table companies        enable row level security;
-alter table company_members  enable row level security;
-alter table teams            enable row level security;
-alter table team_members     enable row level security;
-alter table team_invites     enable row level security;
-alter table projects         enable row level security;
-alter table project_members  enable row level security;
-alter table actors           enable row level security;
-alter table sprints          enable row level security;
-alter table tasks            enable row level security;
-alter table assignments      enable row level security;
-alter table deliverables     enable row level security;
-alter table ai_logs          enable row level security;
-alter table ai_messages      enable row level security;
-alter table task_interactions   enable row level security;
+alter table roles              enable row level security;
+alter table companies          enable row level security;
+alter table company_members    enable row level security;
+alter table teams              enable row level security;
+alter table team_members       enable row level security;
+alter table team_invites       enable row level security;
+alter table user_signups       enable row level security;
+alter table projects           enable row level security;
+alter table project_members    enable row level security;
+alter table actors             enable row level security;
+alter table sprints            enable row level security;
+alter table tasks              enable row level security;
+alter table task_interactions  enable row level security;
+alter table assignments        enable row level security;
+alter table deliverables       enable row level security;
+alter table ai_logs            enable row level security;
+alter table ai_messages        enable row level security;
 alter table github_connections enable row level security;
 
 create policy "service_role_all_roles"             on roles              for all using (true);
-create policy "service_role_all_companies"        on companies          for all using (true);
-create policy "service_role_all_company_members"  on company_members    for all using (true);
-create policy "service_role_all_teams"            on teams              for all using (true);
-create policy "service_role_all_team_members"     on team_members       for all using (true);
-create policy "service_role_all_team_invites"     on team_invites       for all using (true);
-create policy "service_role_all_projects"         on projects           for all using (true);
-create policy "service_role_all_project_members"  on project_members    for all using (true);
-create policy "service_role_all_actors"           on actors             for all using (true);
-create policy "service_role_all_sprints"          on sprints            for all using (true);
-create policy "service_role_all_tasks"            on tasks              for all using (true);
-create policy "service_role_all_assignments"      on assignments        for all using (true);
-create policy "service_role_all_deliverables"     on deliverables       for all using (true);
-create policy "service_role_all_ai_logs"          on ai_logs            for all using (true);
-create policy "service_role_all_ai_messages"      on ai_messages        for all using (true);
-create policy "service_role_all_task_interactions" on task_interactions   for all using (true);
-create policy "service_role_all_github"           on github_connections for all using (true);
+create policy "service_role_all_companies"         on companies          for all using (true);
+create policy "service_role_all_company_members"   on company_members    for all using (true);
+create policy "service_role_all_teams"             on teams              for all using (true);
+create policy "service_role_all_team_members"      on team_members       for all using (true);
+create policy "service_role_all_team_invites"      on team_invites       for all using (true);
+create policy "service_role_all_user_signups"      on user_signups       for all using (true);
+create policy "service_role_all_projects"          on projects           for all using (true);
+create policy "service_role_all_project_members"   on project_members    for all using (true);
+create policy "service_role_all_actors"            on actors             for all using (true);
+create policy "service_role_all_sprints"           on sprints            for all using (true);
+create policy "service_role_all_tasks"             on tasks              for all using (true);
+create policy "service_role_all_task_interactions" on task_interactions  for all using (true);
+create policy "service_role_all_assignments"       on assignments        for all using (true);
+create policy "service_role_all_deliverables"      on deliverables       for all using (true);
+create policy "service_role_all_ai_logs"           on ai_logs            for all using (true);
+create policy "service_role_all_ai_messages"       on ai_messages        for all using (true);
+create policy "service_role_all_github"            on github_connections for all using (true);

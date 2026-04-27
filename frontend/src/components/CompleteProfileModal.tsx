@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import api from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 
@@ -47,9 +48,19 @@ export default function CompleteProfileModal() {
       if (needsName) messages.push(`welcome, ${name.trim()}!`)
       toast.success(messages.join(' — ') || 'Profile updated')
 
-      // Direct user to the right place based on why they signed in via link
-      if (linkType === 'create_company') {
-        navigate('/company/new')
+      // Navigate based on persistent origin stored in the DB — robust across
+      // page reloads and cross-host invite links where URL params may be absent.
+      try {
+        const { data: originData } = await api.get<{ origin: string }>('/auth/my-origin')
+        if (originData.origin === 'organic') {
+          navigate('/company/new')
+        }
+        // 'team_invite' users already have a team; AppLayout will direct them.
+      } catch {
+        // Fallback to URL-based link type if the endpoint is unreachable.
+        if (linkType !== 'join_company') {
+          navigate('/company/new')
+        }
       }
     } catch (err: unknown) {
       setError((err as Error).message ?? 'Failed to save — please try again')

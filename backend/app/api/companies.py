@@ -84,6 +84,19 @@ def create_company(body: CompanyCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
 
+    # Mark the owner's onboarding as complete.
+    from datetime import datetime, timezone
+    _now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.table("user_signups").upsert({
+            "user_id": body.owner_id,
+            "origin": "organic",
+            "signup_status": "company_created",
+            "completed_at": _now,
+        }).execute()
+    except Exception:
+        pass  # Non-blocking
+
     return {**company_row, "my_role": "owner", "default_team_id": team_id}
 
 
