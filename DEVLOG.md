@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-27 | `19e7b68` — Fix user_signups upsert: add on_conflict='user_id' so status updates correctly
+
+- `backend/app/api/teams.py` — added `on_conflict="user_id"` to both `user_signups` upsert calls (invite creation → `'invited'`, accept-invites → `'team_join'`); without it PostgREST tried to insert a new row, hit the UNIQUE constraint, and the `except: pass` silently left status stuck at `'invited'`
+- `backend/app/api/companies.py` — same fix for the `'company_created'` upsert after company creation
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
 ## 2026-04-27 | `c49db2f` — Refactor invite flow: dedicated /invite page, clean URLs, simplified Auth
 
 - `frontend/src/pages/InvitePage.tsx` (new) — dedicated landing page for `/invite`; waits for Zustand session, calls `POST /teams/accept-invites`, then navigates to `/`; uses `useRef` to prevent double execution

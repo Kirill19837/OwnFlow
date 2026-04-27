@@ -423,7 +423,110 @@ def test_member_cannot_invite(client):
 
 
 # ---------------------------------------------------------------------------
-# 11. admin can invite (201)
+# 11. Resend invite to unconfirmed user — must send invite email (not "added" email)
+# ---------------------------------------------------------------------------
+
+def test_resend_invite_to_unconfirmed_user_sends_invite_email(client):
+    """
+    When 'resend' re-calls POST /{team_id}/invites for a user whose first invite
+    was never clicked (Supabase throws 'already been invited'), the backend must
+    fall back to generate_link(type='magiclink') and send the proper invite email,
+    NOT the 'added to org' notification email.
+    """
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
+    )
+
+    owner_user = _user(OWNER_ID, OWNER_EMAIL)
+    db.auth.admin.list_users.return_value = [owner_user]
+    db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+
+    # First generate_link(type="invite") fails — user already has a pending invite
+    magic_link_resp = SimpleNamespace(
+        action_link="https://supabase.co/auth/confirm?token=magic123",
+        properties=SimpleNamespace(action_link="https://supabase.co/auth/confirm?token=magic123"),
+    )
+
+    def generate_link_side_effect(payload):
+        if payload.get("type") == "invite":
+            raise Exception("User already been invited")
+        return magic_link_resp
+
+    db.auth.admin.generate_link.side_effect = generate_link_side_effect
+
+    with _patch_db(db):
+        with patch("app.api.teams.send_invite_email") as mock_invite_email:
+            with patch("app.api.teams.send_added_to_org_email") as mock_added_email:
+                with patch("app.api.teams.get_settings") as mock_settings:
+                    s = MagicMock()
+                    s.postmark_enabled = True
+                    s.frontend_url = "http://localhost:5173"
+                    mock_settings.return_value = s
+
+                    resp = client.post(f"/teams/{ORG_ID}/invites", json={
+                        "email": INVITEE_EMAIL,
+                        "role": "member",
+                        "invited_by_user_id": OWNER_ID,
+                    })
+
+    assert resp.status_code == 201
+    # Must send the invite email with the magic link, not the "added" notification
+    mock_invite_email.assert_called_once()
+    mock_added_email.assert_not_called()
+    call_kwargs = mock_invite_email.call_args.kwargs
+    assert call_kwargs["to_email"] == INVITEE_EMAIL
+    assert "magic123" in call_kwargs["invite_url"]
+
+
+# ---------------------------------------------------------------------------
+# 12. Resend to confirmed user — must send "added to org" notification (not invite)
+# ---------------------------------------------------------------------------
+
+def test_resend_invite_to_confirmed_user_sends_added_email(client):
+    """
+    When generate_link(type='invite') fails with 'already registered' (confirmed
+    user), the backend must send send_added_to_org_email, NOT the invite email.
+    """
+    db = MagicMock()
+
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
+    )
+
+    existing = _user(INVITEE_ID, INVITEE_EMAIL, confirmed=True)
+    owner_user = _user(OWNER_ID, OWNER_EMAIL)
+    db.auth.admin.list_users.return_value = [owner_user, existing]
+    db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+
+    db.auth.admin.generate_link.side_effect = Exception("User already registered")
+
+    with _patch_db(db):
+        with patch("app.api.teams.send_invite_email") as mock_invite_email:
+            with patch("app.api.teams.send_added_to_org_email") as mock_added_email:
+                with patch("app.api.teams.get_settings") as mock_settings:
+                    s = MagicMock()
+                    s.postmark_enabled = True
+                    s.frontend_url = "http://localhost:5173"
+                    mock_settings.return_value = s
+
+                    resp = client.post(f"/teams/{ORG_ID}/invites", json={
+                        "email": INVITEE_EMAIL,
+                        "role": "member",
+                        "invited_by_user_id": OWNER_ID,
+                    })
+
+    assert resp.status_code == 201
+    mock_added_email.assert_called_once()
+    mock_invite_email.assert_not_called()
+    assert mock_added_email.call_args.kwargs["to_email"] == INVITEE_EMAIL
+
+
+# ---------------------------------------------------------------------------
+# 14. admin can invite (201)
 # ---------------------------------------------------------------------------
 
 def test_admin_can_invite(client):
@@ -455,7 +558,7 @@ def test_admin_can_invite(client):
 
 
 # ---------------------------------------------------------------------------
-# 12. non-owner cannot delete team (403)
+# 15. non-owner cannot delete team (403)
 # ---------------------------------------------------------------------------
 
 def test_non_owner_cannot_delete_team(client):
@@ -480,7 +583,45 @@ def test_non_owner_cannot_delete_team(client):
 
 
 # ---------------------------------------------------------------------------
-# 13. owner can delete team (204)
+# 16. GET /teams/pending-invite — returns invite details for pending email
+# ---------------------------------------------------------------------------
+
+def test_get_pending_invite_returns_invite(client):
+    db = MagicMock()
+    invite_id = str(uuid.uuid4())
+
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp([
+        {"id": invite_id, "team_id": ORG_ID, "role": ROLE_MEMBER, "invited_by_email": OWNER_EMAIL},
+    ])
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(
+        {"id": ORG_ID, "name": "Test Org"}
+    )
+
+    with _patch_db(db):
+        resp = client.get("/teams/pending-invite", params={"email": INVITEE_EMAIL})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["invite"] is not None
+    assert body["invite"]["team_name"] == "Test Org"
+    assert body["invite"]["role"] == "member"
+    assert body["invite"]["invited_by_email"] == OWNER_EMAIL
+    assert body["invite"]["team_id"] == ORG_ID
+
+
+def test_get_pending_invite_returns_null_when_none(client):
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp([])
+
+    with _patch_db(db):
+        resp = client.get("/teams/pending-invite", params={"email": "nobody@example.com"})
+
+    assert resp.status_code == 200
+    assert resp.json()["invite"] is None
+
+
+# ---------------------------------------------------------------------------
+# 17. owner can delete team (204)
 # ---------------------------------------------------------------------------
 
 def test_owner_can_delete_team(client):

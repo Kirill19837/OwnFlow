@@ -127,6 +127,36 @@ def list_models():
     return {"models": AI_MODELS}
 
 
+@router.get("/pending-invite")
+def get_pending_invite(email: str):
+    """Return the first pending invite for the given email, with team details."""
+    db = get_supabase()
+    norm_email = email.strip().lower()
+    invites = (
+        db.table("team_invites")
+        .select("id,team_id,role,invited_by_email")
+        .eq("email", norm_email)
+        .eq("status", "pending")
+        .limit(1)
+        .execute()
+    )
+    rows = invites.data or []
+    if not rows:
+        return {"invite": None}
+    row = rows[0]
+    team = db.table("teams").select("id,name").eq("id", row["team_id"]).single().execute()
+    team_name = (team.data or {}).get("name", "a team") if team.data else "a team"
+    role_name = ROLE_NAMES.get(row["role"], row["role"])
+    return {
+        "invite": {
+            "team_id": row["team_id"],
+            "team_name": team_name,
+            "invited_by_email": row["invited_by_email"],
+            "role": role_name,
+        }
+    }
+
+
 @router.get("/{team_id}")
 def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
     db = get_supabase()
@@ -284,7 +314,8 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             )
         except Exception as exc:
             msg = str(exc).lower()
-            if "already registered" in msg or "already been invited" in msg:
+            if "already registered" in msg:
+                # Confirmed existing user — they just need to log in.
                 login_url = f"{settings.frontend_url.rstrip('/')}/invite"
                 try:
                     send_added_to_org_email(
@@ -293,6 +324,30 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         inviter_email=inviter_email,
                         role=body.role,
                         frontend_url=login_url,
+                    )
+                except Exception:
+                    pass
+            elif "already been invited" in msg:
+                # Unconfirmed user with a previous invite — generate a fresh magic link
+                # so the resend email contains a working click-through URL.
+                try:
+                    magic_resp = db.auth.admin.generate_link({
+                        "type": "magiclink",
+                        "email": email,
+                        "options": {
+                            "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
+                        },
+                    })
+                    magic_link = (
+                        getattr(magic_resp, "action_link", None)
+                        or (magic_resp.properties.action_link if hasattr(magic_resp, "properties") else None)
+                    )
+                    send_invite_email(
+                        to_email=email,
+                        invite_url=magic_link or f"{settings.frontend_url}/invite",
+                        org_name=team.data["name"],
+                        inviter_email=inviter_email,
+                        role=body.role,
                     )
                 except Exception:
                     pass
