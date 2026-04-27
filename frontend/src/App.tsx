@@ -13,6 +13,8 @@ import OrgSettingsPage from './pages/OrgSettingsPage'
 import ProjectActivityPage from './pages/ProjectActivityPage'
 import ProfilePage from './pages/ProfilePage'
 
+import InvitePage from './pages/InvitePage'
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 })
@@ -24,6 +26,7 @@ export default function App() {
         <Routes>
           <Route element={<AuthProvider />}>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/invite" element={<InvitePage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/company/new" element={<NewCompanyPage />} />
               <Route element={<AppLayout />}>

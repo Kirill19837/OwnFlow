@@ -2,6 +2,26 @@
 
 ---
 
+## 2026-04-27 | `b687042` — Fix Supabase lock contention in axios interceptor
+
+- `frontend/src/lib/api.ts` — replaced `async` interceptor that called `supabase.auth.getSession()` with a synchronous read from `useAuthStore.getState().session`; eliminates the `Lock "lock:sb-…-auth-token" was released because another request stole it` error that fired when multiple parallel API calls (e.g. on AppLayout mount) all raced for the same storage lock simultaneously
+- Validation — `make check-backend` and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `d8a76e9` — Add user_signups table, signup funnel tracking, and clean DB bootstrap script
+
+- `supabase/database_full.sql` — fully rewritten as a clean idempotent bootstrap script; single file to run on a fresh Supabase project; replaces the entire migrations chain
+- `supabase/migrations/` — deleted all migration files; `database_full.sql` is now the sole schema reference
+- `user_signups` table (new) — tracks how each user entered the product: `origin` (`organic` / `team_invite`), `signup_status` (`invited` / `company_created` / `team_join`), `completed_at` (set when onboarding completes), plus `invited_by_email`, `team_id`
+- `backend/app/api/auth.py` — `POST /auth/signup` inserts `origin='organic'`; new `GET /auth/my-origin` endpoint returns the user's origin so the frontend can decide whether to show company-setup
+- `backend/app/api/companies.py` — `POST /companies` upserts `signup_status='company_created'` + `completed_at` when a company is created
+- `backend/app/api/teams.py` — invite endpoint sets `signup_status='invited'` for existing users; `_do_accept_invites` upserts `signup_status='team_join'` + `completed_at` when a team invite is accepted
+- `frontend/src/components/CompleteProfileModal.tsx` — after profile completion calls `GET /auth/my-origin`; navigates to `/company/new` for `organic` users, skips redirect for `team_invite` users; URL-based `linkType` kept as fallback
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
 ## 2026-04-27 | `0ec081a` — Fix frontend warnings and refresh FastAPI stack
 
 - `backend/app/config.py` — migrated settings configuration to Pydantic v2 `model_config` to remove the class-based config deprecation warning

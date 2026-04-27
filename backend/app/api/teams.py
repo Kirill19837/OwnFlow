@@ -268,7 +268,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         "org_name": team.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
                 },
             })
             action_link = (
@@ -285,7 +285,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
         except Exception as exc:
             msg = str(exc).lower()
             if "already registered" in msg or "already been invited" in msg:
-                login_url = f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company"
+                login_url = f"{settings.frontend_url.rstrip('/')}/invite"
                 try:
                     send_added_to_org_email(
                         to_email=email,
@@ -309,7 +309,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         "org_name": team.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
                 },
             )
         except Exception as exc:
