@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-27 | `5327b92` — Add standalone full database bootstrap SQL script
+
+- `supabase/database_full.sql` (NEW) — single combined SQL script that drops all existing tables and recreates the full current schema without relying on migrations
+- Includes all latest schema updates in one file: `projects.sprint_days`, `projects.roadmap`, `actors.role`, `tasks.task_details`, `tasks.is_ready`, and `task_interactions`
+- Includes indexes, realtime publication setup, RLS enables, and service-role policies so a fresh Supabase project can be bootstrapped from one script
+
+---
+
 ## 2026-04-27 | `0e423d4` — Fix invite onboarding for cross-host login links
 
 - `frontend/src/components/Auth.tsx` — invite acceptance now runs on both `getSession` and `SIGNED_IN`, even without `invite_org` in URL; still uses `invite_org` filter when present
