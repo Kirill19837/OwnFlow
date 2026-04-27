@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-27 | `7d18746` — Fix my_role in team response; schema migrations; CORS for local dev
+
+- `backend/app/api/teams.py` — `get_team` now resolves `my_role` from the already-fetched members list and includes it in the response; uses `Depends(current_user_id)` so no extra DB round-trip
+- `supabase/migrations/007_projects_sprint_days_roadmap.sql` — expanded to cover all missing columns: `projects.sprint_days`, `projects.roadmap`, `actors.role`, `tasks.task_details`, `tasks.is_ready`, and the new `task_interactions` table with RLS
+- `supabase/migrations/001_schema.sql` — canonical schema updated to match: added `sprint_days`/`roadmap` to `projects`, `role` to `actors`, `task_details`/`is_ready` to `tasks`, `task_interactions` table
+- `docs/database.md` — created full database reference doc covering all 16 tables, columns, FKs, indexes, and migration files
+- `backend/app/api/actors.py` — added `role` to `update_actor` allowed_fields so actor role is patchable
+- `backend/app/config.py` — `cors_origins_list` now always includes `localhost:5173–5180` so Vite's fallback ports (e.g. 5174) work locally without any `.env` changes
+
+---
+
 ## 2026-04-26 | `4a82527` — Security: verify caller identity via JWT; add role-based permissions for invite/delete team
 
 - `backend/app/auth_deps.py` (NEW) — `current_user_id` FastAPI dependency: verifies Supabase JWT via `auth.get_user(token)` and returns the authenticated user's UUID; no client-supplied identity trusted
