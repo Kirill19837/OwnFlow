@@ -209,7 +209,7 @@ export default function AppLayout() {
       <main className="flex-1 flex flex-col">
         <Outlet />
       </main>
-      {(needsPassword || needsName) && <CompleteProfileModal />}
+      {(needsPassword || needsName) && linkType !== 'join_company' && <CompleteProfileModal />}
     </div>
   )
 }

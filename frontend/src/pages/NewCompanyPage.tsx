@@ -50,7 +50,7 @@ const PERKS = [
 ]
 
 export default function NewCompanyPage() {
-  const { session } = useAuthStore()
+  const { session, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName } = useAuthStore()
   const { setCompany } = useCompanyStore()
   const { setTeams, setActiveTeam } = useTeamStore()
   const navigate = useNavigate()
@@ -82,9 +82,16 @@ export default function NewCompanyPage() {
           owner_id: session!.user.id,
           default_ai_model: model,
           phone: phone.trim(),
+          // Atomically set password + name on first save
+          ...(pendingProfile?.password ? { password: pendingProfile.password } : {}),
+          ...(pendingProfile?.name ? { full_name: pendingProfile.name } : {}),
         })
         .then((r) => r.data),
     onSuccess: (data) => {
+      // Profile is now saved in Supabase — clear the pending state
+      setPendingProfile(null)
+      setNeedsPassword(false)
+      setNeedsName(false)
       // Seed the company cache so AppLayout sees the real company immediately
       queryClient.setQueryData(['company', session!.user.id], data)
       setCompany(data)

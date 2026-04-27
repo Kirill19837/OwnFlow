@@ -1,72 +1,34 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Lock } from 'lucide-react'
-import { supabase } from '../lib/supabase'
-import api from '../lib/api'
 import { useAuthStore } from '../store/authStore'
-import toast from 'react-hot-toast'
 
 export default function CompleteProfileModal() {
-  const { needsPassword, needsName, setNeedsPassword, setNeedsName, setSession, linkType } = useAuthStore()
+  const { needsPassword, needsName, setPendingProfile } = useAuthStore()
   const navigate = useNavigate()
 
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const passwordsMatch = password === confirm
   const passwordValid = password.length >= 8 && passwordsMatch
-  const nameValid = name.trim().length > 0
+  const nameValid = name.trim().length >= 4
   const valid = (!needsName || nameValid) && (!needsPassword || passwordValid)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!valid) return
     setError('')
-    setLoading(true)
-    try {
-      const update: Parameters<typeof supabase.auth.updateUser>[0] = {}
-      if (needsPassword) update.password = password
-      if (needsName) update.data = { full_name: name.trim() }
-      // Mark password as set in metadata so we never prompt again
-      if (needsPassword) update.data = { ...(update.data ?? {}), password_set: true }
 
-      const { error: updateError } = await supabase.auth.updateUser(update)
-      if (updateError) throw updateError
-
-      // Refresh session so header/store reflect the new name immediately
-      const { data: sessionData } = await supabase.auth.getSession()
-      if (sessionData.session) setSession(sessionData.session)
-
-      if (needsPassword) setNeedsPassword(false)
-      if (needsName) setNeedsName(false)
-
-      const messages = []
-      if (needsPassword) messages.push('password set')
-      if (needsName) messages.push(`welcome, ${name.trim()}!`)
-      toast.success(messages.join(' — ') || 'Profile updated')
-
-      // Navigate based on persistent origin stored in the DB — robust across
-      // page reloads and cross-host invite links where URL params may be absent.
-      try {
-        const { data: originData } = await api.get<{ origin: string }>('/auth/my-origin')
-        if (originData.origin === 'organic') {
-          navigate('/company/new')
-        }
-        // 'team_invite' users already have a team; AppLayout will direct them.
-      } catch {
-        // Fallback to URL-based link type if the endpoint is unreachable.
-        if (linkType !== 'join_company') {
-          navigate('/company/new')
-        }
-      }
-    } catch (err: unknown) {
-      setError((err as Error).message ?? 'Failed to save — please try again')
-    } finally {
-      setLoading(false)
-    }
+    // Store name+password without saving — the atomic save happens in NewCompanyPage
+    // when the user completes company setup (organic flow).
+    setPendingProfile({
+      name: needsName ? name.trim() : '',
+      password: needsPassword ? password : '',
+    })
+    navigate('/company/new')
   }
 
   const both = needsPassword && needsName
@@ -74,12 +36,12 @@ export default function CompleteProfileModal() {
     ? 'Complete your profile'
     : needsPassword
     ? 'Set your password'
-    : "What’s your name?"
+    : "What's your name?"
   const subtitle = both
-    ? 'You signed in via a link — set a password and tell us your name to get started.'
+    ? 'Set a password and your name — we\'ll save everything once you finish setup.'
     : needsPassword
-    ? 'You signed in via a link — set a password so you can sign in normally next time.'
-    : 'We’ll use this to personalise your experience and team activity.'
+    ? 'Set a password so you can sign in normally next time.'
+    : "We'll use this to personalise your experience and team activity."
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center px-4">
@@ -107,6 +69,9 @@ export default function CompleteProfileModal() {
                 placeholder="Jane Smith"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
               />
+              {name.trim().length > 0 && name.trim().length < 4 && (
+                <p className="text-red-400 text-xs mt-1">Name must be at least 4 characters</p>
+              )}
             </div>
           )}
 
@@ -146,10 +111,10 @@ export default function CompleteProfileModal() {
 
           <button
             type="submit"
-            disabled={!valid || loading}
+            disabled={!valid}
             className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors"
           >
-            {loading ? 'Saving…' : 'Save & continue'}
+            Continue →
           </button>
         </form>
       </div>

@@ -94,7 +94,7 @@ create table team_invites (
   role               uuid        not null default '00000000-0000-0000-0000-000000000003' references roles(id),
   invited_by_user_id uuid        not null,
   invited_by_email   text,
-  status             text        not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
+  status             text        not null default 'pending' check (status in ('pending', 'accepted', 'revoked', 'declined')),
   accepted_user_id   uuid,
   invited_at         timestamptz not null default now(),
   accepted_at        timestamptz

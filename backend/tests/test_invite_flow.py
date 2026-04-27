@@ -317,7 +317,88 @@ def test_accept_invites_no_pending(client):
 
 
 # ---------------------------------------------------------------------------
-# 8. create_team: response my_role is readable text, not UUID
+# 8. accept-invites: user is added to the exact team they were invited to
+# ---------------------------------------------------------------------------
+
+def test_accept_invite_joins_correct_team(client):
+    """
+    The user must be inserted into team_members with exactly the team_id from
+    the pending invite row — not some other team — and with the matching role UUID.
+    Uses per-table mocks so we can inspect each table's calls independently.
+    """
+    COMPANY_ID = str(uuid.uuid4())
+    INVITE_ID = str(uuid.uuid4())
+
+    # Build one mock per table so we can check each independently.
+    team_invites_mock = MagicMock()
+    teams_mock = MagicMock()
+    team_members_mock = MagicMock()
+    company_members_mock = MagicMock()
+    user_signups_mock = MagicMock()
+
+    def _table(name: str):
+        return {
+            "team_invites": team_invites_mock,
+            "teams": teams_mock,
+            "team_members": team_members_mock,
+            "company_members": company_members_mock,
+            "user_signups": user_signups_mock,
+        }.get(name, MagicMock())
+
+    db = MagicMock()
+    db.table.side_effect = _table
+
+    # One pending invite for ORG_ID with ROLE_MEMBER
+    team_invites_mock.select.return_value.eq.return_value.eq.return_value.execute.return_value = _resp([
+        {"id": INVITE_ID, "team_id": ORG_ID, "role": ROLE_MEMBER},
+    ])
+    team_invites_mock.update.return_value.eq.return_value.execute.return_value = _resp([])
+
+    # ORG_ID belongs to COMPANY_ID
+    teams_mock.select.return_value.in_.return_value.execute.return_value = _resp([
+        {"id": ORG_ID, "company_id": COMPANY_ID},
+    ])
+
+    # No conflicting company memberships for this user
+    company_members_mock.select.return_value.eq.return_value.neq.return_value.execute.return_value = _resp([])
+    company_members_mock.upsert.return_value.execute.return_value = _resp([])
+
+    team_members_mock.upsert.return_value.execute.return_value = _resp([])
+    user_signups_mock.upsert.return_value.execute.return_value = _resp([])
+
+    with _patch_db(db):
+        resp = client.post("/teams/accept-invites", json={
+            "user_id": INVITEE_ID,
+            "email": INVITEE_EMAIL,
+        })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["accepted"] == 1
+    assert ORG_ID in body["team_ids"]
+
+    # team_members.upsert must have been called with the correct team, user, and role
+    assert team_members_mock.upsert.called, "Expected team_members.upsert to be called"
+    member_row = team_members_mock.upsert.call_args_list[0].args[0]
+    assert member_row["team_id"] == ORG_ID, (
+        f"Expected team_id={ORG_ID!r}, got {member_row.get('team_id')!r}"
+    )
+    assert member_row["user_id"] == INVITEE_ID, (
+        f"Expected user_id={INVITEE_ID!r}, got {member_row.get('user_id')!r}"
+    )
+    assert member_row["role"] == ROLE_MEMBER, (
+        f"Expected role UUID {ROLE_MEMBER!r}, got {member_row.get('role')!r}"
+    )
+
+    # team_invites must have been marked accepted for the right invite id
+    assert team_invites_mock.update.called, "Expected team_invites.update to be called"
+    update_row = team_invites_mock.update.call_args_list[0].args[0]
+    assert update_row["status"] == "accepted"
+    assert update_row.get("accepted_user_id") == INVITEE_ID
+
+
+# ---------------------------------------------------------------------------
+# 9. create_team: response my_role is readable text, not UUID
 # ---------------------------------------------------------------------------
 
 def test_create_team_inserts_owner_role_as_uuid(client):

@@ -33,6 +33,8 @@ class CompanyCreate(BaseModel):
     owner_id: str
     default_ai_model: str = "gpt-4o"
     phone: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 class TeamCreate(BaseModel):
@@ -48,6 +50,27 @@ def create_company(body: CompanyCreate):
 
     if body.default_ai_model not in AI_MODELS:
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
+
+    if body.full_name is not None and len(body.full_name.strip()) < 4:
+        raise HTTPException(400, "Full name must be at least 4 characters")
+    if body.password is not None and len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    # Atomically set password + name BEFORE creating company rows.
+    # This ensures profile is never half-saved if company creation fails.
+    if body.password or body.full_name:
+        user_update: dict = {}
+        if body.password:
+            user_update["password"] = body.password
+        user_meta: dict = {"password_set": True} if body.password else {}
+        if body.full_name and body.full_name.strip():
+            user_meta["full_name"] = body.full_name.strip()
+        if user_meta:
+            user_update["user_metadata"] = user_meta
+        try:
+            db.auth.admin.update_user_by_id(body.owner_id, user_update)
+        except Exception as exc:
+            raise HTTPException(400, f"Failed to update profile: {exc}")
 
     # Create company
     slug = _slug(body.name)

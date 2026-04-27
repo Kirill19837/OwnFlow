@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-04-27 | `75ab5b8` — Invite confirmation page: show accept/decline card before joining team
+
+- `frontend/src/pages/InvitePage.tsx` — rewritten: fetches pending invite details from `GET /teams/pending-invite`, shows a card with team name / role / inviter; Accept → calls accept-invites then goes to `/` (CompleteProfileModal handles name+password); Decline → signs out, goes to `/login`; handles no-pending-invite gracefully
+- `backend/app/api/teams.py` — new `GET /teams/pending-invite?email=...` endpoint returning first pending invite with resolved team name and role label; positioned before `/{team_id}` to avoid route conflict
+- `backend/tests/test_invite_flow.py` — tests 16 & 17: `pending-invite` returns correct details / returns `null` when no invite
+- Validation — `make check-backend` (17 tests) and `make check-frontend` both passed
+
+---
+
 ## 2026-04-27 | `19e7b68` — Fix user_signups upsert: add on_conflict='user_id' so status updates correctly
 
 - `backend/app/api/teams.py` — added `on_conflict="user_id"` to both `user_signups` upsert calls (invite creation → `'invited'`, accept-invites → `'team_join'`); without it PostgREST tried to insert a new row, hit the UNIQUE constraint, and the `except: pass` silently left status stuck at `'invited'`

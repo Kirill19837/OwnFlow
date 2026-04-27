@@ -1,28 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Layers, Users, X, Check } from 'lucide-react'
+import { Layers, Users, X, Check, Lock, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 
 interface PendingInvite {
+  id: string
   team_id: string
   team_name: string
   invited_by_email: string
   role: string
 }
 
-type Stage = 'waiting' | 'loaded' | 'accepting' | 'declining'
+type Step = 'loading' | 'profile' | 'invite-card' | 'accepting' | 'declining'
 
 export default function InvitePage() {
-  const { session } = useAuthStore()
+  const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setLinkType } = useAuthStore()
   const navigate = useNavigate()
   const fetchedRef = useRef(false)
 
-  const [stage, setStage] = useState<Stage>('waiting')
+  const [step, setStep] = useState<Step>('loading')
   const [invite, setInvite] = useState<PendingInvite | null>(null)
 
-  // Once we have a session, fetch the pending invite details.
+  // Profile form state
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [profileError, setProfileError] = useState('')
+
+  const passwordsMatch = password === confirm
+  const passwordValid = password.length >= 8 && passwordsMatch
+  const nameValid = name.trim().length >= 4
+  const profileValid = (!needsName || nameValid) && (!needsPassword || passwordValid)
+
+  // Once session is ready, fetch pending invite details
   useEffect(() => {
     if (!session || fetchedRef.current) return
     fetchedRef.current = true
@@ -33,28 +45,57 @@ export default function InvitePage() {
       })
       .then((r) => setInvite(r.data.invite ?? null))
       .catch(() => setInvite(null))
-      .finally(() => setStage('loaded'))
-  }, [session])
+      .finally(() => {
+        // If user needs to set name/password → profile step first, then invite card
+        setStep(needsPassword || needsName ? 'profile' : 'invite-card')
+      })
+  }, [session, needsPassword, needsName])
+
+  const handleProfileContinue = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profileValid) return
+    setProfileError('')
+    setStep('invite-card')
+  }
 
   const handleAccept = () => {
-    if (!session) return
-    setStage('accepting')
+    if (!session || !invite) return
+    setStep('accepting')
+    setLinkType(null) // allow CompleteProfileModal to show for future flows
+
     api
       .post('/teams/accept-invites', {
         user_id: session.user.id,
         email: session.user.email,
+        // Atomically save profile + accept invite in one call
+        ...(needsPassword && password ? { password } : {}),
+        ...(needsName && name.trim() ? { full_name: name.trim() } : {}),
+      })
+      .then(() => {
+        setNeedsPassword(false)
+        setNeedsName(false)
       })
       .finally(() => navigate('/', { replace: true }))
   }
 
   const handleDecline = async () => {
-    setStage('declining')
+    if (!invite) {
+      await supabase.auth.signOut()
+      navigate('/login', { replace: true })
+      return
+    }
+    setStep('declining')
+    try {
+      await api.post(`/teams/invites/${invite.id}/decline`)
+    } catch {
+      // Non-blocking — sign out regardless
+    }
     await supabase.auth.signOut()
     navigate('/login', { replace: true })
   }
 
-  // ── Waiting for Supabase to process the magic-link hash ──────────────────
-  if (stage === 'waiting' || !session) {
+  // ── Spinner ───────────────────────────────────────────────────────────────
+  if (step === 'loading' || !session) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-5">
@@ -65,21 +106,107 @@ export default function InvitePage() {
     )
   }
 
-  // ── Accepting / declining in progress ────────────────────────────────────
-  if (stage === 'accepting' || stage === 'declining') {
+  if (step === 'accepting' || step === 'declining') {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-5">
           <Layers size={36} className="text-purple-400 animate-pulse" />
           <p className="text-white font-semibold">
-            {stage === 'accepting' ? 'Joining the team…' : 'Signing you out…'}
+            {step === 'accepting' ? 'Joining the team…' : 'Signing you out…'}
           </p>
         </div>
       </div>
     )
   }
 
-  // ── No pending invite found ───────────────────────────────────────────────
+  // ── Step 1: Profile (name + password) ────────────────────────────────────
+  if (step === 'profile') {
+    const both = needsPassword && needsName
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-6 shadow-2xl">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-9 h-9 rounded-lg bg-purple-900/40 border border-purple-800/40 flex items-center justify-center shrink-0">
+              {needsPassword ? <Lock size={16} className="text-purple-400" /> : <User size={16} className="text-purple-400" />}
+            </div>
+            <div>
+              <h2 className="text-white font-semibold leading-tight">
+                {both ? 'Complete your profile' : needsPassword ? 'Set your password' : "What's your name?"}
+              </h2>
+              <p className="text-gray-400 text-xs mt-0.5">
+                {both
+                  ? "We'll save everything once you accept the invite."
+                  : needsPassword
+                  ? "Set a password so you can sign in normally next time."
+                  : "We'll use this in your team profile."}
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleProfileContinue} className="space-y-4">
+            {needsName && (
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Full name</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus={!needsPassword}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Jane Smith"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+                />
+                {name.trim().length > 0 && name.trim().length < 4 && (
+                  <p className="text-red-400 text-xs mt-1">Name must be at least 4 characters</p>
+                )}
+              </div>
+            )}
+            {needsPassword && (
+              <>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    autoFocus={!needsName}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 8 characters"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Confirm password</label>
+                  <input
+                    type="password"
+                    required
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder="Repeat your password"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+                  />
+                  {confirm.length > 0 && !passwordsMatch && (
+                    <p className="text-red-400 text-xs mt-1">Passwords don't match</p>
+                  )}
+                </div>
+              </>
+            )}
+            {profileError && <p className="text-red-400 text-sm">{profileError}</p>}
+            <button
+              type="submit"
+              disabled={!profileValid}
+              className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors"
+            >
+              Continue →
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  // ── No pending invite ─────────────────────────────────────────────────────
   if (!invite) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
@@ -100,7 +227,7 @@ export default function InvitePage() {
     )
   }
 
-  // ── Invite confirmation card ──────────────────────────────────────────────
+  // ── Step 2: Invite confirmation card ─────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-6 shadow-2xl">
@@ -149,3 +276,5 @@ export default function InvitePage() {
     </div>
   )
 }
+
+

@@ -149,6 +149,7 @@ def get_pending_invite(email: str):
     role_name = ROLE_NAMES.get(row["role"], row["role"])
     return {
         "invite": {
+            "id": row["id"],
             "team_id": row["team_id"],
             "team_name": team_name,
             "invited_by_email": row["invited_by_email"],
@@ -413,6 +414,8 @@ class AcceptInvitesBody(BaseModel):
     user_id: str
     email: str
     team_id: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 @router.post("/accept-invites")
@@ -428,6 +431,27 @@ def accept_pending_invites(body: AcceptInvitesBody):
 
 
 def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
+    if body.full_name is not None and len(body.full_name.strip()) < 4:
+        raise HTTPException(400, "Full name must be at least 4 characters")
+    if body.password is not None and len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    # Atomically set password + name BEFORE accepting the invite so the user
+    # always has their profile set if they join a team successfully.
+    if body.password or body.full_name:
+        user_update: dict = {}
+        if body.password:
+            user_update["password"] = body.password
+        user_meta: dict = {"password_set": True} if body.password else {}
+        if body.full_name and body.full_name.strip():
+            user_meta["full_name"] = body.full_name.strip()
+        if user_meta:
+            user_update["user_metadata"] = user_meta
+        try:
+            db.auth.admin.update_user_by_id(body.user_id, user_update)
+        except Exception as exc:
+            raise HTTPException(400, f"Failed to update profile: {exc}")
+
     email = body.email.strip().lower()
     query = (
         db.table("team_invites")
@@ -503,6 +527,13 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
             pass  # Non-blocking
 
     return {"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids}
+
+
+@router.post("/invites/{invite_id}/decline", status_code=204)
+def decline_invite(invite_id: str):
+    """Mark an invite as declined by the invitee."""
+    db = get_supabase()
+    db.table("team_invites").update({"status": "declined"}).eq("id", invite_id).execute()
 
 
 @router.delete("/{team_id}", status_code=204)
