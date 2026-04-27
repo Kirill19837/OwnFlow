@@ -3,6 +3,7 @@
 -- Run against an empty Supabase project.
 
 -- ─── Drop old tables (if migrating from previous schema) ─────────────────────
+drop table if exists task_interactions    cascade;
 drop table if exists github_connections cascade;
 drop table if exists ai_messages        cascade;
 drop table if exists ai_logs            cascade;
@@ -98,13 +99,15 @@ create index if not exists team_invites_email_status_idx on team_invites (email,
 -- ─── Projects ───────────────────────────────────────────────────────────────
 
 create table if not exists projects (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  prompt     text not null,
-  owner_id   uuid not null,
-  team_id    uuid references teams(id) on delete cascade,
-  status     text not null default 'planning',
-  created_at timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  prompt      text not null,
+  owner_id    uuid not null,
+  team_id     uuid references teams(id) on delete cascade,
+  status      text not null default 'planning',
+  sprint_days int  not null default 3,
+  roadmap     jsonb,
+  created_at  timestamptz not null default now()
 );
 
 create table if not exists project_members (
@@ -122,6 +125,7 @@ create table if not exists actors (
   project_id   uuid not null references projects(id) on delete cascade,
   name         text not null,
   type         text not null check (type in ('human', 'ai')),
+  role         text,
   model        text,
   capabilities text[] default '{}',
   avatar_url   text,
@@ -154,9 +158,23 @@ create table if not exists tasks (
   estimated_hours  float not null default 4,
   depends_on       uuid[] default '{}',
   github_pr_url    text,
-  ai_ready         boolean default false,
+  ai_ready         boolean not null default false,
+  is_ready         boolean not null default false,
+  task_details     jsonb,
   created_at       timestamptz not null default now()
 );
+
+-- ─── Task interactions (AI/human chat per task) ────────────────────────────────
+
+create table if not exists task_interactions (
+  id         uuid primary key default gen_random_uuid(),
+  task_id    uuid not null references tasks(id) on delete cascade,
+  role       text not null check (role in ('user', 'assistant')),
+  content    text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists task_interactions_task_idx on task_interactions (task_id, created_at);
 
 -- ─── Assignments ─────────────────────────────────────────────────────────────
 
@@ -240,6 +258,7 @@ alter table assignments      enable row level security;
 alter table deliverables     enable row level security;
 alter table ai_logs          enable row level security;
 alter table ai_messages      enable row level security;
+alter table task_interactions   enable row level security;
 alter table github_connections enable row level security;
 
 create policy "service_role_all_roles"             on roles              for all using (true);
@@ -257,4 +276,5 @@ create policy "service_role_all_assignments"      on assignments        for all 
 create policy "service_role_all_deliverables"     on deliverables       for all using (true);
 create policy "service_role_all_ai_logs"          on ai_logs            for all using (true);
 create policy "service_role_all_ai_messages"      on ai_messages        for all using (true);
+create policy "service_role_all_task_interactions" on task_interactions   for all using (true);
 create policy "service_role_all_github"           on github_connections for all using (true);

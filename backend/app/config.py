@@ -29,7 +29,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",")]
+        origins = [o.strip() for o in self.cors_origins.split(",")]
+        # Always allow all common Vite dev ports for local development
+        for port in range(5173, 5181):
+            candidate = f"http://localhost:{port}"
+            if candidate not in origins:
+                origins.append(candidate)
+        return origins
 
     class Config:
         env_file = str(_ENV_FILE)
