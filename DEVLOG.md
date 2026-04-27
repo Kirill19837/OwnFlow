@@ -2,6 +2,24 @@
 
 ---
 
+## 2026-04-27 | `0ec081a` — Fix frontend warnings and refresh FastAPI stack
+
+- `backend/app/config.py` — migrated settings configuration to Pydantic v2 `model_config` to remove the class-based config deprecation warning
+- `backend/requirements.txt` — upgraded `fastapi` from `0.115.0` to `0.136.1` and `python-multipart` from `0.0.26` to `0.0.27`, removing the multipart deprecation warning at the dependency level
+- `frontend/src/hooks/useRealtimeProject.ts` — removed the stale project closure in realtime subscriptions and fixed the React Hooks exhaustive-deps warning
+- `frontend/src/pages/DashboardPage.tsx` — added the missing `setProjects` dependency to the project sync effect
+- `frontend/vite.config.ts` — added manual vendor chunk splitting so the production build no longer warns about oversized chunks
+- Validation — `make check-backend` and `make check-frontend` both passed with no remaining warnings
+
+## 2026-04-27 | `3c8caf8` — Rebuild README and move frontend Docker build to Node 24
+
+- `README.md` — recreated as a concise, current project document (snapshot, capabilities, architecture, DB setup options, local run, quality checks, and summarized recent changes from DEVLOG)
+- `frontend/Dockerfile` — build image upgraded from `node:20-alpine` to `node:24-alpine`
+- README prerequisites updated to `Node.js 20+ (Node.js 24 recommended)`
+- Validation — `make check-backend` and `make check-frontend` passed
+
+---
+
 ## 2026-04-27 | `c269a98` — Dependency upgrades: python-dotenv and pytest
 
 - `backend/requirements.txt` — bumped `python-dotenv` from `1.0.1` to `1.2.2`
