@@ -4,7 +4,9 @@ import { useProjectStore } from '../store/projectStore'
 import type { Task, Assignment, Project } from '../types'
 
 export function useRealtimeProject(projectId: string | undefined) {
-  const { upsertTask, upsertAssignment, setCurrentProject, currentProject } = useProjectStore()
+  const upsertTask = useProjectStore((state) => state.upsertTask)
+  const upsertAssignment = useProjectStore((state) => state.upsertAssignment)
+  const setCurrentProject = useProjectStore((state) => state.setCurrentProject)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   useEffect(() => {
@@ -30,6 +32,7 @@ export function useRealtimeProject(projectId: string | undefined) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` },
         (payload) => {
+          const currentProject = useProjectStore.getState().currentProject
           if (payload.new && currentProject) {
             setCurrentProject({ ...currentProject, ...(payload.new as Partial<Project>) })
           }
@@ -42,5 +45,5 @@ export function useRealtimeProject(projectId: string | undefined) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [projectId])
+  }, [projectId, setCurrentProject, upsertAssignment, upsertTask])
 }

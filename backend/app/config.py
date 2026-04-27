@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 # Resolve .env relative to this file (backend/app/config.py → backend/.env)
@@ -9,6 +9,8 @@ _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE))
+
     supabase_url: str
     supabase_service_role_key: str
     openai_api_key: str = ""
@@ -36,9 +38,6 @@ class Settings(BaseSettings):
             if candidate not in origins:
                 origins.append(candidate)
         return origins
-
-    class Config:
-        env_file = str(_ENV_FILE)
 
 
 @lru_cache
