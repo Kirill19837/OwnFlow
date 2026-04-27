@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-04-27 | `0e423d4` — Fix invite onboarding for cross-host login links
+
+- `frontend/src/components/Auth.tsx` — invite acceptance now runs on both `getSession` and `SIGNED_IN`, even without `invite_org` in URL; still uses `invite_org` filter when present
+- `frontend/src/components/Auth.tsx` — added robust `resolveLinkType` helper that infers `join_company` from `invite_org` when `link_type` is absent
+- `frontend/src/store/authStore.ts` — `signOut` now clears `linkType`, `needsPassword`, and `needsName` to prevent stale flow state
+- Outcome — invited users logging in from a different host/domain no longer fall into `/company/new` because pending invites are accepted immediately after auth
+
+---
+
 ## 2026-04-27 | `7d18746` — Fix my_role in team response; schema migrations; CORS for local dev
 
 - `backend/app/api/teams.py` — `get_team` now resolves `my_role` from the already-fetched members list and includes it in the response; uses `Depends(current_user_id)` so no extra DB round-trip
