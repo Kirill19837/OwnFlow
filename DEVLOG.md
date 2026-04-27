@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-27 | `c269a98` — Dependency upgrades: python-dotenv and pytest
+
+- `backend/requirements.txt` — bumped `python-dotenv` from `1.0.1` to `1.2.2`
+- `backend/requirements-dev.txt` — bumped `pytest` from `8.3.5` to `9.0.3`
+- Validation — `make check-backend` and `make check-frontend` both passed after the version upgrades
+
+---
+
 ## 2026-04-27 | `5327b92` — Add standalone full database bootstrap SQL script
 
 - `supabase/database_full.sql` (NEW) — single combined SQL script that drops all existing tables and recreates the full current schema without relying on migrations
