@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-28 | `96a81e2` — feat: skills selection modal after invite onboarding; fix role UUID display on invite card
+
+- `frontend/src/store/authStore.ts` — added `needsSkills: boolean` + `setNeedsSkills` action; clears on sign-out
+- `frontend/src/components/CompleteProfileModal.tsx` — after saving name/password for the `set_password` (invite) flow, sets `needsSkills(true)` before closing
+- `frontend/src/components/SelectSkillsModal.tsx` — new modal: pill multi-select grouped by category, "Save skills" → `PUT /skills/user`, "Skip for now" dismisses without saving
+- `frontend/src/components/AppLayout.tsx` — mounts `SelectSkillsModal` when `needsSkills` is true
+- `frontend/src/pages/InvitePage.tsx` — added `ROLE_NAMES` map + `resolveRole()` helper; invite card now shows `member`/`admin`/`owner` instead of raw UUID
+
 ## 2026-04-28 | `2902e2b` — feat: show member skills in team settings page
 
 - `frontend/src/pages/OrgSettingsPage.tsx` — member rows now display skill pills; uses `useQueries` to batch-fetch each member's skills in parallel (cached 5 min); added `Skill` type import
