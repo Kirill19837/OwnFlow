@@ -115,8 +115,9 @@ export default function OrgSettingsPage() {
     onMutate: ({ email }) => setResendingEmail(email),
     onSettled: () => setResendingEmail(null),
     onSuccess: (_, { email }) => setInviteMessage(`Invite re-sent to ${email}.`),
-    onError: (err: any) => {             // ← додай це
-      const msg = err?.response?.data?.detail || err?.message || 'Unknown error'
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string }
+      const msg = e?.response?.data?.detail || e?.message || 'Unknown error'
       setInviteMessage(`Error: ${msg}`)
     },
   })
