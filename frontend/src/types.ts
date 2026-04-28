@@ -16,7 +16,8 @@ export interface Team {
   company_id?: string
   default_ai_model: string
   created_at: string
-  my_role?: 'owner' | 'admin' | 'member'
+  my_role?: 'owner' | 'admin' | 'member'   // display name, may change
+  my_role_id?: string                       // stable UUID, use for permission checks
   members?: TeamMember[]
   pending_invites?: TeamPendingInvite[]
 }
@@ -26,7 +27,8 @@ export interface TeamMember {
   user_id: string
   email?: string
   full_name?: string
-  role: 'owner' | 'admin' | 'member'
+  role: 'owner' | 'admin' | 'member'   // display name
+  role_id: string                       // stable UUID for permission checks
   joined_at: string
 }
 

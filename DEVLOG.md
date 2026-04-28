@@ -2,6 +2,11 @@
 
 ---
 
+## 2026-04-28 | `83c69be` — Fix: role UUID display in team members; add role change endpoint; compare roles by UUID not name
+
+- `backend/app/api/teams.py` — `get_team` now converts each member's raw role UUID to a human-readable name before returning; `_require_member` updated to return raw UUID and compare against `ROLE_IDS` constants (not string names); added `PATCH /{team_id}/members/{user_id}` endpoint for owner to change member roles (admin ↔ member); docstring updated
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `changeRole` mutation; member role displays as a dropdown (`<select>`) for owners on non-owner members, static text for everyone else
+
 ## 2026-04-28 | `24c7ab3` — UX: show full_name and email for team members, remove user_id display
 
 - `backend/app/api/teams.py` — `get_team` now fetches `user_metadata.full_name` from admin user list and attaches it to each member object alongside `email`

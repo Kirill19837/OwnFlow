@@ -196,7 +196,8 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
 
     # Resolve caller's role
     caller_member = next((m for m in members if str(m.get("user_id")) == caller_id), None)
-    my_role = ROLE_NAMES.get(caller_member["role"], "member") if caller_member else None
+    my_role_id = caller_member["role"] if caller_member else None          # raw UUID
+    my_role = ROLE_NAMES.get(my_role_id, "member") if my_role_id else None  # display name
 
     if members:
         users = _extract_auth_users(db.auth.admin.list_users())
@@ -213,7 +214,8 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
             uid = str(member["user_id"])
             member["email"] = email_by_user_id.get(uid)
             member["full_name"] = name_by_user_id.get(uid) or None
-            member["role"] = ROLE_NAMES.get(member["role"], member["role"])
+            member["role_id"] = member["role"]                              # raw UUID
+            member["role"] = ROLE_NAMES.get(member["role"], member["role"]) # display name
 
     pending_invites = []
     try:
@@ -240,7 +242,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
     except Exception:
         pending_invites = []
 
-    return {**team.data, "members": members, "pending_invites": pending_invites, "my_role": my_role}
+    return {**team.data, "members": members, "pending_invites": pending_invites, "my_role": my_role, "my_role_id": my_role_id}
 
 
 @router.patch("/{team_id}")

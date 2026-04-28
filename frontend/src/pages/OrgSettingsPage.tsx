@@ -7,6 +7,13 @@ import api from '../lib/api'
 import type { Team, TeamPendingInvite } from '../types'
 import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil } from 'lucide-react'
 
+// Stable role UUIDs — match backend ROLE_IDS; use these for permission checks
+const ROLE_IDS = {
+  owner:  '00000000-0000-0000-0000-000000000001',
+  admin:  '00000000-0000-0000-0000-000000000002',
+  member: '00000000-0000-0000-0000-000000000003',
+} as const
+
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'OpenAI' },
@@ -132,9 +139,9 @@ export default function OrgSettingsPage() {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading…</div>
   }
 
-  const myRole = org.my_role ?? 'member'
-  const canInvite = myRole === 'owner' || myRole === 'admin'
-  const canDelete = myRole === 'owner'
+  const myRoleId = org.my_role_id ?? ''   // stable UUID for permission checks
+  const canInvite = myRoleId === ROLE_IDS.owner || myRoleId === ROLE_IDS.admin
+  const canDelete = myRoleId === ROLE_IDS.owner
 
   return (
     <div className="max-w-2xl mx-auto w-full px-6 py-10">
@@ -229,7 +236,7 @@ export default function OrgSettingsPage() {
                   {m.full_name && <p className="text-sm text-white">{m.full_name}</p>}
                   {m.email && <p className={`text-sm ${m.full_name ? 'text-gray-400' : 'text-white'}`}>{m.email}</p>}
                   {!m.email && !m.full_name && <p className="text-sm text-gray-500 italic">Unknown user</p>}
-                  {myRole === 'owner' && m.user_id !== session?.user.id && m.role !== 'owner' ? (
+                  {myRoleId === ROLE_IDS.owner && m.user_id !== session?.user.id && m.role_id !== ROLE_IDS.owner ? (
                     <select
                       value={m.role}
                       onChange={(e) => changeRole.mutate({ userId: m.user_id, role: e.target.value })}
