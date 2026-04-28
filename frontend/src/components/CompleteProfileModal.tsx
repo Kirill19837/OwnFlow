@@ -50,6 +50,8 @@ export default function CompleteProfileModal() {
       // Direct user to the right place based on why they signed in via link
       if (linkType === 'create_company') {
         navigate('/company/new')
+      } else {
+        navigate('/')
       }
     } catch (err: unknown) {
       setError((err as Error).message ?? 'Failed to save — please try again')

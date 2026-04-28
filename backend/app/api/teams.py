@@ -150,6 +150,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
         }
         for member in members:
             member["email"] = email_by_user_id.get(str(member["user_id"]))
+            member["role"] = ROLE_NAMES.get(member["role"], member["role"])
 
     pending_invites = []
     try:
@@ -165,6 +166,8 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
         # Exclude invites for emails that are already active members
         # (can happen if a previous accept-invites call failed mid-transaction).
         member_emails = {(m.get("email") or "").lower() for m in members if m.get("email")}
+        for i in raw_invites:
+            i["role"] = ROLE_NAMES.get(i["role"], i["role"])
         pending_invites = [i for i in raw_invites if i["email"].lower() not in member_emails]
         # Heal stuck invites in the background — mark them accepted.
         stuck_ids = [i["id"] for i in raw_invites if i["email"].lower() in member_emails]
