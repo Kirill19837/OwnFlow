@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-28 | `b1565bc` — feat: skills catalogue from DB; user skill profile selection; NewProjectPage uses API skills
+
+- `supabase/migrations/007_skills.sql` — new `skills` table (id, name, category, description, actor_type) seeded with 17 roles; `user_skills` join table with RLS policies
+- `supabase/database_full.sql` — added skills + user_skills table definitions and seed data
+- `backend/app/api/skills.py` — new router: `GET /skills`, `GET /skills/categories`, `GET /skills/user/{user_id}`, `PUT /skills/user` (auth-gated, max 10 skills)
+- `backend/app/main.py` — registered skills router at `/skills`
+- `frontend/src/types.ts` — added `Skill` interface
+- `frontend/src/pages/NewProjectPage.tsx` — removed all hardcoded `ROLE_TEMPLATES`; role picker and auto-fill now fetch from `GET /skills` API; used `useRef` guard to fix `react-hooks/set-state-in-effect` lint error
+- `frontend/src/pages/ProfilePage.tsx` — added "My skills" section: pill-style multi-select grouped by category, fetches user's current skills, saves via `PUT /skills/user`
+
 ## 2026-04-28 | `13b7f1c` — Security: use role UUIDs for all permission checks (FE+BE); add my_role_id and role_id to API responses
 
 - `backend/app/api/teams.py` — `get_team` now returns `my_role_id` (raw role UUID for the caller) and `role_id` on each member object alongside the human-readable `role`/`my_role` names
