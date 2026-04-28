@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-28 | `13b7f1c` — Security: use role UUIDs for all permission checks (FE+BE); add my_role_id and role_id to API responses
+
+- `backend/app/api/teams.py` — `get_team` now returns `my_role_id` (raw role UUID for the caller) and `role_id` on each member object alongside the human-readable `role`/`my_role` names
+- `frontend/src/types.ts` — added `my_role_id?: string` to `Team`, `role_id: string` to `TeamMember`
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `ROLE_IDS` const (matching backend fixed UUIDs); all permission checks (`canInvite`, `canDelete`, role dropdown condition) now compare against UUID constants instead of name strings — immune to role renames
+
 ## 2026-04-28 | `83c69be` — Fix: role UUID display in team members; add role change endpoint; compare roles by UUID not name
 
 - `backend/app/api/teams.py` — `get_team` now converts each member's raw role UUID to a human-readable name before returning; `_require_member` updated to return raw UUID and compare against `ROLE_IDS` constants (not string names); added `PATCH /{team_id}/members/{user_id}` endpoint for owner to change member roles (admin ↔ member); docstring updated

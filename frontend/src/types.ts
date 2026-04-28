@@ -43,6 +43,14 @@ export interface TeamPendingInvite {
 
 export type ActorType = 'human' | 'ai'
 
+export interface Skill {
+  id: string
+  name: string
+  category: string
+  description?: string
+  actor_type: 'human' | 'ai' | 'both'
+}
+
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'rework'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'
 export type TaskType = 'code' | 'design' | 'review' | 'research' | 'qa' | 'devops'
