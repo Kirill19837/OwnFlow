@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-04-28 | `b96b236` — Security: member role restrictions on team settings + team list filtering
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — hide remove-member trash icon and revoke-invite trash icon for non-admin/owner users (gate on `canInvite`); disable Default AI Model buttons for members (`disabled` + `cursor-not-allowed` + reduced opacity)
+- `backend/app/api/companies.py` — `GET /{company_id}/teams?user_id=…` now filters to only teams the user is a member of; previously returned all teams in the company regardless of membership
+
+---
+
 ## 2026-04-28 | `bb3789c` — Fix: auth guards on remove_member/revoke_invite; refactor with _require_member helper
 
 - `backend/app/api/teams.py` — `DELETE /{team_id}/members/{user_id}` had zero authorization: any authenticated user could remove any member from any team. Fixed with full role-based checks (owner can remove anyone, admin can remove members only, members can only leave themselves, owner cannot leave). `DELETE /{team_id}/invites/{invite_id}` (revoke) was similarly unguarded — now requires owner or admin. Introduced `_require_member(db, team_id, user_id) -> str` helper to eliminate the repeated 9-line membership-lookup pattern used in 4 endpoints (`invite_member_by_email`, `delete_team`, `remove_member`, `revoke_invite`).

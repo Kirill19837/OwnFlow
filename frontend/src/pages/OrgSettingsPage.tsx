@@ -220,8 +220,9 @@ export default function OrgSettingsPage() {
             {(org.members ?? []).map((m) => (
               <div key={m.user_id} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
                 <div>
-                  <p className="text-sm text-white font-mono">{m.email ?? m.user_id}</p>
-                  {!m.email && <p className="text-[11px] text-gray-600">{m.user_id}</p>}
+                  {m.full_name && <p className="text-sm text-white">{m.full_name}</p>}
+                  {m.email && <p className={`text-sm ${m.full_name ? 'text-gray-400' : 'text-white'}`}>{m.email}</p>}
+                  {!m.email && !m.full_name && <p className="text-sm text-gray-500 italic">Unknown user</p>}
                   <p className="text-xs text-gray-500 capitalize">{m.role}</p>
                 </div>
                 {canInvite && m.user_id !== session?.user.id && (

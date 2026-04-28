@@ -198,14 +198,19 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
 
     if members:
         users = _extract_auth_users(db.auth.admin.list_users())
-        email_by_user_id = {
-            uid: (_user_email(u) or "")
-            for u in users
-            for uid in [_user_id(u)]
-            if uid
-        }
+        email_by_user_id: dict[str, str] = {}
+        name_by_user_id: dict[str, str] = {}
+        for u in users:
+            uid = _user_id(u)
+            if not uid:
+                continue
+            email_by_user_id[uid] = _user_email(u) or ""
+            meta = (u.get("user_metadata") if isinstance(u, dict) else getattr(u, "user_metadata", None)) or {}
+            name_by_user_id[uid] = meta.get("full_name") or ""
         for member in members:
-            member["email"] = email_by_user_id.get(str(member["user_id"]))
+            uid = str(member["user_id"])
+            member["email"] = email_by_user_id.get(uid)
+            member["full_name"] = name_by_user_id.get(uid) or None
 
     pending_invites = []
     try:
