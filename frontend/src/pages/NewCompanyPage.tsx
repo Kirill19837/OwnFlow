@@ -16,6 +16,7 @@ import {
   Phone,
   Building2,
   Star,
+  Trash2,
 } from 'lucide-react'
 import type { Team } from '../types'
 
@@ -51,7 +52,7 @@ const PERKS = [
 ]
 
 export default function NewCompanyPage() {
-  const { session, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName, setNeedsSkills } = useAuthStore()
+  const { session, signOut, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName, setNeedsSkills } = useAuthStore()
   const { setCompany } = useCompanyStore()
   const { setTeams, setActiveTeam } = useTeamStore()
   const navigate = useNavigate()
@@ -72,6 +73,18 @@ export default function NewCompanyPage() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [model, setModel] = useState('gpt-4o')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  const deleteAccount = useMutation({
+    mutationFn: () => api.delete('/auth/account'),
+    onSuccess: async () => {
+      setPendingProfile(null)
+      setNeedsPassword(false)
+      setNeedsName(false)
+      await signOut()
+      navigate('/login', { replace: true })
+    },
+  })
 
   const canSubmit = name.trim().length > 0 && phone.trim().length > 0
 
@@ -273,6 +286,47 @@ export default function NewCompanyPage() {
               <a href="#" className="text-gray-500 underline underline-offset-2">Terms</a> and{' '}
               <a href="#" className="text-gray-500 underline underline-offset-2">Privacy Policy</a>.
             </p>
+
+            {/* Delete account */}
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full text-center text-xs text-gray-600 hover:text-red-400 transition-colors mt-2"
+              >
+                I don't want to continue — delete my account
+              </button>
+            ) : (
+              <div className="border border-red-900/50 bg-red-950/20 rounded-xl p-4 space-y-3 mt-2">
+                <div className="flex items-start gap-2">
+                  <Trash2 size={14} className="text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">
+                    This will permanently delete your account and all associated data. This cannot be undone.
+                  </p>
+                </div>
+                {deleteAccount.isError && (
+                  <p className="text-xs text-red-400">Something went wrong. Please try again.</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deleteAccount.isPending}
+                    className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-colors disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteAccount.mutate()}
+                    disabled={deleteAccount.isPending}
+                    className="flex-1 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors disabled:opacity-40"
+                  >
+                    {deleteAccount.isPending ? 'Deleting…' : 'Yes, delete my account'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -790,6 +790,7 @@ def test_get_pending_invite_returns_null_when_none(client):
 # ---------------------------------------------------------------------------
 
 def test_owner_can_delete_team(client):
+
     db = MagicMock()
 
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
@@ -807,3 +808,226 @@ def test_owner_can_delete_team(client):
         app.dependency_overrides.clear()
 
     assert resp.status_code == 204
+
+
+# ===========================================================================
+# Company PATCH / DELETE endpoint tests
+# ===========================================================================
+
+COMPANY_ID   = str(uuid.uuid4())
+COMPANY_ROW  = {"id": COMPANY_ID, "name": "Acme", "slug": "acme", "owner_id": OWNER_ID}
+
+def _patch_company_db(db_mock):
+    return patch("app.api.companies.get_supabase", return_value=db_mock)
+
+
+def _company_owner_mock(user_id: str = OWNER_ID):
+    """Return a db mock whose company_members lookup says user is owner."""
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"role": ROLE_OWNER}]
+    )
+    return db
+
+
+def _company_member_mock(role_uuid: str):
+    """Return a db mock whose company_members lookup returns the given role."""
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"role": role_uuid}]
+    )
+    return db
+
+
+def _company_non_member_mock():
+    """Return a db mock where the user is NOT a company member."""
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp([])
+    return db
+
+
+# ---------------------------------------------------------------------------
+# 18. PATCH /companies/{id} — owner can rename
+# ---------------------------------------------------------------------------
+
+def test_update_company_owner_can_rename(client):
+    db = _company_owner_mock()
+    db.table.return_value.update.return_value.eq.return_value.execute.return_value = _resp([])
+
+    with _patch_company_db(db):
+        resp = client.patch(
+            f"/companies/{COMPANY_ID}",
+            json={"name": "NewName"},
+            params={"user_id": OWNER_ID},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "NewName"
+    assert body["company_id"] == COMPANY_ID
+
+
+# ---------------------------------------------------------------------------
+# 19. PATCH /companies/{id} — owner can update phone
+# ---------------------------------------------------------------------------
+
+def test_update_company_owner_can_update_phone(client):
+    db = _company_owner_mock()
+    db.table.return_value.update.return_value.eq.return_value.execute.return_value = _resp([])
+
+    with _patch_company_db(db):
+        resp = client.patch(
+            f"/companies/{COMPANY_ID}",
+            json={"phone": "+1-555-0100"},
+            params={"user_id": OWNER_ID},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["phone"] == "+1-555-0100"
+
+
+# ---------------------------------------------------------------------------
+# 20. PATCH /companies/{id} — non-owner (admin) gets 403
+# ---------------------------------------------------------------------------
+
+def test_update_company_admin_gets_403(client):
+    db = _company_member_mock(ROLE_ADMIN)
+
+    with _patch_company_db(db):
+        resp = client.patch(
+            f"/companies/{COMPANY_ID}",
+            json={"name": "Hack"},
+            params={"user_id": INVITEE_ID},
+        )
+
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 21. PATCH /companies/{id} — non-member gets 403
+# ---------------------------------------------------------------------------
+
+def test_update_company_non_member_gets_403(client):
+    db = _company_non_member_mock()
+
+    with _patch_company_db(db):
+        resp = client.patch(
+            f"/companies/{COMPANY_ID}",
+            json={"name": "Hack"},
+            params={"user_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 22. PATCH /companies/{id} — empty body returns 400
+# ---------------------------------------------------------------------------
+
+def test_update_company_empty_body_returns_400(client):
+    db = _company_owner_mock()
+
+    with _patch_company_db(db):
+        resp = client.patch(
+            f"/companies/{COMPANY_ID}",
+            json={},
+            params={"user_id": OWNER_ID},
+        )
+
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# 23. DELETE /companies/{id} — owner can delete; cascade calls are made
+# ---------------------------------------------------------------------------
+
+def test_delete_company_owner_cascades_and_returns_204(client):
+    company_members_mock = MagicMock()
+    teams_mock           = MagicMock()
+    team_members_mock    = MagicMock()
+    team_invites_mock    = MagicMock()
+    companies_mock       = MagicMock()
+
+    # _require_company_owner lookup
+    company_members_mock.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _resp(
+        [{"role": ROLE_OWNER}]
+    )
+
+    TEAM_ID_1 = str(uuid.uuid4())
+    TEAM_ID_2 = str(uuid.uuid4())
+
+    # list teams belonging to company
+    teams_mock.select.return_value.eq.return_value.execute.return_value = _resp([
+        {"id": TEAM_ID_1},
+        {"id": TEAM_ID_2},
+    ])
+
+    # All delete operations succeed
+    team_invites_mock.delete.return_value.eq.return_value.execute.return_value = _resp([])
+    team_members_mock.delete.return_value.eq.return_value.execute.return_value = _resp([])
+    teams_mock.delete.return_value.eq.return_value.execute.return_value       = _resp([])
+    company_members_mock.delete.return_value.eq.return_value.execute.return_value = _resp([])
+    companies_mock.delete.return_value.eq.return_value.execute.return_value   = _resp([])
+
+    def _table(name: str):
+        return {
+            "company_members": company_members_mock,
+            "teams":           teams_mock,
+            "team_members":    team_members_mock,
+            "team_invites":    team_invites_mock,
+            "companies":       companies_mock,
+        }.get(name, MagicMock())
+
+    db = MagicMock()
+    db.table.side_effect = _table
+
+    with _patch_company_db(db):
+        resp = client.delete(
+            f"/companies/{COMPANY_ID}",
+            params={"user_id": OWNER_ID},
+        )
+
+    assert resp.status_code == 204
+
+    # Verify team-level cascade: team_invites and team_members deleted for each team
+    assert team_invites_mock.delete.call_count == 2
+    assert team_members_mock.delete.call_count == 2
+    assert teams_mock.delete.call_count == 2
+
+    # Verify company-level cleanup
+    assert company_members_mock.delete.call_count == 1
+    assert companies_mock.delete.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 24. DELETE /companies/{id} — non-owner gets 403
+# ---------------------------------------------------------------------------
+
+def test_delete_company_non_owner_gets_403(client):
+    db = _company_member_mock(ROLE_MEMBER)
+
+    with _patch_company_db(db):
+        resp = client.delete(
+            f"/companies/{COMPANY_ID}",
+            params={"user_id": INVITEE_ID},
+        )
+
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 25. DELETE /companies/{id} — non-member gets 403
+# ---------------------------------------------------------------------------
+
+def test_delete_company_non_member_gets_403(client):
+    db = _company_non_member_mock()
+
+    with _patch_company_db(db):
+        resp = client.delete(
+            f"/companies/{COMPANY_ID}",
+            params={"user_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 403
+
