@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-27 | `324a02b` — Fix 401 after onboarding: refresh session after password change
+
+- `frontend/src/pages/NewCompanyPage.tsx` — after `POST /companies` succeeds with a password, `supabase.auth.refreshSession()` is awaited before navigating; `onAuthStateChange` in authStore picks up the new JWT so dashboard requests don't 401
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`; converted to `async/await` for clarity
+- Root cause: Supabase invalidates the current JWT when a user's password is changed via the admin API; the old token was still in the Zustand store, causing every subsequent authenticated request to fail with 401
+
+---
+
 ## 2026-04-27 | `eec23a8` — Validate name ≥4 chars and password ≥8 chars on profile setup (FE + BE)
 
 - `frontend/src/components/CompleteProfileModal.tsx` — `nameValid` threshold raised from `> 0` to `>= 4`; inline red hint "Name must be at least 4 characters" appears while typing (mirrors existing password-mismatch hint)

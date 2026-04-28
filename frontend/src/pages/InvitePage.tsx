@@ -64,18 +64,18 @@ export default function InvitePage() {
     setLinkType(null) // allow CompleteProfileModal to show for future flows
 
     try {
+      // Set password client-side first — keeps the session alive.
+      // Never send the password to the backend (admin.update_user_by_id
+      // revokes all tokens and logs the user out).
+      if (needsPassword && password) {
+        const { error } = await supabase.auth.updateUser({ password })
+        if (error) throw new Error(`Failed to set password: ${error.message}`)
+      }
       await api.post('/teams/accept-invites', {
         user_id: session.user.id,
         email: session.user.email,
-        // Atomically save profile + accept invite in one call
-        ...(needsPassword && password ? { password } : {}),
         ...(needsName && name.trim() ? { full_name: name.trim() } : {}),
       })
-      // If the password was just set, the current JWT is invalidated by Supabase.
-      // Refresh the session so the new token is in the store before navigating.
-      if (needsPassword && password) {
-        await supabase.auth.refreshSession()
-      }
       setNeedsPassword(false)
       setNeedsName(false)
     } finally {

@@ -76,25 +76,25 @@ export default function NewCompanyPage() {
   const canSubmit = name.trim().length > 0 && phone.trim().length > 0
 
   const create = useMutation({
-    mutationFn: () =>
-      api
+    mutationFn: async () => {
+      // Set password client-side first — supabase.auth.updateUser keeps the
+      // session alive. Never send the password to the backend (admin.update_user_by_id
+      // revokes all tokens and logs the user out).
+      if (pendingProfile?.password) {
+        const { error } = await supabase.auth.updateUser({ password: pendingProfile.password })
+        if (error) throw new Error(`Failed to set password: ${error.message}`)
+      }
+      return api
         .post('/companies', {
           name: name.trim(),
           owner_id: session!.user.id,
           default_ai_model: model,
           phone: phone.trim(),
-          // Atomically set password + name on first save
-          ...(pendingProfile?.password ? { password: pendingProfile.password } : {}),
           ...(pendingProfile?.name ? { full_name: pendingProfile.name } : {}),
         })
-        .then((r) => r.data),
+        .then((r) => r.data)
+    },
     onSuccess: async (data) => {
-      // If the password was just set for the first time, the current JWT is
-      // invalidated by Supabase. Refresh the session so the new token is in
-      // the store before any further authenticated requests are made.
-      if (pendingProfile?.password) {
-        await supabase.auth.refreshSession()
-      }
       // Profile is now saved in Supabase — clear the pending state
       setPendingProfile(null)
       setNeedsPassword(false)
