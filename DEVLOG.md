@@ -2,6 +2,10 @@
 
 ---
 
+## 2026-04-28 | `bab1628` — fix: show skills selection modal after invite name/password step
+
+- `frontend/src/pages/InvitePage.tsx` — after saving name/password in the profile step, now calls `setNeedsSkills(true)` before navigating to `/`; `SelectSkillsModal` then appears on the dashboard as the next onboarding step
+
 ## 2026-04-28 | `58150d4` — refactor: get_role_name helper; fix pending invite role in API; new tests
 
 - `backend/app/api/teams.py` — extracted `get_role_name(role_id, fallback)` helper; replaced all 5 inline `ROLE_NAMES.get()` calls; `GET /teams/{id}` now resolves `pending_invites[].role` UUID → display name and adds `role_id` for the raw UUID

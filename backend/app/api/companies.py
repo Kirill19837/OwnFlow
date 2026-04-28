@@ -209,3 +209,57 @@ def create_team(company_id: str, body: TeamCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
     return {**row, "my_role": "owner"}
+
+
+class CompanyUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+def _require_company_owner(db, company_id: str, user_id: str) -> None:
+    row = (
+        db.table("company_members")
+        .select("role")
+        .eq("company_id", company_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(403, "Not a member of this company")
+    if row.data[0]["role"] != ROLE_IDS["owner"]:
+        raise HTTPException(403, "Only the company owner can perform this action")
+
+
+@router.patch("/{company_id}")
+def update_company(company_id: str, body: CompanyUpdate, user_id: str):
+    """Rename or update phone. Only the company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    db.table("companies").update(update).eq("id", company_id).execute()
+    return {"company_id": company_id, **update}
+
+
+@router.delete("/{company_id}", status_code=204)
+def delete_company(company_id: str, user_id: str):
+    """
+    Delete a company and cascade-remove all its teams, memberships and invites.
+    Only the company owner can do this.
+    """
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+
+    # Remove all teams belonging to this company
+    teams = db.table("teams").select("id").eq("company_id", company_id).execute()
+    for t in (teams.data or []):
+        tid = t["id"]
+        db.table("team_invites").delete().eq("team_id", tid).execute()
+        db.table("team_members").delete().eq("team_id", tid).execute()
+        db.table("teams").delete().eq("id", tid).execute()
+
+    db.table("company_members").delete().eq("company_id", company_id).execute()
+    db.table("companies").delete().eq("id", company_id).execute()
+

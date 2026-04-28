@@ -132,10 +132,22 @@ export default function AppLayout() {
 
         {/* Company name */}
         {company && (
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
-            <Building2 size={12} />
-            <span>{company.name}</span>
-          </div>
+          company.owner_id === session?.user?.id
+            ? (
+              <button
+                onClick={() => navigate('/company/settings')}
+                className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                title="Company settings"
+              >
+                <Building2 size={12} />
+                <span>{company.name}</span>
+              </button>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
+                <Building2 size={12} />
+                <span>{company.name}</span>
+              </div>
+            )
         )}
 
         {/* Team switcher */}

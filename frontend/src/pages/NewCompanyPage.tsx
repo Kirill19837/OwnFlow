@@ -51,7 +51,7 @@ const PERKS = [
 ]
 
 export default function NewCompanyPage() {
-  const { session, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName } = useAuthStore()
+  const { session, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName, setNeedsSkills } = useAuthStore()
   const { setCompany } = useCompanyStore()
   const { setTeams, setActiveTeam } = useTeamStore()
   const navigate = useNavigate()
@@ -102,6 +102,7 @@ export default function NewCompanyPage() {
       setPendingProfile(null)
       setNeedsPassword(false)
       setNeedsName(false)
+      setNeedsSkills(true)
       // Seed the company cache so AppLayout sees the real company immediately
       queryClient.setQueryData(['company', session!.user.id], data)
       setCompany(data)
