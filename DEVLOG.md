@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-04-28 | `aad8e6c` — Fix magic link: actually send email + BE rate limit + FE cooldown 20 min
+
+- `backend/app/api/auth.py` — `POST /auth/magic-link` was calling `generate_link` but discarding the result and never sending any email; now extracts `action_link` and calls `send_magic_link_email` (same pattern as invite flow); added server-side in-memory rate limit (20 min / email); TODO comment to move to DB table for multi-worker safety
+- `frontend/src/pages/LoginPage.tsx` — `MAGIC_LINK_COOLDOWN_MS` changed from 60 min → 20 min to match BE
+
+---
+
 ## 2026-04-27 | `afb0385` — Fix repeated password modal + add FRONTEND_URL to CI/CD
 
 - `frontend/src/pages/NewCompanyPage.tsx` — `supabase.auth.updateUser` now includes `data: { password_set: true }` so Auth.tsx short-circuits the AMR check on any subsequent SIGNED_IN events

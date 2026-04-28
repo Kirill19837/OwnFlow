@@ -2,28 +2,50 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Lock } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import { supabase } from '../lib/supabase'
 
 export default function CompleteProfileModal() {
-  const { needsPassword, needsName, setPendingProfile } = useAuthStore()
+  const { needsPassword, needsName, linkType, setPendingProfile, setNeedsPassword, setNeedsName } = useAuthStore()
   const navigate = useNavigate()
 
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const passwordsMatch = password === confirm
   const passwordValid = password.length >= 8 && passwordsMatch
   const nameValid = name.trim().length >= 4
   const valid = (!needsName || nameValid) && (!needsPassword || passwordValid)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!valid) return
     setError('')
 
-    // Store name+password without saving — the atomic save happens in NewCompanyPage
-    // when the user completes company setup (organic flow).
+    // Magic-link / set_password flow: user already has a company.
+    // Save password + name immediately — do NOT navigate to /company/new.
+    if (linkType === 'set_password') {
+      setSaving(true)
+      try {
+        const updateData: Record<string, unknown> = { password_set: true }
+        if (needsName && name.trim()) updateData.full_name = name.trim()
+        const update: Parameters<typeof supabase.auth.updateUser>[0] = { data: updateData }
+        if (needsPassword) update.password = password
+        const { error: err } = await supabase.auth.updateUser(update)
+        if (err) { setError(err.message); return }
+        setNeedsPassword(false)
+        setNeedsName(false)
+        // Modal unmounts — user stays on dashboard
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
+    // Organic new-user flow: store name+password without saving — the atomic
+    // save happens in NewCompanyPage when the user completes company setup.
     setPendingProfile({
       name: needsName ? name.trim() : '',
       password: needsPassword ? password : '',
@@ -111,10 +133,10 @@ export default function CompleteProfileModal() {
 
           <button
             type="submit"
-            disabled={!valid}
+            disabled={!valid || saving}
             className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors"
           >
-            Continue →
+            {saving ? 'Saving…' : 'Continue →'}
           </button>
         </form>
       </div>
