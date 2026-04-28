@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-04-28 | `af5429c` — Fix InvitePage: show invite card first, collect profile only after Accept
+
+- `frontend/src/pages/InvitePage.tsx` — reordered the step machine: `loading → invite-card → (profile) → accepting`. Previously the profile form (name + password) was shown before the user could see the invite details, meaning declining still asked for a password. Now Decline immediately marks the invite declined and signs the user out; Accept checks if name/password are needed and routes through the profile step only if so. After saving credentials via `supabase.auth.updateUser`, `doAccept()` fires and navigates to dashboard.
+- `docs/auth-flow.md` — updated §4 (team invite new user) and §6 (InvitePage step machine) to reflect new order.
+
+---
+
 ## 2026-04-28 | `f9ef148` — Fix CompleteProfileModal: save password immediately for magic-link (set_password) users
 
 - `frontend/src/components/CompleteProfileModal.tsx` — when `linkType === 'set_password'`, the modal now calls `supabase.auth.updateUser({ password, data: { password_set: true, full_name? } })` directly and clears `needsPassword`/`needsName` flags; user stays on dashboard. Previously the modal stored to `pendingProfile` and navigated to `/company/new`, where the existing-company guard redirected back to `/` without ever saving the password. Organic new-user flow (navigate to `/company/new`) unchanged.
