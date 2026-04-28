@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-28 | `24c7ab3` — UX: show full_name and email for team members, remove user_id display
+
+- `backend/app/api/teams.py` — `get_team` now fetches `user_metadata.full_name` from admin user list and attaches it to each member object alongside `email`
+- `frontend/src/types.ts` — added `full_name?: string` to `TeamMember` interface
+- `frontend/src/pages/OrgSettingsPage.tsx` — member rows show full name (primary) + email (secondary) + role; raw UUID is never displayed; falls back gracefully to email-only or "Unknown user"
+
 ## 2026-04-28 | `b96b236` — Security: member role restrictions on team settings + team list filtering
 
 - `frontend/src/pages/OrgSettingsPage.tsx` — hide remove-member trash icon and revoke-invite trash icon for non-admin/owner users (gate on `canInvite`); disable Default AI Model buttons for members (`disabled` + `cursor-not-allowed` + reduced opacity)

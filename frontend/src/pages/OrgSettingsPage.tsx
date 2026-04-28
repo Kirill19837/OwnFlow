@@ -105,6 +105,12 @@ export default function OrgSettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
   })
 
+  const changeRole = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      api.patch(`/teams/${teamId}/members/${userId}`, { role }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
+  })
+
   const resendInvite = useMutation({
     mutationFn: ({ email, role }: { email: string; role: string }) =>
       api.post(`/teams/${teamId}/invites`, {
@@ -223,7 +229,18 @@ export default function OrgSettingsPage() {
                   {m.full_name && <p className="text-sm text-white">{m.full_name}</p>}
                   {m.email && <p className={`text-sm ${m.full_name ? 'text-gray-400' : 'text-white'}`}>{m.email}</p>}
                   {!m.email && !m.full_name && <p className="text-sm text-gray-500 italic">Unknown user</p>}
-                  <p className="text-xs text-gray-500 capitalize">{m.role}</p>
+                  {myRole === 'owner' && m.user_id !== session?.user.id && m.role !== 'owner' ? (
+                    <select
+                      value={m.role}
+                      onChange={(e) => changeRole.mutate({ userId: m.user_id, role: e.target.value })}
+                      className="mt-0.5 bg-gray-700 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-300 capitalize focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    >
+                      <option value="admin">admin</option>
+                      <option value="member">member</option>
+                    </select>
+                  ) : (
+                    <p className="text-xs text-gray-500 capitalize">{m.role}</p>
+                  )}
                 </div>
                 {canInvite && m.user_id !== session?.user.id && (
                   <button

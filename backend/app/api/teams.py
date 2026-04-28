@@ -81,14 +81,15 @@ def _user_email(user) -> Optional[str]:
 
 def _require_member(db, team_id: str, user_id: str) -> str:
     """
-    Verify that user_id is an active member of team_id and return their role name
-    ('owner', 'admin', or 'member').
+    Verify that user_id is an active member of team_id and return their raw role UUID.
 
     Raises HTTP 403 if the user is not a member at all.
-    Callers use the returned role to enforce further permissions, e.g.:
+    Callers compare the returned UUID against ROLE_IDS constants, e.g.:
         role = _require_member(db, team_id, requester_id)
-        if role not in ("owner", "admin"):
+        if role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
             raise HTTPException(403, "...")
+    Using UUIDs (not names) means permission checks stay correct even if
+    role names are ever renamed in the DB.
     """
     row = (
         db.table("team_members")
@@ -100,8 +101,9 @@ def _require_member(db, team_id: str, user_id: str) -> str:
     )
     if not row.data:
         raise HTTPException(403, "Not a member of this team")
-    # ROLE_NAMES maps UUID → human-readable string; fall back to "member"
-    return ROLE_NAMES.get(row.data[0]["role"], "member")
+    # Return the raw role UUID so callers compare against ROLE_IDS constants,
+    # which are fixed and cannot be affected by role name changes.
+    return row.data[0]["role"]
 
 
 @router.post("", status_code=201)
@@ -211,6 +213,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
             uid = str(member["user_id"])
             member["email"] = email_by_user_id.get(uid)
             member["full_name"] = name_by_user_id.get(uid) or None
+            member["role"] = ROLE_NAMES.get(member["role"], member["role"])
 
     pending_invites = []
     try:
@@ -282,7 +285,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
         raise HTTPException(404, "Team not found")
 
     inviter_role = _require_member(db, team_id, body.invited_by_user_id)
-    if inviter_role not in ("owner", "admin"):
+    if inviter_role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can invite members")
 
     users_resp = db.auth.admin.list_users()
@@ -559,11 +562,34 @@ def decline_invite(invite_id: str):
 @router.delete("/{team_id}", status_code=204)
 def delete_team(team_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
-    if _require_member(db, team_id, requester_id) != "owner":
+    if _require_member(db, team_id, requester_id) != ROLE_IDS["owner"]:
         raise HTTPException(403, "Only the team owner can delete the team")
     db.table("team_members").delete().eq("team_id", team_id).execute()
     db.table("team_invites").delete().eq("team_id", team_id).execute()
     db.table("teams").delete().eq("id", team_id).execute()
+
+
+class RoleUpdate(BaseModel):
+    role: str  # "admin" | "member"
+
+
+@router.patch("/{team_id}/members/{user_id}", status_code=200)
+def change_member_role(team_id: str, user_id: str, body: RoleUpdate, requester_id: str = Depends(current_user_id)):
+    new_role_name = body.role.lower()
+    if new_role_name not in ("admin", "member"):
+        raise HTTPException(400, "role must be 'admin' or 'member'")
+    db = get_supabase()
+    requester_role = _require_member(db, team_id, requester_id)
+    if requester_role != ROLE_IDS["owner"]:
+        raise HTTPException(403, "Only the team owner can change member roles")
+    if requester_id == user_id:
+        raise HTTPException(403, "Cannot change your own role")
+    target_role = _require_member(db, team_id, user_id)
+    if target_role == ROLE_IDS["owner"]:
+        raise HTTPException(403, "Cannot change the owner's role")
+    new_role_id = ROLE_IDS[new_role_name]
+    db.table("team_members").update({"role": new_role_id}).eq("team_id", team_id).eq("user_id", user_id).execute()
+    return {"role": new_role_name}
 
 
 @router.delete("/{team_id}/members/{user_id}", status_code=204)
@@ -573,18 +599,18 @@ def remove_member(team_id: str, user_id: str, requester_id: str = Depends(curren
 
     # Allow self-leave without further role check
     if requester_id == user_id:
-        if requester_role == "owner":
+        if requester_role == ROLE_IDS["owner"]:
             raise HTTPException(403, "Team owner cannot leave — transfer ownership or delete the team first")
         db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
         return
 
-    if requester_role not in ("owner", "admin"):
+    if requester_role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can remove members")
 
     target_role = _require_member(db, team_id, user_id)
-    if target_role == "owner":
+    if target_role == ROLE_IDS["owner"]:
         raise HTTPException(403, "Cannot remove the team owner")
-    if target_role == "admin" and requester_role != "owner":
+    if target_role == ROLE_IDS["admin"] and requester_role != ROLE_IDS["owner"]:
         raise HTTPException(403, "Only the team owner can remove an admin")
 
     db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
@@ -593,6 +619,6 @@ def remove_member(team_id: str, user_id: str, requester_id: str = Depends(curren
 @router.delete("/{team_id}/invites/{invite_id}", status_code=204)
 def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
-    if _require_member(db, team_id, requester_id) not in ("owner", "admin"):
+    if _require_member(db, team_id, requester_id) not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can revoke invites")
     db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
