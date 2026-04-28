@@ -2,7 +2,14 @@
 
 ---
 
-## 2026-04-28 | `bab1628` — fix: show skills selection modal after invite name/password step
+## 2026-04-28 | `56cf848` — feat: add delete-account option on company setup page; tests for company PATCH/DELETE endpoints
+
+- `frontend/src/pages/NewCompanyPage.tsx` — added "delete my account" link at bottom of form; expands to inline confirmation panel (red border + warning); on confirm calls `DELETE /auth/account`, signs out, redirects to `/login`
+- `backend/tests/test_invite_flow.py` — 8 new tests for company `PATCH` (rename, phone, 403 for admin/non-member, 400 for empty body) and `DELETE` (cascade verified via call counts, 403 for non-owner/non-member); total 31 tests
+
+## 2026-04-28 | `080e788` — feat: company settings page (rename, phone, delete); fix owner check to use owner_id UUID; skills modal after new company
+
+
 
 - `frontend/src/pages/InvitePage.tsx` — after saving name/password in the profile step, now calls `setNeedsSkills(true)` before navigating to `/`; `SelectSkillsModal` then appears on the dashboard as the next onboarding step
 

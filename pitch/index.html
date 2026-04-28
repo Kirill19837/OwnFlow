@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OwnFlow — eMerge AI Hackathon</title>
+<title>OwnFlow — AI-Native Project Management</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet">
 <style>
@@ -105,26 +105,27 @@ body {
 
 .arrows {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   pointer-events: all;
 }
 
 .arrows button {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid var(--border);
-  color: var(--gray-d);
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
+  background: rgba(124,58,237,0.18);
+  border: 1px solid rgba(124,58,237,0.45);
+  color: var(--purple-l);
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 18px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
 }
 
-.arrows button:hover { color: var(--white); border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); }
+.arrows button:hover { color: var(--white); border-color: var(--purple-l); background: rgba(124,58,237,0.38); transform: scale(1.08); }
 
 /* ── Type ── */
 .label {
@@ -350,7 +351,7 @@ h2 {
 
   <!-- 1 · Hero ──────────────────────────────── -->
   <div class="slide active" id="s1">
-    <div class="badge">🌊 eMerge AI Hackathon 2026</div>
+    <div class="badge">🤖 AI-Native Project Management</div>
     <h1>Project management.<br><span class="accent">Where some of your team is AI.</span></h1>
     <p class="sub">OwnFlow looks and works like the PM tool you already know — boards, tasks, sprints, assignments. The difference: your actors can be humans <em>or</em> AI agents. The PM stays in the driver's seat either way.</p>
     <div class="pills">
@@ -485,28 +486,33 @@ h2 {
   <!-- 7 · Business Model ──────────────────── -->
   <div class="slide" id="s7">
     <div class="label">Business Model</div>
-    <h2>Simple SaaS + <span class="accent">usage credits</span></h2>
+    <h2>Cheaper than Jira. <span class="accent">Built for AI teams.</span></h2>
     <div class="price-row">
       <div class="pc">
-        <div class="tier">Starter</div>
-        <div class="price">$25</div>
-        <div class="period">per seat / month</div>
+        <div class="tier">Free</div>
+        <div class="price">$0</div>
+        <div class="period">forever</div>
         <ul class="checklist">
-          <li><span class="ck">✓</span> Up to 5 actors (AI + human)</li>
-          <li><span class="ck">✓</span> 3 active projects</li>
-          <li><span class="ck">✓</span> GitHub integration</li>
+          <li><span class="ck">✓</span> 1 team, up to 3 members</li>
+          <li><span class="ck">✓</span> 2 active projects</li>
+          <li><span class="ck">✓</span> Human actors only</li>
+          <li><span class="ck">✓</span> Kanban board &amp; sprints</li>
         </ul>
       </div>
       <div class="pc hi">
         <div class="tier">Pro</div>
-        <div class="price">$75</div>
-        <div class="period">per seat / month</div>
+        <div class="price">$100<span style="font-size:18px;font-weight:500;color:var(--gray)">/mo</span></div>
+        <div class="period">per company &nbsp;+&nbsp; <strong style="color:var(--white)">$3</strong> per user/mo</div>
         <ul class="checklist">
-          <li><span class="ck">✓</span> Unlimited actors</li>
-          <li><span class="ck">✓</span> Unlimited projects</li>
+          <li><span class="ck">✓</span> Unlimited teams &amp; projects</li>
+          <li><span class="ck">✓</span> AI actors (GPT-4o, Claude)</li>
+          <li><span class="ck">✓</span> GitHub integration</li>
+          <li><span class="ck">✓</span> AI sprint planning</li>
           <li><span class="ck">✓</span> Custom AI models</li>
-          <li><span class="ck">✓</span> Priority execution</li>
         </ul>
+        <div style="margin-top:16px;padding:10px 14px;background:var(--green-dim);border:1px solid rgba(74,222,128,.2);border-radius:10px;font-size:12px;color:var(--green);text-align:center">
+          10 users = <strong>$130/mo</strong> &nbsp;·&nbsp; Jira charges $1,500+
+        </div>
       </div>
       <div class="pc">
         <div class="tier">Enterprise</div>
@@ -515,7 +521,8 @@ h2 {
         <ul class="checklist">
           <li><span class="ck">✓</span> On-premise deploy</li>
           <li><span class="ck">✓</span> SSO &amp; audit logs</li>
-          <li><span class="ck">✓</span> Dedicated support</li>
+          <li><span class="ck">✓</span> SLA &amp; dedicated support</li>
+          <li><span class="ck">✓</span> Volume AI credit pricing</li>
         </ul>
       </div>
     </div>
@@ -524,7 +531,7 @@ h2 {
 
   <!-- 8 · Traction ────────────────────────── -->
   <div class="slide" id="s8">
-    <div class="label">Built at eMerge AI Hackathon</div>
+    <div class="label">Traction</div>
     <h2>Working product.<br><span class="accent">End-to-end, today.</span></h2>
     <div class="two-col" style="margin-top:40px;gap:48px">
       <ul class="checklist">
@@ -560,7 +567,7 @@ h2 {
     <p class="sub" style="font-size:clamp(16px,1.8vw,20px);margin-top:24px">Half your work is already orchestrated by AI. OwnFlow is the board that knows it — and gives your PM the control to drive it.</p>
     <div class="pills" style="margin-top:44px">
       <span class="pill" style="font-size:15px;padding:12px 28px;color:var(--white);border-color:rgba(124,58,237,0.4);background:var(--purple-dim)">
-        🌊 OwnFlow &nbsp;·&nbsp; eMerge AI Hackathon 2026
+        🤖 OwnFlow &nbsp;·&nbsp; AI-Native Project OS
       </span>
     </div>
   </div>

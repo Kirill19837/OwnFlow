@@ -2,6 +2,8 @@
 
 OwnFlow uses Supabase Auth for identity, but routes all email delivery through **Postmark** for reliability and branding. The frontend talks to both the FastAPI backend (for custom flows) and Supabase directly (for session management).
 
+> **[Project presentation](https://kirill19837.github.io/OwnFlow/)**
+
 ---
 
 ## Overview of entry paths
@@ -94,7 +96,9 @@ Admin sends invite from Team Settings
     → team_invites row updated: status='accepted'
     → team_members + company_members rows created
     → user_signups upserted: origin='team_invite', signup_status='team_join', completed_at=now
+  → setNeedsSkills(true)
   → navigate / (dashboard)
+  → SelectSkillsModal shown on dashboard
 ```
 
 **Idempotency:** if the user closes the tab after Continue but before Accept, on return
@@ -203,15 +207,78 @@ Only shown to organic users after profile completion.
 ```
 /company/new
   ├─ guard: GET /companies/my → if company already exists → navigate / (prevents re-entry)
-  └─ user fills name, phone, AI model → POST /companies
-       → company row + first team auto-created
-       → user_signups: signup_status='company_created', completed_at=now
-       → navigate / (AppLayout loads new team → dashboard)
+  ├─ user fills name, phone, AI model → POST /companies
+  │    → company row + first team auto-created
+  │    → user_signups: signup_status='company_created', completed_at=now
+  │    → setNeedsSkills(true)
+  │    → navigate / (AppLayout loads new team → dashboard)
+  │    → SelectSkillsModal shown on dashboard
+  └─ "I don't want to continue" link → inline confirmation panel
+       → DELETE /auth/account (removes team_members + company_members + auth user)
+       → signOut() → navigate /login
 ```
 
 ---
 
-## Password detection (JWT AMR claims)
+## 9. Skills selection (`SelectSkillsModal`)
+
+Shown on the dashboard immediately after:
+- Accepting a team invite (new or existing user)
+- Completing company creation (organic user)
+- Completing the magic-link set-password flow (organic user without a company)
+
+Triggered by `needsSkills: boolean` in `authStore`.
+
+```
+SelectSkillsModal shown over dashboard
+  ├─ GET /skills → full skills catalogue (17 seeded rows, grouped by category)
+  ├─ user selects skills via pill UI → PUT /skills/user { skill_ids: [...] }
+  │    → user_skills rows upserted
+  │    → setNeedsSkills(false) → modal unmounts
+  └─ "Skip for now" → setNeedsSkills(false) → modal unmounts (no skills saved)
+```
+
+Skills can always be updated later from the **Profile** page.
+
+---
+
+## 10. Account deletion
+
+### From company setup page (`/company/new`)
+
+Available before the user commits to creating a company. Useful if they signed up by mistake.
+
+```
+"I don't want to continue" link clicked
+  → inline confirmation panel expands (red warning)
+  → "Yes, delete my account" → DELETE /auth/account (Bearer JWT)
+    → team_members rows removed
+    → company_members rows removed
+    → auth user deleted (db.auth.admin.delete_user)
+  → signOut() → navigate /login
+```
+
+**Blocked if user already owns a company** (returns 403) — must delete the company first via Company Settings.
+
+### From profile page (`/profile`)
+
+Same endpoint. Blocked if the user is a company owner.
+
+### From company settings (`/company/settings`) — owner only
+
+Deletes the entire company and cascades:
+```
+DELETE /companies/{id}?user_id=...
+  → team_invites deleted for each team
+  → team_members deleted for each team
+  → teams deleted
+  → company_members deleted
+  → companies row deleted
+```
+
+After deletion: company/team store cleared → navigate `/company/new`.
+
+---
 
 After every `SIGNED_IN` event, `Auth.tsx` base64-decodes the JWT access token and reads the `amr` (Authentication Methods References) array:
 
@@ -252,13 +319,17 @@ Every user has exactly one row in `user_signups` that records their entry path a
 | `frontend/src/components/Auth.tsx` | Session restore, AMR OTP detection, linkType resolution |
 | `frontend/src/pages/InvitePage.tsx` | Invite landing page — accepts invites, redirects to dashboard |
 | `frontend/src/pages/LoginPage.tsx` | Sign-in / sign-up form, magic link fallback |
-| `frontend/src/pages/NewCompanyPage.tsx` | Company creation — organic users only |
+| `frontend/src/pages/NewCompanyPage.tsx` | Company creation — organic users only; delete-account option |
+| `frontend/src/pages/CompanySettingsPage.tsx` | Rename/phone/delete company — owner only |
+| `frontend/src/pages/ProfilePage.tsx` | Name/password/skills/delete account |
 | `frontend/src/components/CompleteProfileModal.tsx` | Combined name + password prompt |
-| `frontend/src/store/authStore.ts` | Session, `needsPassword`, `needsName`, `linkType` flags |
+| `frontend/src/components/SelectSkillsModal.tsx` | Skills selection after onboarding steps |
+| `frontend/src/store/authStore.ts` | Session, `needsPassword`, `needsName`, `needsSkills`, `linkType` flags |
 | `frontend/src/lib/api.ts` | Axios instance — reads token from Zustand store (no lock contention) |
-| `backend/app/api/auth.py` | `POST /signup`, `POST /magic-link`, `GET /has-password`, `GET /my-origin` |
-| `backend/app/api/teams.py` | `POST /{id}/invites`, `POST /accept-invites` |
-| `backend/app/api/companies.py` | `POST /companies` — records `company_created` status |
+| `backend/app/api/auth.py` | `POST /signup`, `POST /magic-link`, `GET /has-password`, `GET /my-origin`, `DELETE /account` |
+| `backend/app/api/teams.py` | `POST /{id}/invites`, `POST /accept-invites`, `get_role_name` helper |
+| `backend/app/api/companies.py` | `POST /companies`, `PATCH /{id}`, `DELETE /{id}` |
+| `backend/app/api/skills.py` | `GET /skills`, `GET /skills/user/{id}`, `PUT /skills/user` |
 | `backend/app/email.py` | Postmark email templates |
 
 ---
