@@ -145,25 +145,36 @@ def my_company(user_id: str):
 
 @router.get("/{company_id}/teams")
 def list_teams(company_id: str, user_id: Optional[str] = None):
-    """List teams within a company, optionally annotating with the user's role."""
+    """List teams within a company the user is a member of."""
     db = get_supabase()
-    teams = db.table("teams").select("*").eq("company_id", company_id).execute()
-    result = teams.data or []
 
-    if user_id and result:
-        team_ids = [t["id"] for t in result]
-        members = (
+    if user_id:
+        # Fetch only the teams this user belongs to within the company
+        memberships = (
             db.table("team_members")
             .select("team_id, role")
             .eq("user_id", user_id)
-            .in_("team_id", team_ids)
             .execute()
         )
-        role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in (members.data or [])}
+        member_team_ids = [m["team_id"] for m in (memberships.data or [])]
+        if not member_team_ids:
+            return []
+        teams = (
+            db.table("teams")
+            .select("*")
+            .eq("company_id", company_id)
+            .in_("id", member_team_ids)
+            .execute()
+        )
+        role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in (memberships.data or [])}
+        result = teams.data or []
         for t in result:
             t["my_role"] = role_map.get(t["id"])
+        return result
 
-    return result
+    # No user_id — return all teams without role annotation (admin/internal use)
+    teams = db.table("teams").select("*").eq("company_id", company_id).execute()
+    return teams.data or []
 
 
 @router.post("/{company_id}/teams", status_code=201)

@@ -190,12 +190,13 @@ export default function OrgSettingsPage() {
             {AI_MODELS.map((m) => (
               <button
                 key={m.value}
-                onClick={() => updateModel.mutate(m.value)}
+                onClick={() => canInvite && updateModel.mutate(m.value)}
+                disabled={!canInvite}
                 className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-all text-left ${
                   org.default_ai_model === m.value
                     ? 'border-purple-500 bg-purple-900/30 text-white'
                     : 'border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-                }`}
+                } ${!canInvite ? 'opacity-60 cursor-not-allowed hover:border-gray-700 hover:bg-transparent' : ''}`}
               >
                 <div>
                   <span className="font-medium">{m.label}</span>
@@ -223,7 +224,7 @@ export default function OrgSettingsPage() {
                   {!m.email && <p className="text-[11px] text-gray-600">{m.user_id}</p>}
                   <p className="text-xs text-gray-500 capitalize">{m.role}</p>
                 </div>
-                {m.user_id !== session?.user.id && (
+                {canInvite && m.user_id !== session?.user.id && (
                   <button
                     onClick={() => removeMember.mutate(m.user_id)}
                     className="text-gray-600 hover:text-red-400 transition-colors"
@@ -268,7 +269,7 @@ export default function OrgSettingsPage() {
                         <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
                           invite sent
                         </span>
-                        {inv.id !== inv.email && (
+                        {canInvite && inv.id !== inv.email && (
                           <button
                             onClick={() => revokeInvite.mutate(inv.id)}
                             disabled={revokeInvite.isPending}
