@@ -13,7 +13,7 @@ interface PendingInvite {
   role: string
 }
 
-type Step = 'loading' | 'profile' | 'invite-card' | 'accepting' | 'declining'
+type Step = 'loading' | 'invite-card' | 'profile' | 'accepting' | 'declining'
 
 export default function InvitePage() {
   const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setLinkType } = useAuthStore()
@@ -28,6 +28,7 @@ export default function InvitePage() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [profileError, setProfileError] = useState('')
+  const [profileSaving, setProfileSaving] = useState(false)
 
   const passwordsMatch = password === confirm
   const passwordValid = password.length >= 8 && passwordsMatch
@@ -45,44 +46,53 @@ export default function InvitePage() {
       })
       .then((r) => setInvite(r.data.invite ?? null))
       .catch(() => setInvite(null))
-      .finally(() => {
-        // If user needs to set name/password → profile step first, then invite card
-        setStep(needsPassword || needsName ? 'profile' : 'invite-card')
-      })
-  }, [session, needsPassword, needsName])
+      .finally(() => setStep('invite-card'))
+  }, [session])
 
-  const handleProfileContinue = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!profileValid) return
-    setProfileError('')
-    setStep('invite-card')
+  const handleAccept = () => {
+    if (!session || !invite) return
+    // If the user needs to set a name or password, collect that first.
+    // The profile step will call accept-invites once credentials are saved.
+    if (needsPassword || needsName) {
+      setStep('profile')
+    } else {
+      doAccept()
+    }
   }
 
-  const handleAccept = async () => {
+  const doAccept = async () => {
     if (!session || !invite) return
     setStep('accepting')
-    setLinkType(null) // allow CompleteProfileModal to show for future flows
-
+    setLinkType(null)
     try {
-      // Set password client-side first — keeps the session alive.
-      // Never send the password to the backend (admin.update_user_by_id
-      // revokes all tokens and logs the user out).
-      if (needsPassword && password) {
-        const { error } = await supabase.auth.updateUser({
-          password,
-          data: { password_set: true },
-        })
-        if (error) throw new Error(`Failed to set password: ${error.message}`)
-      }
       await api.post('/teams/accept-invites', {
         user_id: session.user.id,
         email: session.user.email,
-        ...(needsName && name.trim() ? { full_name: name.trim() } : {}),
       })
-      setNeedsPassword(false)
-      setNeedsName(false)
     } finally {
       navigate('/', { replace: true })
+    }
+  }
+
+  const handleProfileContinue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profileValid) return
+    setProfileError('')
+    setProfileSaving(true)
+    try {
+      const updateData: Record<string, unknown> = {}
+      if (needsName && name.trim()) updateData.full_name = name.trim()
+      if (needsPassword) updateData.password_set = true
+      const update: Parameters<typeof supabase.auth.updateUser>[0] = { data: updateData }
+      if (needsPassword) update.password = password
+      const { error } = await supabase.auth.updateUser(update)
+      if (error) { setProfileError(error.message); return }
+      setNeedsPassword(false)
+      setNeedsName(false)
+      // Credentials saved — now complete the accept
+      await doAccept()
+    } finally {
+      setProfileSaving(false)
     }
   }
 
@@ -127,7 +137,7 @@ export default function InvitePage() {
     )
   }
 
-  // ── Step 1: Profile (name + password) ────────────────────────────────────
+  // ── Step 2: Profile (name + password) — shown only after Accept is clicked ─
   if (step === 'profile') {
     const both = needsPassword && needsName
     return (
@@ -143,9 +153,9 @@ export default function InvitePage() {
               </h2>
               <p className="text-gray-400 text-xs mt-0.5">
                 {both
-                  ? "We'll save everything once you accept the invite."
+                  ? 'One last step before joining the team.'
                   : needsPassword
-                  ? "Set a password so you can sign in normally next time."
+                  ? 'Set a password so you can sign in normally next time.'
                   : "We'll use this in your team profile."}
               </p>
             </div>
@@ -203,10 +213,10 @@ export default function InvitePage() {
             {profileError && <p className="text-red-400 text-sm">{profileError}</p>}
             <button
               type="submit"
-              disabled={!profileValid}
+              disabled={!profileValid || profileSaving}
               className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors"
             >
-              Continue →
+              {profileSaving ? 'Saving…' : 'Continue →'}
             </button>
           </form>
         </div>
@@ -214,6 +224,7 @@ export default function InvitePage() {
     )
   }
 
+  // ── Step 1: Invite confirmation card ───────────────────────────────────────
   // ── No pending invite ─────────────────────────────────────────────────────
   if (!invite) {
     return (
@@ -235,7 +246,6 @@ export default function InvitePage() {
     )
   }
 
-  // ── Step 2: Invite confirmation card ─────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-6 shadow-2xl">

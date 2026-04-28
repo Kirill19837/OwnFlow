@@ -83,16 +83,23 @@ Admin sends invite from Team Settings
   → Postmark sends branded invite email
   → user clicks email link → browser opens /invite (Supabase token in URL hash)
   → Supabase processes token → SIGNED_IN fires in Auth.tsx
+  → linkType='join_company' → CompleteProfileModal suppressed in AppLayout
   → JWT AMR = "otp" + no password → needsPassword=true + needsName=true
-  → CompleteProfileModal shown (name + password)
-  → on submit: supabase.auth.updateUser(...)
-  → POST /auth/my-origin → origin='team_invite' → no redirect
-  → InvitePage now has a session → POST /teams/accept-invites
+  → InvitePage shows built-in "profile" step (name + password form)
+  → user fills form → clicks Continue
+    → supabase.auth.updateUser({ password, data: { password_set: true, full_name } })
+    → needsPassword=false, needsName=false (saved to Supabase — survives tab close)
+  → InvitePage advances to invite-card step
+  → user clicks Accept → POST /teams/accept-invites { user_id, email }
     → team_invites row updated: status='accepted'
     → team_members + company_members rows created
     → user_signups upserted: origin='team_invite', signup_status='team_join', completed_at=now
-  → navigate / (dashboard — user already in a team)
+  → navigate / (dashboard)
 ```
+
+**Idempotency:** if the user closes the tab after Continue but before Accept, on return
+`needsPassword` is already `false` (metadata committed), so the profile step is skipped
+and they land directly on the invite card.
 
 ---
 
@@ -117,38 +124,75 @@ Admin sends invite for an email that already has an account
 
 ## 6. InvitePage (`/invite`)
 
-Central landing point for all invite links. Keeps the flow simple regardless of whether the user is new or existing.
+Central landing point for all invite links. Owns the full profile-collection step for new users so that profile data is saved to Supabase before the invite is accepted.
 
 ```
 /invite
-  ├─ session not yet available → show "Accepting your invite…" spinner
-  │    (waits for AuthProvider to restore or establish session)
+  ├─ loading  — session not yet available
+  │    shows spinner; waits for Auth.tsx to restore or establish session
   │
-  └─ session available
-       → POST /teams/accept-invites { user_id, email }
-          (no team_id filter — accepts all pending invites for this email)
-       → .finally() → navigate('/', { replace: true })
+  ├─ profile  — shown when needsPassword || needsName
+  │    built-in form (name, password, confirm)
+  │    Continue click:
+  │      supabase.auth.updateUser({ password?, data: { password_set: true, full_name? } })
+  │      needsPassword=false, needsName=false
+  │      → advance to invite-card
+  │
+  ├─ invite-card  — shows team name, role, invited-by; Accept / Decline buttons
+  │    Accept:
+  │      POST /teams/accept-invites { user_id, email }
+  │      → navigate('/', { replace: true })
+  │    Decline:
+  │      POST /teams/invites/{id}/decline
+  │      → supabase.auth.signOut() → navigate('/login')
+  │
+  └─ no-invite fallback  — invite already used or link expired
+       shows message + "Go to dashboard" button
 ```
 
-If there are no pending invites (already accepted, or link reused), `accept-invites` returns `{ accepted: 0 }` — the user is silently redirected to the dashboard.
+**`CompleteProfileModal` is suppressed on `/invite`** — `AppLayout` gates it with
+`linkType !== 'join_company'`, so the modal never appears over the invite page.
+
+If there are no pending invites, `accept-invites` returns `{ accepted: 0 }` — the user is silently redirected to the dashboard.
 
 ---
 
 ## 7. Profile completion modal (`CompleteProfileModal`)
 
-Shown when `needsPassword` or `needsName` is true (or both). Non-dismissable.
+Shown inside `AppLayout` when `needsPassword || needsName` is true **and** `linkType !== 'join_company'`.
+Non-dismissable overlay — user cannot access the app until the form is submitted.
 
 | Condition | Fields shown |
 |---|---|
 | `needsName` + `needsPassword` | Full name + Password + Confirm password |
 | `needsPassword` only | Password + Confirm password |
 
-On submit:
-1. `supabase.auth.updateUser({ password?, data: { full_name?, password_set: true } })`
-2. Session refreshed so header shows new name immediately
-3. `POST /auth/my-origin` to determine next destination:
-   - `origin='organic'` → `navigate('/company/new')`
-   - `origin='team_invite'` → no redirect (InvitePage handles navigation)
+Behavior on submit depends on `linkType`:
+
+### `linkType === 'set_password'` (magic-link user, already has a company)
+
+```
+supabase.auth.updateUser({ password?, data: { password_set: true, full_name? } })
+  → setNeedsPassword(false), setNeedsName(false)
+  → modal unmounts — user stays on current page (dashboard)
+```
+
+No navigation — the user already has a company and is on the dashboard.
+
+### `linkType === null` or `'create_company'` (organic new user)
+
+```
+stores { name, password } to pendingProfile (Zustand)
+  → navigate('/company/new')
+  → NewCompanyPage picks up pendingProfile:
+      supabase.auth.updateUser({ password, data: { password_set: true } })
+      POST /companies { name, phone, model, full_name }
+      → company + first team created
+      → navigate / (dashboard)
+```
+
+Password is intentionally held in memory (not saved) until the company form is submitted,
+so a single `POST /companies` atomically completes the entire onboarding.
 
 ---
 
