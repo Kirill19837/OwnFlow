@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-27 | `afb0385` — Fix repeated password modal + add FRONTEND_URL to CI/CD
+
+- `frontend/src/pages/NewCompanyPage.tsx` — `supabase.auth.updateUser` now includes `data: { password_set: true }` so Auth.tsx short-circuits the AMR check on any subsequent SIGNED_IN events
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`
+- Root cause: `supabase.auth.updateUser({ password })` fires a new SIGNED_IN event; the refreshed JWT still has `amr = "otp"` and `user_metadata.password_set` was never written client-side, causing the modal to reappear every time the user returned
+- `.github/workflows/deploy.yml` — `FRONTEND_URL=https://ownflow.21century.tech` added to the `.env.prod` printf block
+- `docker-compose.prod.yml` — `FRONTEND_URL` env var wired through to backend container
+- `backend/.env.example` — `FRONTEND_URL` and `CORS_ORIGINS` production values documented
+
+---
+
 ## 2026-04-27 | `13cded7` — Fix logout on company creation: set password client-side via supabase.auth.updateUser
 
 - `frontend/src/pages/NewCompanyPage.tsx` — password is now set via `supabase.auth.updateUser({ password })` before `POST /companies`; only `full_name` goes to the backend; removed `refreshSession()` call (no longer needed)

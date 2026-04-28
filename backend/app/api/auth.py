@@ -115,31 +115,53 @@ class MagicLinkBody(BaseModel):
     link_type: str = "set_password"
 
 
+# In-memory rate limit: one magic link per email per 20 minutes.
+# Keyed by lowercased email, value is the Unix timestamp of the last send.
+# TODO: move to a DB table (e.g. magic_link_rate_limits) so the limit survives
+#       restarts and is enforced across multiple workers/replicas.
+#       Suggested schema:
+#         email TEXT PRIMARY KEY, sent_at TIMESTAMPTZ NOT NULL
+#       Upsert on each send; check (now() - sent_at) < interval '20 minutes'.
+_magic_link_sent_at: dict[str, float] = {}
+_MAGIC_LINK_COOLDOWN_SECONDS = 20 * 60  # 20 minutes
+
+
 @router.post("/magic-link", status_code=200)
 def send_magic_link(body: MagicLinkBody):
     """
     Generate a magic-link (OTP) for an existing user and deliver it via Postmark.
-    The caller is responsible for client-side rate limiting (e.g. once per hour).
+    Server-side rate limit: one email per address per 20 minutes.
     """
+    import time
     db = get_supabase()
     settings = get_settings()
 
     email = body.email.strip().lower()
 
+    # Server-side rate limit — silently drop without leaking account existence
+    last_sent = _magic_link_sent_at.get(email, 0)
+    if time.time() - last_sent < _MAGIC_LINK_COOLDOWN_SECONDS:
+        return {"status": "sent", "email": email}
+
     try:
-        db.auth.admin.generate_link({
+        link_resp = db.auth.admin.generate_link({
             "type": "magiclink",
             "email": email,
             "options": {
                 "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?link_type={body.link_type}",
             },
         })
+        action_link = (
+            getattr(link_resp, "action_link", None)
+            or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
+        )
+        if action_link and settings.postmark_enabled:
+            from app.email import send_magic_link_email
+            send_magic_link_email(to_email=email, magic_url=action_link)
+        _magic_link_sent_at[email] = time.time()
     except Exception as exc:
-        # Don't leak whether the email exists — return success either way
-        # to prevent user enumeration.
         import logging
         logging.getLogger(__name__).warning("magic-link generate_link failed for %s: %s", email, exc)
-        return {"status": "sent", "email": email}
 
     return {"status": "sent", "email": email}
 
