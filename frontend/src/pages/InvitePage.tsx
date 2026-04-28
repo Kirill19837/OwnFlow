@@ -23,7 +23,7 @@ const resolveRole = (r: string) => ROLE_NAMES[r] ?? r
 type Step = 'loading' | 'invite-card' | 'profile' | 'accepting' | 'declining'
 
 export default function InvitePage() {
-  const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setLinkType } = useAuthStore()
+  const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setNeedsSkills, setLinkType } = useAuthStore()
   const navigate = useNavigate()
   const fetchedRef = useRef(false)
 
@@ -96,6 +96,7 @@ export default function InvitePage() {
       if (error) { setProfileError(error.message); return }
       setNeedsPassword(false)
       setNeedsName(false)
+      setNeedsSkills(true)
       // Credentials saved — now complete the accept
       await doAccept()
     } finally {

@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-28 | `58150d4` — refactor: get_role_name helper; fix pending invite role in API; new tests
+
+- `backend/app/api/teams.py` — extracted `get_role_name(role_id, fallback)` helper; replaced all 5 inline `ROLE_NAMES.get()` calls; `GET /teams/{id}` now resolves `pending_invites[].role` UUID → display name and adds `role_id` for the raw UUID
+- `frontend/src/pages/OrgSettingsPage.tsx` — reverted FE workaround (role now correct from API)
+- `backend/tests/test_invite_flow.py` — added 5 new tests (23 total, all passing):
+  - `test_get_role_name_known_uuids` — maps all 3 fixed UUIDs to names
+  - `test_get_role_name_unknown_uuid_returns_raw` — unknown UUID falls back to raw value
+  - `test_get_role_name_none_returns_fallback` — None/empty returns configurable fallback
+  - `test_get_role_name_empty_string_returns_fallback`
+  - `test_get_team_pending_invites_resolve_role_name` — integration test verifying `role`/`role_id` shape in API response
+
 ## 2026-04-28 | `d1e4d54` — fix: resolve role UUIDs to names in pending invites list
 
 - `frontend/src/pages/OrgSettingsPage.tsx` — added `ROLE_NAMES` map + `resolveRole()` helper; pending invites row now shows `member`/`admin`/`owner` instead of raw UUID
