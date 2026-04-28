@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-27 | `13cded7` — Fix logout on company creation: set password client-side via supabase.auth.updateUser
+
+- `frontend/src/pages/NewCompanyPage.tsx` — password is now set via `supabase.auth.updateUser({ password })` before `POST /companies`; only `full_name` goes to the backend; removed `refreshSession()` call (no longer needed)
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`; password set client-side before `POST /teams/accept-invites`
+- Root cause: `supabase.auth.admin.update_user_by_id` revokes all tokens including the refresh token, making `refreshSession()` fail and triggering `SIGNED_OUT`; `supabase.auth.updateUser` keeps the session alive
+
+---
+
 ## 2026-04-27 | `324a02b` — Fix 401 after onboarding: refresh session after password change
 
 - `frontend/src/pages/NewCompanyPage.tsx` — after `POST /companies` succeeds with a password, `supabase.auth.refreshSession()` is awaited before navigating; `onAuthStateChange` in authStore picks up the new JWT so dashboard requests don't 401

@@ -68,7 +68,10 @@ export default function InvitePage() {
       // Never send the password to the backend (admin.update_user_by_id
       // revokes all tokens and logs the user out).
       if (needsPassword && password) {
-        const { error } = await supabase.auth.updateUser({ password })
+        const { error } = await supabase.auth.updateUser({
+          password,
+          data: { password_set: true },
+        })
         if (error) throw new Error(`Failed to set password: ${error.message}`)
       }
       await api.post('/teams/accept-invites', {

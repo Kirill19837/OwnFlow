@@ -81,7 +81,10 @@ export default function NewCompanyPage() {
       // session alive. Never send the password to the backend (admin.update_user_by_id
       // revokes all tokens and logs the user out).
       if (pendingProfile?.password) {
-        const { error } = await supabase.auth.updateUser({ password: pendingProfile.password })
+        const { error } = await supabase.auth.updateUser({
+          password: pendingProfile.password,
+          data: { password_set: true },
+        })
         if (error) throw new Error(`Failed to set password: ${error.message}`)
       }
       return api
