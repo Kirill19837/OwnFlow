@@ -639,6 +639,90 @@ def test_admin_can_invite(client):
 
 
 # ---------------------------------------------------------------------------
+# 15. get_role_name: unit tests for the helper function
+# ---------------------------------------------------------------------------
+
+def test_get_role_name_known_uuids():
+    from app.api.teams import get_role_name, ROLE_IDS
+    assert get_role_name(ROLE_IDS["owner"])  == "owner"
+    assert get_role_name(ROLE_IDS["admin"])  == "admin"
+    assert get_role_name(ROLE_IDS["member"]) == "member"
+
+
+def test_get_role_name_unknown_uuid_returns_raw():
+    from app.api.teams import get_role_name
+    raw = "00000000-0000-0000-0000-000000000099"
+    assert get_role_name(raw) == raw
+
+
+def test_get_role_name_none_returns_fallback():
+    from app.api.teams import get_role_name
+    assert get_role_name(None) == "member"
+    assert get_role_name(None, fallback="unknown") == "unknown"
+
+
+def test_get_role_name_empty_string_returns_fallback():
+    from app.api.teams import get_role_name
+    assert get_role_name("") == "member"
+
+
+# ---------------------------------------------------------------------------
+# 16. get_team: pending_invites role resolved to name, role_id preserved
+# ---------------------------------------------------------------------------
+
+def test_get_team_pending_invites_resolve_role_name(client):
+    """
+    GET /teams/{id} must return pending_invites with role as a display name
+    ('member', 'admin', 'owner'), not a raw UUID, and must include role_id
+    with the original UUID.
+    """
+    INVITE_ID = str(uuid.uuid4())
+    CALLER_ID = OWNER_ID
+
+    db = MagicMock()
+
+    # Team exists
+    db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = _resp(_ORG_ROW)
+
+    # team_members: only the owner
+    db.table.return_value.select.return_value.eq.return_value.execute.return_value = _resp([
+        {"user_id": OWNER_ID, "role": ROLE_OWNER, "team_id": ORG_ID},
+    ])
+
+    # auth.admin.list_users for member email/name enrichment
+    db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
+
+    # pending_invites returns raw UUID role
+    pending_resp = _resp([{
+        "id": INVITE_ID,
+        "email": INVITEE_EMAIL,
+        "role": ROLE_MEMBER,
+        "invited_by_email": OWNER_EMAIL,
+        "status": "pending",
+        "invited_at": "2026-04-28T00:00:00+00:00",
+    }])
+    # We need the pending query (filtered by team_id + status) to return this row.
+    # The chain is: .select().eq(team_id).eq(status).order().execute()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.execute.return_value = pending_resp
+
+    with _patch_db(db):
+        from app.main import app
+        from app.auth_deps import current_user_id
+        app.dependency_overrides[current_user_id] = lambda: CALLER_ID
+        try:
+            resp = client.get(f"/teams/{ORG_ID}")
+        finally:
+            app.dependency_overrides.pop(current_user_id, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    invites = body.get("pending_invites", [])
+    assert len(invites) == 1, f"Expected 1 pending invite, got {invites}"
+    inv = invites[0]
+    assert inv["role"] == "member",   f"Expected 'member', got {inv['role']!r}"
+    assert inv["role_id"] == ROLE_MEMBER, f"Expected UUID, got {inv['role_id']!r}"
+
+# ---------------------------------------------------------------------------
 # 15. non-owner cannot delete team (403)
 # ---------------------------------------------------------------------------
 

@@ -2,6 +2,10 @@
 
 ---
 
+## 2026-04-28 | `d1e4d54` — fix: resolve role UUIDs to names in pending invites list
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `ROLE_NAMES` map + `resolveRole()` helper; pending invites row now shows `member`/`admin`/`owner` instead of raw UUID
+
 ## 2026-04-28 | `96a81e2` — feat: skills selection modal after invite onboarding; fix role UUID display on invite card
 
 - `frontend/src/store/authStore.ts` — added `needsSkills: boolean` + `setNeedsSkills` action; clears on sign-out

@@ -27,6 +27,13 @@ ROLE_IDS = {
 ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
 
 
+def get_role_name(role_id: str | None, fallback: str = "member") -> str:
+    """Resolve a role UUID to its display name, falling back gracefully."""
+    if not role_id:
+        return fallback
+    return ROLE_NAMES.get(role_id, role_id)
+
+
 class TeamCreate(BaseModel):
     name: str
     owner_id: str
@@ -141,7 +148,7 @@ def my_teams(user_id: str):
     if not items:
         return []
     team_ids = [m["team_id"] for m in items]
-    role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in items}
+    role_map = {m["team_id"]: get_role_name(m["role"]) for m in items}
     teams = db.table("teams").select("*").in_("id", team_ids).execute()
     result = teams.data or []
     for t in result:
@@ -173,7 +180,7 @@ def get_pending_invite(email: str):
     row = rows[0]
     team = db.table("teams").select("id,name").eq("id", row["team_id"]).single().execute()
     team_name = (team.data or {}).get("name", "a team") if team.data else "a team"
-    role_name = ROLE_NAMES.get(row["role"], row["role"])
+    role_name = get_role_name(row["role"])
     return {
         "invite": {
             "id": row["id"],
@@ -197,7 +204,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
     # Resolve caller's role
     caller_member = next((m for m in members if str(m.get("user_id")) == caller_id), None)
     my_role_id = caller_member["role"] if caller_member else None          # raw UUID
-    my_role = ROLE_NAMES.get(my_role_id, "member") if my_role_id else None  # display name
+    my_role = get_role_name(my_role_id) if my_role_id else None  # display name
 
     if members:
         users = _extract_auth_users(db.auth.admin.list_users())
@@ -215,7 +222,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
             member["email"] = email_by_user_id.get(uid)
             member["full_name"] = name_by_user_id.get(uid) or None
             member["role_id"] = member["role"]                              # raw UUID
-            member["role"] = ROLE_NAMES.get(member["role"], member["role"]) # display name
+            member["role"] = get_role_name(member["role"]) # display name
 
     pending_invites = []
     try:
@@ -232,6 +239,10 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
         # (can happen if a previous accept-invites call failed mid-transaction).
         member_emails = {(m.get("email") or "").lower() for m in members if m.get("email")}
         pending_invites = [i for i in raw_invites if i["email"].lower() not in member_emails]
+        # Resolve role UUID → display name for each invite
+        for inv in pending_invites:
+            inv["role_id"] = inv["role"]
+            inv["role"] = get_role_name(inv["role"])
         # Heal stuck invites in the background — mark them accepted.
         stuck_ids = [i["id"] for i in raw_invites if i["email"].lower() in member_emails]
         for sid in stuck_ids:

@@ -14,13 +14,6 @@ const ROLE_IDS = {
   member: '00000000-0000-0000-0000-000000000003',
 } as const
 
-const ROLE_NAMES: Record<string, string> = {
-  [ROLE_IDS.owner]:  'owner',
-  [ROLE_IDS.admin]:  'admin',
-  [ROLE_IDS.member]: 'member',
-}
-const resolveRole = (r: string) => ROLE_NAMES[r] ?? r
-
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'OpenAI' },
@@ -314,7 +307,7 @@ export default function OrgSettingsPage() {
                       <div>
                         <p className="text-sm text-white">{inv.email}</p>
                         <p className="text-xs text-gray-500">
-                          {resolveRole(inv.role)}{inv.invited_by_email ? ` • invited by ${inv.invited_by_email}` : ''}
+                          {inv.role}{inv.invited_by_email ? ` • invited by ${inv.invited_by_email}` : ''}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
