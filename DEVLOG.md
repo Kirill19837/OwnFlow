@@ -2,6 +2,10 @@
 
 ---
 
+## 2026-04-28 | `2902e2b` — feat: show member skills in team settings page
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — member rows now display skill pills; uses `useQueries` to batch-fetch each member's skills in parallel (cached 5 min); added `Skill` type import
+
 ## 2026-04-28 | `b1565bc` — feat: skills catalogue from DB; user skill profile selection; NewProjectPage uses API skills
 
 - `supabase/migrations/007_skills.sql` — new `skills` table (id, name, category, description, actor_type) seeded with 17 roles; `user_skills` join table with RLS policies

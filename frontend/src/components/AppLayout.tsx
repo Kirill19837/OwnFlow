@@ -8,10 +8,11 @@ import api from '../lib/api'
 import type { Company, Team } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
+import SelectSkillsModal from './SelectSkillsModal'
 import { useThemeStore } from '../store/themeStore'
 
 export default function AppLayout() {
-  const { signOut, session, needsPassword, needsName, linkType } = useAuthStore()
+  const { signOut, session, needsPassword, needsName, needsSkills, linkType } = useAuthStore()
   const { theme, toggle: toggleTheme } = useThemeStore()
   const { teams, activeTeam, setTeams, setActiveTeam } = useTeamStore()
   const { company, setCompany } = useCompanyStore()
@@ -210,6 +211,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
       {(needsPassword || needsName) && linkType !== 'join_company' && <CompleteProfileModal />}
+      {needsSkills && <SelectSkillsModal />}
     </div>
   )
 }

@@ -13,6 +13,13 @@ interface PendingInvite {
   role: string
 }
 
+const ROLE_NAMES: Record<string, string> = {
+  '00000000-0000-0000-0000-000000000001': 'owner',
+  '00000000-0000-0000-0000-000000000002': 'admin',
+  '00000000-0000-0000-0000-000000000003': 'member',
+}
+const resolveRole = (r: string) => ROLE_NAMES[r] ?? r
+
 type Step = 'loading' | 'invite-card' | 'profile' | 'accepting' | 'declining'
 
 export default function InvitePage() {
@@ -266,7 +273,7 @@ export default function InvitePage() {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Role</span>
-            <span className="text-white capitalize">{invite.role}</span>
+            <span className="text-white capitalize">{resolveRole(invite.role)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Invited by</span>

@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore'
 import { supabase } from '../lib/supabase'
 
 export default function CompleteProfileModal() {
-  const { needsPassword, needsName, linkType, setPendingProfile, setNeedsPassword, setNeedsName } = useAuthStore()
+  const { needsPassword, needsName, linkType, setPendingProfile, setNeedsPassword, setNeedsName, setNeedsSkills } = useAuthStore()
   const navigate = useNavigate()
 
   const [name, setName] = useState('')
@@ -35,6 +35,8 @@ export default function CompleteProfileModal() {
         if (needsPassword) update.password = password
         const { error: err } = await supabase.auth.updateUser(update)
         if (err) { setError(err.message); return }
+        // Show skills selection next
+        setNeedsSkills(true)
         setNeedsPassword(false)
         setNeedsName(false)
         // Modal unmounts — user stays on dashboard

@@ -15,11 +15,13 @@ interface AuthStore {
   loading: boolean
   needsPassword: boolean
   needsName: boolean
+  needsSkills: boolean
   linkType: LinkType
   pendingProfile: PendingProfile | null
   setSession: (s: Session | null) => void
   setNeedsPassword: (v: boolean) => void
   setNeedsName: (v: boolean) => void
+  setNeedsSkills: (v: boolean) => void
   setLinkType: (v: LinkType) => void
   setPendingProfile: (v: PendingProfile | null) => void
   signIn: (email: string, password: string) => Promise<void>
@@ -32,11 +34,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
   loading: true,
   needsPassword: false,
   needsName: false,
+  needsSkills: false,
   linkType: null,
   pendingProfile: null,
   setSession: (session) => set({ session, loading: false }),
   setNeedsPassword: (needsPassword) => set({ needsPassword }),
   setNeedsName: (needsName) => set({ needsName }),
+  setNeedsSkills: (needsSkills) => set({ needsSkills }),
   setLinkType: (linkType) => set({ linkType }),
   setPendingProfile: (pendingProfile) => set({ pendingProfile }),
   signIn: async (email, password) => {
@@ -60,6 +64,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       linkType: null,
       needsPassword: false,
       needsName: false,
+      needsSkills: false,
       pendingProfile: null,
     })
   },
