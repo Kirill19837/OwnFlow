@@ -4,7 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
-import type { Skill } from '../types'
+import type { Skill, TeamMember } from '../types'
 import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 
 const AI_MODELS = [
@@ -18,7 +18,7 @@ const AI_MODELS = [
 /** Pool of names randomly assigned to AI actors */
 const AI_NAMES = [
   'Aria', 'Nova', 'Orion', 'Sage', 'Atlas', 'Echo', 'Lyra', 'Zara',
-  'Cleo', 'Finn', 'Mira', 'Remy', 'Skye', 'Theo', 'Wren', 'Zion',
+  'Cleo', 'Finn', 'Mira', 'Denis', 'Skye', 'Theo', 'Wren', 'Zion',
   'Axel', 'Cara', 'Dex', 'Iris', 'Juno', 'Kael', 'Lena', 'Max',
 ]
 
@@ -40,18 +40,11 @@ const AUTO_FILL_NAMES = [
 
 interface ActorDraft {
   role: string        // skill name, e.g. "Lead Developer"
-  name: string        // personal name, e.g. "Aria" (AI) or "" (human)
+  name: string        // display name (auto-filled from member or AI name)
   type: 'human' | 'ai'
   model: string
   characteristics: string
-}
-
-interface ActorDraft {
-  role: string        // template role name, e.g. "Lead Developer"
-  name: string        // personal name, e.g. "Aria" (AI) or "" (human)
-  type: 'human' | 'ai'
-  model: string
-  characteristics: string
+  user_id?: string    // links human actor to a real team member
 }
 
 export default function NewProjectPage() {
@@ -64,6 +57,14 @@ export default function NewProjectPage() {
   const [sprintDays, setSprintDays] = useState(3)
   const defaultActorModel = activeTeam?.default_ai_model ?? 'gpt-4o'
 
+  // Fetch team members to use as human actor options
+  const { data: teamData } = useQuery({
+    queryKey: ['team', activeTeam?.id],
+    queryFn: () => api.get<{ members?: TeamMember[] }>(`/teams/${activeTeam!.id}`).then((r) => r.data),
+    enabled: !!activeTeam?.id,
+  })
+  const teamMembers: TeamMember[] = useMemo(() => teamData?.members ?? [], [teamData?.members])
+
   // Fetch skills from DB
   const { data: skills = [] } = useQuery<Skill[]>({
     queryKey: ['skills'],
@@ -74,18 +75,21 @@ export default function NewProjectPage() {
 
   const seededRef = useRef(false)
   const [actors, setActors] = useState<ActorDraft[]>([])
-  // Seed default actors once skills load (runs at most once)
+  // Seed default actors once skills AND team members load
   useEffect(() => {
     if (seededRef.current || skills.length === 0) return
     seededRef.current = true
     _usedNames = []
     const pm = skills.find((s) => s.name === 'AI Project Manager')
-    const po = skills.find((s) => s.name === 'Product Owner')
+    // Creator is always the first human actor, linked to their user account
+    const myMember = teamMembers.find((m) => m.user_id === session?.user.id)
+    const myName = myMember?.full_name || session?.user.user_metadata?.full_name || session?.user.email || 'You'
     setActors([
       { role: pm?.name ?? 'AI Project Manager', name: pickAIName(), type: 'ai',    model: defaultActorModel, characteristics: pm?.description ?? '' },
-      { role: po?.name ?? 'Product Owner',       name: '',           type: 'human', model: '',               characteristics: po?.description ?? '' },
+      { role: 'Project Lead', name: myName, type: 'human', model: '', characteristics: '', user_id: session?.user.id },
     ])
-  }, [skills, defaultActorModel])
+  }, [skills, defaultActorModel, session?.user.id, session?.user.email, session?.user.user_metadata?.full_name, teamMembers])
+  // seededRef.current guard ensures this only runs once; full deps listed for exhaustive-deps rule
 
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
@@ -119,6 +123,7 @@ export default function NewProjectPage() {
             model: a.type === 'ai' ? a.model : undefined,
             characteristics: a.characteristics || undefined,
             capabilities: [],
+            user_id: a.user_id ?? null,
           })
         )
       )
@@ -166,6 +171,7 @@ export default function NewProjectPage() {
           type,
           model: type === 'ai' ? defaultActorModel : '',
           characteristics: skill.description ?? '',
+          user_id: undefined,
         }]
       })
     )
@@ -176,7 +182,7 @@ export default function NewProjectPage() {
     const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
     setActors((prev) => [
       ...prev,
-      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '' },
+      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '', user_id: undefined },
     ])
   }
 
@@ -337,7 +343,7 @@ export default function NewProjectPage() {
                   <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
                     <button
                       type="button"
-                      onClick={() => updateActor(i, { type: 'ai', model: defaultActorModel, name: actor.name || pickAIName() })}
+                      onClick={() => updateActor(i, { type: 'ai', model: defaultActorModel, name: actor.name || pickAIName(), user_id: undefined })}
                       className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
                         actor.type === 'ai' ? 'bg-purple-900 text-purple-300' : 'text-gray-500 hover:text-gray-300'
                       }`}
@@ -346,7 +352,7 @@ export default function NewProjectPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => updateActor(i, { type: 'human', model: '' })}
+                      onClick={() => updateActor(i, { type: 'human', model: '', name: '', user_id: undefined })}
                       className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
                         actor.type === 'human' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'
                       }`}
@@ -376,13 +382,42 @@ export default function NewProjectPage() {
                   </button>
                 </div>
                 {/* Name row */}
-                <input
-                  type="text"
-                  value={actor.name}
-                  onChange={(e) => updateActor(i, { name: e.target.value })}
-                  placeholder={actor.type === 'human' ? 'Your name (optional)' : 'AI agent name'}
-                  className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
-                />
+                {actor.type === 'ai' ? (
+                  <input
+                    type="text"
+                    value={actor.name}
+                    onChange={(e) => updateActor(i, { name: e.target.value })}
+                    placeholder="AI agent name"
+                    className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
+                  />
+                ) : (
+                  <div className="pl-6 border-t border-gray-800 pt-1.5">
+                    <select
+                      value={actor.user_id ?? ''}
+                      onChange={(e) => {
+                        const uid = e.target.value
+                        if (!uid) {
+                          updateActor(i, { user_id: undefined, name: '' })
+                        } else {
+                          const m = teamMembers.find((m) => m.user_id === uid)
+                          updateActor(i, { user_id: uid, name: m?.full_name || m?.email || uid })
+                        }
+                      }}
+                      className="w-full bg-transparent text-white text-sm font-medium focus:outline-none focus:text-purple-300 appearance-none"
+                    >
+                      <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
+                      {teamMembers.map((m) => {
+                        const label = m.full_name || m.email || m.user_id
+                        const alreadyUsed = actors.some((a, idx) => idx !== i && a.user_id === m.user_id)
+                        return (
+                          <option key={m.user_id} value={m.user_id} disabled={alreadyUsed} className="bg-gray-900">
+                            {label}{alreadyUsed ? ' (added)' : ''}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </div>
+                )}
                 {/* Characteristics row */}
                 <input
                   type="text"

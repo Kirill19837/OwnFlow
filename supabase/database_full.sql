@@ -167,6 +167,7 @@ create table actors (
   model        text,
   capabilities text[]      default '{}',
   avatar_url   text,
+  user_id      uuid        references auth.users(id) on delete set null,
   created_at   timestamptz not null default now()
 );
 

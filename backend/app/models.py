@@ -64,6 +64,8 @@ class ActorCreate(BaseModel):
     model: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
     avatar_url: Optional[str] = None
+    user_id: Optional[str] = None  # links human actor to a real team member
+    characteristics: Optional[str] = None  # stored in capabilities[0] for now
 
 
 class Actor(BaseModel):
@@ -75,6 +77,7 @@ class Actor(BaseModel):
     model: Optional[str]
     capabilities: List[str]
     avatar_url: Optional[str]
+    user_id: Optional[str] = None
 
 
 # ── Sprints / Roadmap ────────────────────────────────────

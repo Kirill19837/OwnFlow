@@ -185,6 +185,8 @@ def add_actor(project_id: str, body: ActorCreate):
         "capabilities": body.capabilities,
         "avatar_url": body.avatar_url,
     }
+    if body.user_id:
+        row["user_id"] = body.user_id
     db.table("actors").insert(row).execute()
     return row
 

@@ -2,6 +2,10 @@
 
 ---
 
+## 2026-04-28 | `43d40fa` — feat: make pitch deck mobile-friendly; improve nav button visibility
+
+- `pitch/index.html` — added `@media (max-width: 700px)`: slides scroll vertically, all multi-column grids collapse to 1 col, steps/pricing/two-col stack vertically, typography shrinks with clamp, nav buttons 44px tap targets, dots move to horizontal row above nav, counter hidden on small screens
+
 ## 2026-04-28 | `be42da5` — docs: update README, auth-flow, pitch deck (remove eMerge refs, new pricing, visible nav buttons)
 
 - `README.md` — full rewrite: presentation link, Skills section, Company Settings section, updated API table, accurate changelog
