@@ -35,24 +35,23 @@ create table if not exists notifications (
   created_at timestamptz not null default now()
 );
 
-create index notifications_user_id_idx  on notifications (user_id);
-create index notifications_unread_idx   on notifications (user_id) where read = false;
-create index notifications_created_idx  on notifications (created_at desc);
+create index if not exists notifications_user_id_idx  on notifications (user_id);
+create index if not exists notifications_unread_idx   on notifications (user_id) where read = false;
+create index if not exists notifications_created_idx  on notifications (created_at desc);
 
-alter table notifications      enable row level security;
+alter table notifications enable row level security;
 
--- Users can only see their own notifications.
-create policy "user_can_read_own_notifications"
-  on notifications for select
-  using (auth.uid() = user_id);
-
--- Users can mark their own notifications as read.
-create policy "user_can_update_own_notifications"
-  on notifications for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
--- Service role inserts on behalf of backend.
-create policy "service_role_all_notifications"
-  on notifications for all
-  using (true);
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename='notifications' and policyname='user_can_read_own_notifications') then
+    create policy "user_can_read_own_notifications"
+      on notifications for select using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename='notifications' and policyname='user_can_update_own_notifications') then
+    create policy "user_can_update_own_notifications"
+      on notifications for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename='notifications' and policyname='service_role_all_notifications') then
+    create policy "service_role_all_notifications"
+      on notifications for all using (true);
+  end if;
+end $$;
