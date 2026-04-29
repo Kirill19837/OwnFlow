@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-28 | `be42da5` — docs: update README, auth-flow, pitch deck (remove eMerge refs, new pricing, visible nav buttons)
+
+- `README.md` — full rewrite: presentation link, Skills section, Company Settings section, updated API table, accurate changelog
+- `docs/auth-flow.md` — added skills modal flow (section 9), account deletion paths (section 10), updated key files table
+- `pitch/index.html` — removed all eMerge AI Hackathon references; business model replaced with Free / Pro ($100/company + $3/user) / Enterprise; nav buttons made larger and purple-tinted
+
 ## 2026-04-28 | `56cf848` — feat: add delete-account option on company setup page; tests for company PATCH/DELETE endpoints
 
 - `frontend/src/pages/NewCompanyPage.tsx` — added "delete my account" link at bottom of form; expands to inline confirmation panel (red border + warning); on confirm calls `DELETE /auth/account`, signs out, redirects to `/login`
