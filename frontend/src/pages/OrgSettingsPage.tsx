@@ -30,6 +30,7 @@ export default function OrgSettingsPage() {
   const { session } = useAuthStore()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
+  const [selectedExistingUserId, setSelectedExistingUserId] = useState('')
   const [inviteMessage, setInviteMessage] = useState('')
   const [resendingEmail, setResendingEmail] = useState<string | null>(null)
   const [localPendingInvites, setLocalPendingInvites] = useState<{ email: string; role: string }[]>([])
@@ -42,6 +43,21 @@ export default function OrgSettingsPage() {
     queryKey: ['team', teamId],
     queryFn: () => api.get<Team>(`/teams/${teamId}`).then((r) => r.data),
     enabled: !!teamId,
+  })
+
+  const { data: companyTeams = [] } = useQuery({
+    queryKey: ['company-teams', org?.company_id],
+    queryFn: () => api.get<Team[]>(`/companies/${org!.company_id}/teams`).then((r) => r.data),
+    enabled: !!org?.company_id,
+  })
+
+  const companyTeamDetails = useQueries({
+    queries: companyTeams.map((team) => ({
+      queryKey: ['team', team.id],
+      queryFn: () => api.get<Team>(`/teams/${team.id}`).then((r) => r.data),
+      enabled: !!team.id,
+      staleTime: 2 * 60 * 1000,
+    })),
   })
 
   const updateModel = useMutation({
@@ -107,6 +123,28 @@ export default function OrgSettingsPage() {
     },
   })
 
+  const inviteExistingMember = useMutation({
+    mutationFn: (email: string) =>
+      api.post(`/teams/${teamId}/invites`, {
+        email,
+        role: inviteRole,
+        invited_by_user_id: session!.user.id,
+      }),
+    onSuccess: (res, email) => {
+      const sentEmail = email.trim().toLowerCase()
+      const payload = res?.data || {}
+      if (payload.status === 'invite_queued') {
+        setInviteMessage(`Invite saved — email couldn't be sent right now (rate limit). It will be sent later.`)
+      } else {
+        const who = payload.invited_by_email ? ` by ${payload.invited_by_email}` : ''
+        setInviteMessage(`Invite sent${who}.`)
+      }
+      setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: inviteRole }])
+      setSelectedExistingUserId('')
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
+    },
+  })
+
   const removeMember = useMutation({
     mutationFn: (userId: string) => api.delete(`/teams/${teamId}/members/${userId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
@@ -136,6 +174,44 @@ export default function OrgSettingsPage() {
   })
 
   const members = org?.members ?? []
+  const existingMemberCandidates = (() => {
+    if (!org?.company_id) return []
+    const currentMemberIds = new Set((org.members ?? []).map((m) => m.user_id))
+    const pendingEmails = new Set((org.pending_invites ?? []).map((i) => i.email.toLowerCase()))
+    const localPendingEmails = new Set(localPendingInvites.map((i) => i.email.toLowerCase()))
+    const candidatesById = new Map<string, { user_id: string; email: string; full_name?: string; teams: Set<string> }>()
+
+    companyTeamDetails.forEach((q, idx) => {
+      const team = companyTeams[idx]
+      const teamName = team?.name || 'Other team'
+      const teamMembers = q.data?.members ?? []
+      teamMembers.forEach((m) => {
+        const email = (m.email || '').trim().toLowerCase()
+        if (!m.user_id || !email) return
+        if (currentMemberIds.has(m.user_id)) return
+        if (pendingEmails.has(email) || localPendingEmails.has(email)) return
+
+        const existing = candidatesById.get(m.user_id)
+        if (existing) {
+          existing.teams.add(teamName)
+          if (!existing.full_name && m.full_name) existing.full_name = m.full_name
+          return
+        }
+        candidatesById.set(m.user_id, {
+          user_id: m.user_id,
+          email,
+          full_name: m.full_name,
+          teams: new Set([teamName]),
+        })
+      })
+    })
+
+    return Array.from(candidatesById.values())
+      .map((c) => ({ ...c, teamNames: Array.from(c.teams).sort() }))
+      .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email))
+  })()
+
+  const selectedExistingCandidate = existingMemberCandidates.find((c) => c.user_id === selectedExistingUserId)
   const memberSkillQueries = useQueries({
     queries: members.map((m) => ({
       queryKey: ['user-skills', m.user_id],
@@ -343,6 +419,38 @@ export default function OrgSettingsPage() {
           {/* Invite by email — admins and owners only */}
           {canInvite && (
           <div className="border-t border-gray-800 pt-4">
+            <p className="text-sm text-gray-400 mb-2">Invite existing member from other teams</p>
+            <div className="flex gap-2 mb-3">
+              <select
+                value={selectedExistingUserId}
+                onChange={(e) => setSelectedExistingUserId(e.target.value)}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none"
+              >
+                <option value="">Select company member from another team…</option>
+                {existingMemberCandidates.map((candidate) => {
+                  const label = candidate.full_name
+                    ? `${candidate.full_name} (${candidate.email})`
+                    : candidate.email
+                  const fromTeams = candidate.teamNames.join(', ')
+                  return (
+                    <option key={candidate.user_id} value={candidate.user_id}>
+                      {`${label} • ${fromTeams}`}
+                    </option>
+                  )
+                })}
+              </select>
+              <button
+                onClick={() => {
+                  if (selectedExistingCandidate?.email) inviteExistingMember.mutate(selectedExistingCandidate.email)
+                }}
+                disabled={!selectedExistingCandidate?.email || inviteExistingMember.isPending || !session?.user.id}
+                className="flex items-center gap-1 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+              >
+                <UserPlus size={14} />
+                Invite member
+              </button>
+            </div>
+
             <p className="text-sm text-gray-400 mb-2">Invite member by email</p>
             <div className="flex gap-2">
               <input
