@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-04-29 | `995f317` — fix: improve light-mode contrast for filled action buttons
+
+- `frontend/src/index.css` — added targeted light-mode overrides so filled purple/red action buttons keep white text instead of inheriting global dark text remapping
+- `frontend/src/index.css` — preserved white text on hover for common filled CTA variants to keep button readability consistent in light theme
+
+---
+
 ## 2026-04-29 | `0dcd0d4` — feat: invite existing company members and refine setup copy
 
 - `frontend/src/pages/OrgSettingsPage.tsx` — added an "Invite existing member from other teams" flow that lists company users from other teams and sends a team invite with one click
