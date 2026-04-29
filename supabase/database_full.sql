@@ -25,6 +25,7 @@ drop table if exists sprints             cascade;
 drop table if exists project_members     cascade;
 drop table if exists projects            cascade;
 drop table if exists actors              cascade;
+drop table if exists team_api_logs       cascade;
 drop table if exists team_invites        cascade;
 drop table if exists team_members        cascade;
 drop table if exists teams               cascade;
@@ -87,6 +88,23 @@ create table team_members (
   joined_at timestamptz not null default now(),
   primary key (team_id, user_id)
 );
+
+-- ─── Team API logs ──────────────────────────────────────────────────────────
+
+create table team_api_logs (
+  id         uuid        primary key default gen_random_uuid(),
+  team_id    uuid,
+  user_id    text,
+  action     text        not null,
+  level      text        not null default 'info' check (level in ('info', 'warn', 'error')),
+  detail     jsonb       not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create index team_api_logs_team_id_idx on team_api_logs (team_id);
+create index team_api_logs_user_id_idx on team_api_logs (user_id);
+create index team_api_logs_action_idx  on team_api_logs (action);
+create index team_api_logs_created_idx on team_api_logs (created_at desc);
 
 create table team_invites (
   id                 uuid        primary key default gen_random_uuid(),
@@ -287,6 +305,7 @@ alter table companies          enable row level security;
 alter table company_members    enable row level security;
 alter table teams              enable row level security;
 alter table team_members       enable row level security;
+alter table team_api_logs      enable row level security;
 alter table team_invites       enable row level security;
 alter table user_signups       enable row level security;
 alter table projects           enable row level security;
@@ -306,6 +325,7 @@ create policy "service_role_all_companies"         on companies          for all
 create policy "service_role_all_company_members"   on company_members    for all using (true);
 create policy "service_role_all_teams"             on teams              for all using (true);
 create policy "service_role_all_team_members"      on team_members       for all using (true);
+create policy "service_role_all_team_api_logs"     on team_api_logs      for all using (true);
 create policy "service_role_all_team_invites"      on team_invites       for all using (true);
 create policy "service_role_all_user_signups"      on user_signups       for all using (true);
 create policy "service_role_all_projects"          on projects           for all using (true);

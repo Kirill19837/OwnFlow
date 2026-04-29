@@ -86,6 +86,28 @@ def _user_email(user) -> Optional[str]:
     return user.get("email") if isinstance(user, dict) else getattr(user, "email", None)
 
 
+def _log_team_event(
+    db,
+    action: str,
+    team_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    level: str = "info",
+    detail: Optional[dict] = None,
+) -> None:
+    """Write a non-blocking structured log entry to team_api_logs in Supabase."""
+    try:
+        db.table("team_api_logs").insert({
+            "id": str(uuid.uuid4()),
+            "team_id": team_id,
+            "user_id": user_id,
+            "action": action,
+            "level": level,
+            "detail": detail or {},
+        }).execute()
+    except Exception:
+        pass  # never block the main request
+
+
 def _require_member(db, team_id: str, user_id: str) -> str:
     """
     Verify that user_id is an active member of team_id and return their raw role UUID.
@@ -137,6 +159,8 @@ def create_team(body: TeamCreate):
         "user_id": body.owner_id,
         "role": ROLE_IDS["owner"],
     }).execute()
+    _log_team_event(db, "create_team", team_id=team_id, user_id=body.owner_id,
+                    detail={"name": body.name, "model": body.default_ai_model})
     return {**row, "my_role": "owner"}
 
 
@@ -265,6 +289,7 @@ def update_team(team_id: str, body: TeamUpdate):
     if not update:
         raise HTTPException(400, "No valid fields to update")
     db.table("teams").update(update).eq("id", team_id).execute()
+    _log_team_event(db, "update_team", team_id=team_id, detail=update)
     return {"team_id": team_id, **update}
 
 
@@ -278,6 +303,8 @@ def add_member(team_id: str, body: TeamMemberInvite):
         "user_id": body.user_id,
         "role": ROLE_IDS[body.role],
     }).execute()
+    _log_team_event(db, "add_member", team_id=team_id, user_id=body.user_id,
+                    detail={"role": body.role})
     return {"team_id": team_id, "user_id": body.user_id, "role": body.role}
 
 
@@ -351,7 +378,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             )
         except Exception as exc:
             msg = str(exc).lower()
-            if "already registered" in msg:
+            if "already registered" in msg or "already exists" in msg or "user exists" in msg:
                 # Confirmed existing user — they just need to log in.
                 login_url = f"{settings.frontend_url.rstrip('/')}/invite"
                 try:
@@ -408,7 +435,12 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             msg = str(exc).lower()
             if "rate limit" in msg:
                 invite_error = "rate_limit"
-            elif "already registered" in msg or "already been invited" in msg:
+            elif (
+                "already registered" in msg
+                or "already exists" in msg
+                or "user exists" in msg
+                or "already been invited" in msg
+            ):
                 invite_error = "already_exists"
             else:
                 raise HTTPException(400, f"Failed to send invite: {exc}")
@@ -436,6 +468,8 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     except Exception:
         pass  # Non-blocking
 
+    _log_team_event(db, "invite_member", team_id=team_id, user_id=body.invited_by_user_id,
+                    detail={"email": email, "role": body.role, "status": status})
     return {
         "status": status,
         "email": email,
@@ -562,6 +596,8 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
         except Exception:
             pass  # Non-blocking
 
+    _log_team_event(db, "accept_invites", user_id=str(body.user_id),
+                    detail={"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids})
     return {"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids}
 
 
@@ -570,6 +606,7 @@ def decline_invite(invite_id: str):
     """Mark an invite as declined by the invitee."""
     db = get_supabase()
     db.table("team_invites").update({"status": "declined"}).eq("id", invite_id).execute()
+    _log_team_event(db, "decline_invite", detail={"invite_id": invite_id})
 
 
 @router.delete("/{team_id}", status_code=204)
@@ -580,6 +617,7 @@ def delete_team(team_id: str, requester_id: str = Depends(current_user_id)):
     db.table("team_members").delete().eq("team_id", team_id).execute()
     db.table("team_invites").delete().eq("team_id", team_id).execute()
     db.table("teams").delete().eq("id", team_id).execute()
+    _log_team_event(db, "delete_team", team_id=team_id, user_id=requester_id)
 
 
 class RoleUpdate(BaseModel):
@@ -602,6 +640,8 @@ def change_member_role(team_id: str, user_id: str, body: RoleUpdate, requester_i
         raise HTTPException(403, "Cannot change the owner's role")
     new_role_id = ROLE_IDS[new_role_name]
     db.table("team_members").update({"role": new_role_id}).eq("team_id", team_id).eq("user_id", user_id).execute()
+    _log_team_event(db, "change_member_role", team_id=team_id, user_id=requester_id,
+                    detail={"target_user_id": user_id, "new_role": new_role_name})
     return {"role": new_role_name}
 
 
@@ -615,6 +655,7 @@ def remove_member(team_id: str, user_id: str, requester_id: str = Depends(curren
         if requester_role == ROLE_IDS["owner"]:
             raise HTTPException(403, "Team owner cannot leave — transfer ownership or delete the team first")
         db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
+        _log_team_event(db, "leave_team", team_id=team_id, user_id=user_id)
         return
 
     if requester_role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
@@ -627,6 +668,8 @@ def remove_member(team_id: str, user_id: str, requester_id: str = Depends(curren
         raise HTTPException(403, "Only the team owner can remove an admin")
 
     db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
+    _log_team_event(db, "remove_member", team_id=team_id, user_id=requester_id,
+                    detail={"target_user_id": user_id})
 
 
 @router.delete("/{team_id}/invites/{invite_id}", status_code=204)
@@ -635,3 +678,5 @@ def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(curr
     if _require_member(db, team_id, requester_id) not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can revoke invites")
     db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
+    _log_team_event(db, "revoke_invite", team_id=team_id, user_id=requester_id,
+                    detail={"invite_id": invite_id})
