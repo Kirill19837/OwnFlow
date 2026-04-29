@@ -58,7 +58,7 @@ export interface NotificationType {
 export interface Notification {
   id: string
   user_id: string
-  type: NotificationTypeKey
+  type_id: string               // UUID FK → notification_types.id
   title: string
   body: string
   payload: Record<string, unknown>

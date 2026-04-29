@@ -26,6 +26,29 @@ ROLE_IDS = {
 }
 ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
 
+# Fixed UUIDs seeded in the notification_types table
+NOTIF_TYPE_IDS = {
+    # user-facing
+    "team_invite":        "00000000-0000-0000-0002-000000000001",
+    "team_accepted":      "00000000-0000-0000-0002-000000000002",
+    "team_declined":      "00000000-0000-0000-0002-000000000003",
+    "team_removed":       "00000000-0000-0000-0002-000000000004",
+    "role_changed":       "00000000-0000-0000-0002-000000000005",
+    "general":            "00000000-0000-0000-0002-000000000006",
+    # team API actions
+    "create_team":        "00000000-0000-0000-0002-000000000007",
+    "update_team":        "00000000-0000-0000-0002-000000000008",
+    "add_member":         "00000000-0000-0000-0002-000000000009",
+    "invite_member":      "00000000-0000-0000-0002-000000000010",
+    "accept_invites":     "00000000-0000-0000-0002-000000000011",
+    "decline_invite":     "00000000-0000-0000-0002-000000000012",
+    "delete_team":        "00000000-0000-0000-0002-000000000013",
+    "change_member_role": "00000000-0000-0000-0002-000000000014",
+    "leave_team":         "00000000-0000-0000-0002-000000000015",
+    "remove_member":      "00000000-0000-0000-0002-000000000016",
+    "revoke_invite":      "00000000-0000-0000-0002-000000000017",
+}
+
 
 def get_role_name(role_id: str | None, fallback: str = "member") -> str:
     """Resolve a role UUID to its display name, falling back gracefully."""
@@ -89,7 +112,7 @@ def _user_email(user) -> Optional[str]:
 def _create_notification(
     db,
     user_id: str,
-    type_: str,
+    type_key: str,
     title: str,
     body: str = "",
     payload: Optional[dict] = None,
@@ -99,7 +122,7 @@ def _create_notification(
         db.table("notifications").insert({
             "id": str(uuid.uuid4()),
             "user_id": user_id,
-            "type": type_,
+            "type_id": NOTIF_TYPE_IDS[type_key],
             "title": title,
             "body": body,
             "payload": payload or {},
@@ -122,7 +145,7 @@ def _log_team_event(
             "id": str(uuid.uuid4()),
             "team_id": team_id,
             "user_id": user_id,
-            "action": action,
+            "action_id": NOTIF_TYPE_IDS[action],
             "level": level,
             "detail": detail or {},
         }).execute()
@@ -388,7 +411,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
         _create_notification(
             db,
             user_id=_user_id(existing_user_obj),
-            type_="team_invite",
+            type_key="team_invite",
             title=f"You've been invited to join {team.data['name']}",
             body=f"{inviter_email} invited you to {team.data['name']} as {body.role}.",
             payload={

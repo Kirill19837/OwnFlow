@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-29 | `116ac75` — feat: real-time notifications system with notification_types lookup table and invite 400 fix
+
+- `supabase/migrations/009_notifications.sql` — new `notification_types` lookup table (UUID PK, unique `key`, label, description) seeded with 6 types; `notifications` table with FK to `notification_types.key`; per-user RLS (select/update own rows; service role full access)
+- `supabase/database_full.sql` — added both tables to drops, create, RLS enable, and policies sections
+- `backend/app/api/teams.py` — `_create_notification()` fire-and-forget helper; `invite_member_by_email` now pre-checks confirmed-user status before calling Supabase invite API (prevents 400 for existing users); creates in-app notification for confirmed existing users on invite
+- `frontend/src/types.ts` — added `NotificationTypeKey` union type, `NotificationType` and `Notification` interfaces
+- `frontend/src/hooks/useNotifications.ts` — new hook: initial fetch + Supabase Realtime INSERT/UPDATE subscription; `markRead`, `markAllRead`, `unreadCount`
+- `frontend/src/components/AppLayout.tsx` — notification bell with live unread badge in header; dropdown with notification list, purple dot for unread, "Mark all read" button
+
+---
+
 ## 2026-04-29 | `995f317` — fix: improve light-mode contrast for filled action buttons
 
 - `frontend/src/index.css` — added targeted light-mode overrides so filled purple/red action buttons keep white text instead of inheriting global dark text remapping
