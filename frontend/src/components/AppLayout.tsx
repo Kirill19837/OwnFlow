@@ -6,10 +6,11 @@ import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Team } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle } from 'lucide-react'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle, Bell } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
 import SelectSkillsModal from './SelectSkillsModal'
 import { useThemeStore } from '../store/themeStore'
+import { useNotifications } from '../hooks/useNotifications'
 
 export default function AppLayout() {
   const { signOut, session, needsPassword, needsName, needsSkills, linkType } = useAuthStore()
@@ -20,7 +21,10 @@ export default function AppLayout() {
   const queryClient = useQueryClient()
   const [dropOpen, setDropOpen] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
   const lastUserIdRef = useRef<string | null>(null)
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(session?.user.id)
 
   // Fetch company
   const { data: companyData, isSuccess: companyLoaded } = useQuery({
@@ -105,10 +109,11 @@ export default function AppLayout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamsData, session?.user.id, companyLoaded])
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropRef.current && !dropRef.current.contains(e.target as Node)) setDropOpen(false)
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -206,6 +211,66 @@ export default function AppLayout() {
             <UserCircle size={15} />
             <span>{session?.user?.user_metadata?.full_name || session?.user.email}</span>
           </button>
+
+          {/* Notification bell */}
+          <div className="relative" ref={notifRef}>
+            <button
+              onClick={() => setNotifOpen((p) => !p)}
+              className="relative flex items-center justify-center w-7 h-7 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+              title="Notifications"
+            >
+              <Bell size={15} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 rounded-full bg-purple-600 text-white text-[9px] font-bold leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notifOpen && (
+              <div className="absolute right-0 top-full mt-2 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800">
+                  <span className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Notifications</span>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={markAllRead}
+                      className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-96 overflow-y-auto divide-y divide-gray-800">
+                  {notifications.length === 0 ? (
+                    <p className="px-4 py-6 text-center text-sm text-gray-500">No notifications yet</p>
+                  ) : (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => markRead(n.id)}
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-800 transition-colors ${
+                          n.read ? 'opacity-50' : ''
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          {!n.read && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />}
+                          {n.read && <span className="mt-1.5 w-1.5 h-1.5 shrink-0" />}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-100 leading-snug">{n.title}</p>
+                            {n.body && <p className="text-xs text-gray-400 mt-0.5 leading-snug">{n.body}</p>}
+                            <p className="text-xs text-gray-600 mt-1">
+                              {new Date(n.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={toggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}

@@ -41,6 +41,31 @@ export interface TeamPendingInvite {
   status: 'pending' | 'accepted' | 'revoked'
 }
 
+export type NotificationTypeKey =
+  | 'team_invite'
+  | 'team_accepted'
+  | 'team_declined'
+  | 'team_removed'
+  | 'role_changed'
+  | 'general'
+
+export interface NotificationType {
+  key: NotificationTypeKey
+  label: string
+  description: string
+}
+
+export interface Notification {
+  id: string
+  user_id: string
+  type: NotificationTypeKey
+  title: string
+  body: string
+  payload: Record<string, unknown>
+  read: boolean
+  created_at: string
+}
+
 export type ActorType = 'human' | 'ai'
 
 export interface Skill {

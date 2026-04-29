@@ -86,6 +86,28 @@ def _user_email(user) -> Optional[str]:
     return user.get("email") if isinstance(user, dict) else getattr(user, "email", None)
 
 
+def _create_notification(
+    db,
+    user_id: str,
+    type_: str,
+    title: str,
+    body: str = "",
+    payload: Optional[dict] = None,
+) -> None:
+    """Insert a real-time notification row for a specific user. Never raises."""
+    try:
+        db.table("notifications").insert({
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "type": type_,
+            "title": title,
+            "body": body,
+            "payload": payload or {},
+        }).execute()
+    except Exception:
+        pass
+
+
 def _log_team_event(
     db,
     action: str,
@@ -350,100 +372,146 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
 
     invite_error: str | None = None
 
+    # Check upfront if this email already has a Supabase auth account.
+    # If so, skip the invite API call entirely (it would throw 'already registered').
+    # Only treat as "existing" if the account is confirmed — unconfirmed users
+    # should still receive a proper invite link so they can complete sign-up.
+    def _is_confirmed(u) -> bool:
+        v = u.get("email_confirmed_at") if isinstance(u, dict) else getattr(u, "email_confirmed_at", None)
+        return bool(v)
+
+    user_already_exists = any(_user_email(u) == email and _is_confirmed(u) for u in users)
+    existing_user_obj = next((u for u in users if _user_email(u) == email and _is_confirmed(u)), None) if user_already_exists else None
+
+    if user_already_exists and existing_user_obj:
+        # Create a real-time in-app notification so the user sees the invite instantly.
+        _create_notification(
+            db,
+            user_id=_user_id(existing_user_obj),
+            type_="team_invite",
+            title=f"You've been invited to join {team.data['name']}",
+            body=f"{inviter_email} invited you to {team.data['name']} as {body.role}.",
+            payload={
+                "team_id": team_id,
+                "team_name": team.data["name"],
+                "role": body.role,
+                "invited_by_email": inviter_email,
+            },
+        )
+
     if settings.postmark_enabled:
-        try:
-            link_resp = db.auth.admin.generate_link({
-                "type": "invite",
-                "email": email,
-                "options": {
-                    "data": {
-                        "org_id": team_id,
-                        "org_role": body.role,
-                        "org_name": team.data["name"],
-                        "invited_by_email": inviter_email,
-                    },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
-                },
-            })
-            action_link = (
-                getattr(link_resp, "action_link", None)
-                or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
-            )
-            send_invite_email(
-                to_email=email,
-                invite_url=action_link or f"{settings.frontend_url}/login",
-                org_name=team.data["name"],
-                inviter_email=inviter_email,
-                role=body.role,
-            )
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "already registered" in msg or "already exists" in msg or "user exists" in msg:
-                # Confirmed existing user — they just need to log in.
-                login_url = f"{settings.frontend_url.rstrip('/')}/invite"
-                try:
-                    send_added_to_org_email(
-                        to_email=email,
-                        org_name=team.data["name"],
-                        inviter_email=inviter_email,
-                        role=body.role,
-                        frontend_url=login_url,
-                    )
-                except Exception:
-                    pass
-            elif "already been invited" in msg:
-                # Unconfirmed user with a previous invite — generate a fresh magic link
-                # so the resend email contains a working click-through URL.
-                try:
-                    magic_resp = db.auth.admin.generate_link({
-                        "type": "magiclink",
-                        "email": email,
-                        "options": {
-                            "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
+        if user_already_exists:
+            # Existing user: just send a "you've been added" notification email.
+            login_url = f"{settings.frontend_url.rstrip('/')}/invite"
+            try:
+                send_added_to_org_email(
+                    to_email=email,
+                    org_name=team.data["name"],
+                    inviter_email=inviter_email,
+                    role=body.role,
+                    frontend_url=login_url,
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                link_resp = db.auth.admin.generate_link({
+                    "type": "invite",
+                    "email": email,
+                    "options": {
+                        "data": {
+                            "org_id": team_id,
+                            "org_role": body.role,
+                            "org_name": team.data["name"],
+                            "invited_by_email": inviter_email,
                         },
-                    })
-                    magic_link = (
-                        getattr(magic_resp, "action_link", None)
-                        or (magic_resp.properties.action_link if hasattr(magic_resp, "properties") else None)
-                    )
-                    send_invite_email(
-                        to_email=email,
-                        invite_url=magic_link or f"{settings.frontend_url}/invite",
-                        org_name=team.data["name"],
-                        inviter_email=inviter_email,
-                        role=body.role,
-                    )
-                except Exception:
-                    pass
-            else:
-                raise HTTPException(400, f"Failed to send invite: {exc}")
-    else:
-        try:
-            db.auth.admin.invite_user_by_email(
-                email,
-                {
-                    "data": {
-                        "org_id": team_id,
-                        "org_role": body.role,
-                        "org_name": team.data["name"],
-                        "invited_by_email": inviter_email,
+                        "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
-                },
-            )
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "rate limit" in msg:
-                invite_error = "rate_limit"
-            elif (
-                "already registered" in msg
-                or "already exists" in msg
-                or "user exists" in msg
-                or "already been invited" in msg
-            ):
-                invite_error = "already_exists"
-            else:
-                raise HTTPException(400, f"Failed to send invite: {exc}")
+                })
+                action_link = (
+                    getattr(link_resp, "action_link", None)
+                    or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
+                )
+                send_invite_email(
+                    to_email=email,
+                    invite_url=action_link or f"{settings.frontend_url}/login",
+                    org_name=team.data["name"],
+                    inviter_email=inviter_email,
+                    role=body.role,
+                )
+            except Exception as exc:
+                msg = str(exc).lower()
+                if (
+                    "already registered" in msg
+                    or "already exists" in msg
+                    or "user exists" in msg
+                ):
+                    # Race condition: user registered between our list_users call and now.
+                    login_url = f"{settings.frontend_url.rstrip('/')}/invite"
+                    try:
+                        send_added_to_org_email(
+                            to_email=email,
+                            org_name=team.data["name"],
+                            inviter_email=inviter_email,
+                            role=body.role,
+                            frontend_url=login_url,
+                        )
+                    except Exception:
+                        pass
+                elif "already been invited" in msg:
+                    try:
+                        magic_resp = db.auth.admin.generate_link({
+                            "type": "magiclink",
+                            "email": email,
+                            "options": {
+                                "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
+                            },
+                        })
+                        magic_link = (
+                            getattr(magic_resp, "action_link", None)
+                            or (magic_resp.properties.action_link if hasattr(magic_resp, "properties") else None)
+                        )
+                        send_invite_email(
+                            to_email=email,
+                            invite_url=magic_link or f"{settings.frontend_url}/invite",
+                            org_name=team.data["name"],
+                            inviter_email=inviter_email,
+                            role=body.role,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    raise HTTPException(400, f"Failed to send invite: {exc}")
+    else:
+        if user_already_exists:
+            invite_error = "already_exists"
+        else:
+            try:
+                db.auth.admin.invite_user_by_email(
+                    email,
+                    {
+                        "data": {
+                            "org_id": team_id,
+                            "org_role": body.role,
+                            "org_name": team.data["name"],
+                            "invited_by_email": inviter_email,
+                        },
+                        "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
+                    },
+                )
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "rate limit" in msg:
+                    invite_error = "rate_limit"
+                elif (
+                    "already registered" in msg
+                    or "already exists" in msg
+                    or "user exists" in msg
+                    or "already been invited" in msg
+                ):
+                    invite_error = "already_exists"
+                else:
+                    raise HTTPException(400, f"Failed to send invite: {exc}")
 
     status = "invite_sent"
     if invite_error == "rate_limit":
