@@ -117,6 +117,8 @@ export default function NewProjectPage() {
   const [logs, setLogs] = useState<string[]>([])
   const [planning, setPlanningState] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
+  const [assistantRequest, setAssistantRequest] = useState('')
+  const [assistantSuggestion, setAssistantSuggestion] = useState<{ name: string; prompt: string; notes?: string } | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
@@ -178,6 +180,19 @@ export default function NewProjectPage() {
         es.close()
       }
     },
+  })
+
+  const assistProject = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ name: string; prompt: string; notes?: string }>('/projects/assist', {
+        name,
+        prompt,
+        request: assistantRequest,
+        ai_model: aiModel,
+      })
+      return data
+    },
+    onSuccess: (data) => setAssistantSuggestion(data),
   })
 
   const autoFill = () => {
@@ -261,6 +276,68 @@ export default function NewProjectPage() {
             onChange={(e) => setPrompt(e.target.value)}
             className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
           />
+        </div>
+
+        {/* AI assistant */}
+        <div className="bg-gray-900/70 border border-purple-900/60 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-purple-300">AI Assistant</p>
+            <span className="text-[11px] text-gray-500">Use it to draft or improve your project brief</span>
+          </div>
+          <textarea
+            rows={2}
+            value={assistantRequest}
+            onChange={(e) => setAssistantRequest(e.target.value)}
+            placeholder="Example: Help me turn this into a detailed project brief with scope and acceptance criteria"
+            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => assistProject.mutate()}
+              disabled={assistProject.isPending || (!assistantRequest.trim() && !prompt.trim())}
+              className="text-xs px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white transition-colors"
+            >
+              {assistProject.isPending ? 'Thinking…' : 'Ask AI assistant'}
+            </button>
+            {assistProject.isError && (
+              <span className="text-xs text-red-400">{(assistProject.error as Error)?.message}</span>
+            )}
+          </div>
+          {assistantSuggestion && (
+            <div className="mt-2 bg-gray-950 border border-gray-700 rounded-lg p-3 space-y-2">
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide">Suggested project name</p>
+                <p className="text-sm text-white">{assistantSuggestion.name}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide">Suggested brief</p>
+                <p className="text-xs text-gray-300 whitespace-pre-wrap">{assistantSuggestion.prompt}</p>
+              </div>
+              {assistantSuggestion.notes && (
+                <p className="text-xs text-purple-300">{assistantSuggestion.notes}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setName(assistantSuggestion.name)
+                    setPrompt(assistantSuggestion.prompt)
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                >
+                  Apply suggestion
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssistantSuggestion(null)}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Actors */}

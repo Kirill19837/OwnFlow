@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from app.models import ProjectCreate, ActorCreate
 from app.db import get_supabase
@@ -8,10 +8,27 @@ from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, gen
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
 from app.providers.registry import get_provider
+from app.auth_deps import current_user_id
+from app.assistants import (
+    ProjectAssistBody,
+    build_project_board_messages,
+    generate_project_creation_suggestion,
+)
 import uuid
 import json
 
 router = APIRouter()
+
+
+@router.post("/assist")
+async def assist_project_creation(body: ProjectAssistBody, _caller_id: str = Depends(current_user_id)):
+    """Generate a better project name/prompt draft before project creation."""
+    try:
+        return await generate_project_creation_suggestion(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"AI assistant failed: {exc}")
 
 
 @router.post("", status_code=201)
@@ -384,46 +401,14 @@ async def prompt_project_stream(project_id: str, body: dict):
     sprint_ids = [s["id"] for s in sprints_resp.data or []]
     tasks_resp = db.table("tasks").select("id,title,status,type,priority,estimated_hours").in_("sprint_id", sprint_ids).execute() if sprint_ids else type("R", (), {"data": []})()
 
-    sprint_summary = ", ".join(
-        f"Sprint {s['sprint_number']}" for s in (sprints_resp.data or [])
-    )
-    tasks_list = tasks_resp.data or []
-    task_lines = "\n".join(
-        f'- id:{t["id"]} | {t["title"]} | {t["status"]} | {t.get("type","")} | {t.get("priority","")}'
-        for t in tasks_list
-    ) or "no tasks yet"
-
     history = body.get("history") or []
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"You are an AI project assistant.\n"
-                f"Project: {project['name']}\n"
-                f"Brief: {project.get('prompt', '')}\n"
-                f"Sprints: {sprint_summary or 'none yet'}\n\n"
-                f"Current tasks:\n{task_lines}\n\n"
-                "Answer helpfully and concisely.\n\n"
-                "IMPORTANT — structured output rule:\n"
-                "When the user asks to CREATE, ADD, DELETE, MODIFY, UPDATE, REGENERATE, or ADD DETAILS to tasks, "
-                "respond ONLY with a single fenced JSON block — no prose before or after it.\n\n"
-                "Shapes:\n"
-                "```json\n"
-                '{"intent":"create_tasks","tasks":[{"title":"...","description":"...","type":"feature|bug|chore|spike","priority":"low|medium|high","estimated_hours":2}]}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"modify_tasks","tasks":[{"id":"<existing task id>","title":"...","description":"...","type":"...","priority":"...","estimated_hours":2}]}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"delete_tasks","tasks":[{"id":"<existing task id>","title":"..."}]}\n'
-                "```\n"
-                "For 'regenerate', use delete_tasks for old ones and create_tasks for new ones — pick whichever fits.\n"
-                "For all other questions, answer normally using Markdown."
-            ),
-        },
-        *history,
-        {"role": "user", "content": user_prompt},
-    ]
+    messages = build_project_board_messages(
+        project=project,
+        sprints=sprints_resp.data or [],
+        tasks=tasks_resp.data or [],
+        history=history,
+        user_prompt=user_prompt,
+    )
 
     model = "gpt-4o"
     provider = get_provider(model)
