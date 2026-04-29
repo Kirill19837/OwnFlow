@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
+import type { Skill } from '../types'
 import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 
 const AI_MODELS = [
@@ -13,41 +14,6 @@ const AI_MODELS = [
   { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
   { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', provider: 'Anthropic' },
 ]
-
-interface RoleTemplate {
-  name: string
-  /** 'both' = can be added as either AI or Human */
-  type: 'human' | 'ai' | 'both'
-  category: string
-  characteristics: string
-}
-
-const ROLE_TEMPLATES: RoleTemplate[] = [
-  // Engineering — all 'both' so you can add human devs too
-  { name: 'Lead Developer',     type: 'both',  category: 'Engineering', characteristics: 'Drives technical decisions, reviews PRs, and mentors the team on best practices.' },
-  { name: 'Senior Developer',   type: 'both',  category: 'Engineering', characteristics: 'Implements core features and complex business logic with high code quality.' },
-  { name: 'Backend Developer',  type: 'both',  category: 'Engineering', characteristics: 'Designs APIs, schemas, and services. Focused on performance and reliability.' },
-  { name: 'Frontend Developer', type: 'both',  category: 'Engineering', characteristics: 'Builds responsive, accessible UIs. Manages component state and integrations.' },
-  { name: 'Architect',          type: 'both',  category: 'Engineering', characteristics: 'Defines system design, tech stack choices, and scalability patterns.' },
-  { name: 'DevOps Engineer',    type: 'both',  category: 'Engineering', characteristics: 'Manages CI/CD, infrastructure-as-code, monitoring, and release automation.' },
-  // Quality
-  { name: 'QA Automation Lead', type: 'both',  category: 'Quality', characteristics: 'Designs and maintains automated test suites; owns coverage and regression strategy.' },
-  { name: 'QA Manual',          type: 'human', category: 'Quality', characteristics: 'Runs exploratory and acceptance testing; documents bugs with full reproduction steps.' },
-  { name: 'Security Reviewer',  type: 'both',  category: 'Quality', characteristics: 'Audits code for OWASP vulnerabilities and enforces secure coding standards.' },
-  // Product
-  { name: 'Product Owner',      type: 'human', category: 'Product', characteristics: 'Owns the backlog, defines acceptance criteria, and represents the customer.' },
-  { name: 'Business Analyst',   type: 'both',  category: 'Product', characteristics: 'Maps requirements to specs, validates scope, and bridges business and tech.' },
-  { name: 'UI/UX Designer',     type: 'both',  category: 'Product', characteristics: 'Creates wireframes, design systems, and user flows that prioritise usability.' },
-  { name: 'Copywriter',         type: 'both',  category: 'Product', characteristics: 'Writes product copy, tooltips, onboarding text, and user-facing documentation.' },
-  // Management
-  { name: 'AI Project Manager', type: 'both',  category: 'Management', characteristics: 'Plans sprints, assigns tasks to actors, tracks progress, and surfaces blockers.' },
-  { name: 'Scrum Master',       type: 'human', category: 'Management', characteristics: 'Facilitates stand-ups, retrospectives, and sprint ceremonies; removes impediments.' },
-  // Feedback
-  { name: 'Beta User',          type: 'human', category: 'Feedback', characteristics: 'Stress-tests the product as a real user and reports friction points and bugs.' },
-  { name: 'Stakeholder',        type: 'human', category: 'Feedback', characteristics: 'Approves major decisions, aligns product direction, and reviews key deliverables.' },
-]
-
-const ROLE_CATEGORIES = ['Engineering', 'Quality', 'Product', 'Management', 'Feedback']
 
 /** Pool of names randomly assigned to AI actors */
 const AI_NAMES = [
@@ -65,17 +31,20 @@ const pickAIName = () => {
   return pick
 }
 
-/** Default team used by Auto-fill */
-const AUTO_FILL_ROLES: { name: string; type: 'human' | 'ai' }[] = [
-  { name: 'AI Project Manager', type: 'ai' },
-  { name: 'Architect',          type: 'ai' },
-  { name: 'Lead Developer',     type: 'ai' },
-  { name: 'Frontend Developer', type: 'ai' },
-  { name: 'Backend Developer',  type: 'ai' },
-  { name: 'QA Automation Lead', type: 'ai' },
-  { name: 'Product Owner',      type: 'human' },
-  { name: 'UI/UX Designer',     type: 'ai' },
+/** Names used for auto-fill (in order) */
+const AUTO_FILL_NAMES = [
+  'AI Project Manager', 'Architect', 'Lead Developer',
+  'Frontend Developer', 'Backend Developer', 'QA Automation Lead',
+  'Product Owner', 'UI/UX Designer',
 ]
+
+interface ActorDraft {
+  role: string        // skill name, e.g. "Lead Developer"
+  name: string        // personal name, e.g. "Aria" (AI) or "" (human)
+  type: 'human' | 'ai'
+  model: string
+  characteristics: string
+}
 
 interface ActorDraft {
   role: string        // template role name, e.g. "Lead Developer"
@@ -94,15 +63,30 @@ export default function NewProjectPage() {
   const [aiModel, setAiModel] = useState(activeTeam?.default_ai_model ?? 'gpt-4o')
   const [sprintDays, setSprintDays] = useState(3)
   const defaultActorModel = activeTeam?.default_ai_model ?? 'gpt-4o'
-  const [actors, setActors] = useState<ActorDraft[]>(() => {
-    _usedNames = []
-    const pm = ROLE_TEMPLATES.find((r) => r.name === 'AI Project Manager')!
-    const po = ROLE_TEMPLATES.find((r) => r.name === 'Product Owner')!
-    return [
-      { role: pm.name, name: pickAIName(), type: 'ai',    model: defaultActorModel, characteristics: pm.characteristics },
-      { role: po.name, name: '',            type: 'human', model: '',               characteristics: po.characteristics },
-    ]
+
+  // Fetch skills from DB
+  const { data: skills = [] } = useQuery<Skill[]>({
+    queryKey: ['skills'],
+    queryFn: () => api.get<Skill[]>('/skills').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
   })
+  const roleCategories = useMemo(() => [...new Set(skills.map((s) => s.category))], [skills])
+
+  const seededRef = useRef(false)
+  const [actors, setActors] = useState<ActorDraft[]>([])
+  // Seed default actors once skills load (runs at most once)
+  useEffect(() => {
+    if (seededRef.current || skills.length === 0) return
+    seededRef.current = true
+    _usedNames = []
+    const pm = skills.find((s) => s.name === 'AI Project Manager')
+    const po = skills.find((s) => s.name === 'Product Owner')
+    setActors([
+      { role: pm?.name ?? 'AI Project Manager', name: pickAIName(), type: 'ai',    model: defaultActorModel, characteristics: pm?.description ?? '' },
+      { role: po?.name ?? 'Product Owner',       name: '',           type: 'human', model: '',               characteristics: po?.description ?? '' },
+    ])
+  }, [skills, defaultActorModel])
+
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [planning, setPlanningState] = useState(false)
@@ -172,25 +156,27 @@ export default function NewProjectPage() {
   const autoFill = () => {
     _usedNames = []
     setActors(
-      AUTO_FILL_ROLES.map(({ name: roleName, type }) => {
-        const tpl = ROLE_TEMPLATES.find((r) => r.name === roleName)
-        return {
+      AUTO_FILL_NAMES.flatMap((roleName) => {
+        const skill = skills.find((s) => s.name === roleName)
+        if (!skill) return []
+        const type: 'human' | 'ai' = skill.actor_type === 'human' ? 'human' : 'ai'
+        return [{
           role: roleName,
           name: type === 'ai' ? pickAIName() : '',
           type,
           model: type === 'ai' ? defaultActorModel : '',
-          characteristics: tpl?.characteristics ?? '',
-        }
+          characteristics: skill.description ?? '',
+        }]
       })
     )
     setShowRolePicker(false)
   }
 
-  const addFromTemplate = (tpl: RoleTemplate, typeOverride?: 'human' | 'ai') => {
-    const type = typeOverride ?? (tpl.type === 'both' ? 'ai' : tpl.type as 'human' | 'ai')
+  const addFromTemplate = (skill: Skill, typeOverride?: 'human' | 'ai') => {
+    const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
     setActors((prev) => [
       ...prev,
-      { role: tpl.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: tpl.characteristics },
+      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '' },
     ])
   }
 
@@ -267,34 +253,35 @@ export default function NewProjectPage() {
           {/* Role picker */}
           {showRolePicker && (
             <div className="mb-3 bg-gray-900 border border-gray-700 rounded-lg p-3 space-y-3">
-              {ROLE_CATEGORIES.map((cat) => (
+              {skills.length === 0 && <p className="text-xs text-gray-500">Loading skills…</p>}
+              {roleCategories.map((cat) => (
                 <div key={cat}>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1.5">{cat}</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {ROLE_TEMPLATES.filter((r) => r.category === cat).map((tpl) => {
-                      const hasAI    = actors.some((a) => a.name === tpl.name && a.type === 'ai')
-                      const hasHuman = actors.some((a) => a.name === tpl.name && a.type === 'human')
+                    {skills.filter((s) => s.category === cat).map((skill) => {
+                      const hasAI    = actors.some((a) => a.role === skill.name && a.type === 'ai')
+                      const hasHuman = actors.some((a) => a.role === skill.name && a.type === 'human')
 
-                      if (tpl.type === 'both') {
+                      if (skill.actor_type === 'both') {
                         return (
-                          <span key={tpl.name} className="inline-flex rounded-md overflow-hidden border border-gray-700 text-xs">
+                          <span key={skill.name} className="inline-flex rounded-md overflow-hidden border border-gray-700 text-xs">
                             <button
                               type="button"
-                              title={`Add ${tpl.name} (AI)`}
+                              title={`Add ${skill.name} (AI)`}
                               disabled={hasAI}
-                              onClick={() => addFromTemplate(tpl, 'ai')}
+                              onClick={() => addFromTemplate(skill, 'ai')}
                               className={`flex items-center gap-1 px-2 py-1 transition-colors ${
                                 hasAI ? 'text-gray-600 cursor-default' : 'text-purple-300 hover:bg-purple-900/40'
                               }`}
                             >
-                              <Bot size={10} />{tpl.name}{hasAI && <span className="text-gray-600">✓</span>}
+                              <Bot size={10} />{skill.name}{hasAI && <span className="text-gray-600">✓</span>}
                             </button>
                             <span className="w-px bg-gray-700" />
                             <button
                               type="button"
-                              title={`Add ${tpl.name} (Human)`}
+                              title={`Add ${skill.name} (Human)`}
                               disabled={hasHuman}
-                              onClick={() => addFromTemplate(tpl, 'human')}
+                              onClick={() => addFromTemplate(skill, 'human')}
                               className={`flex items-center gap-1 px-1.5 py-1 transition-colors ${
                                 hasHuman ? 'text-gray-600 cursor-default' : 'text-blue-300 hover:bg-blue-900/40'
                               }`}
@@ -305,23 +292,23 @@ export default function NewProjectPage() {
                         )
                       }
 
-                      const already = tpl.type === 'ai' ? hasAI : hasHuman
+                      const already = skill.actor_type === 'ai' ? hasAI : hasHuman
                       return (
                         <button
-                          key={tpl.name}
+                          key={skill.name}
                           type="button"
                           disabled={already}
-                          onClick={() => addFromTemplate(tpl)}
+                          onClick={() => addFromTemplate(skill)}
                           className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${
                             already
                               ? 'border-gray-700 text-gray-600 cursor-default'
-                              : tpl.type === 'ai'
+                              : skill.actor_type === 'ai'
                               ? 'border-purple-700/60 text-purple-300 hover:bg-purple-900/40'
                               : 'border-blue-700/60 text-blue-300 hover:bg-blue-900/40'
                           }`}
                         >
-                          {tpl.type === 'ai' ? <Bot size={10} /> : <User size={10} />}
-                          {tpl.name}
+                          {skill.actor_type === 'ai' ? <Bot size={10} /> : <User size={10} />}
+                          {skill.name}
                           {already && <span className="text-gray-600 ml-0.5">✓</span>}
                         </button>
                       )

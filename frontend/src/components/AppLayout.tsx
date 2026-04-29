@@ -8,10 +8,11 @@ import api from '../lib/api'
 import type { Company, Team } from '../types'
 import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
+import SelectSkillsModal from './SelectSkillsModal'
 import { useThemeStore } from '../store/themeStore'
 
 export default function AppLayout() {
-  const { signOut, session, needsPassword, needsName, linkType } = useAuthStore()
+  const { signOut, session, needsPassword, needsName, needsSkills, linkType } = useAuthStore()
   const { theme, toggle: toggleTheme } = useThemeStore()
   const { teams, activeTeam, setTeams, setActiveTeam } = useTeamStore()
   const { company, setCompany } = useCompanyStore()
@@ -131,10 +132,22 @@ export default function AppLayout() {
 
         {/* Company name */}
         {company && (
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
-            <Building2 size={12} />
-            <span>{company.name}</span>
-          </div>
+          company.owner_id === session?.user?.id
+            ? (
+              <button
+                onClick={() => navigate('/company/settings')}
+                className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                title="Company settings"
+              >
+                <Building2 size={12} />
+                <span>{company.name}</span>
+              </button>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
+                <Building2 size={12} />
+                <span>{company.name}</span>
+              </div>
+            )
         )}
 
         {/* Team switcher */}
@@ -209,7 +222,8 @@ export default function AppLayout() {
       <main className="flex-1 flex flex-col">
         <Outlet />
       </main>
-      {(needsPassword || needsName) && <CompleteProfileModal />}
+      {(needsPassword || needsName) && linkType !== 'join_company' && <CompleteProfileModal />}
+      {needsSkills && <SelectSkillsModal />}
     </div>
   )
 }

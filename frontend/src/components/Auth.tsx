@@ -8,50 +8,26 @@ export function AuthProvider() {
   const { setSession } = useAuthStore()
   const [ready, setReady] = useState(false)
 
-  const acceptInvitesIfNeeded = async (
-    session: { user?: { email?: string; id?: string } | null } | null,
-    orgId?: string
-  ) => {
-    const email = session?.user?.email
-    const userId = session?.user?.id
-    if (!email || !userId) return
-    try {
-      await api.post('/teams/accept-invites', { user_id: userId, email, team_id: orgId })
-    } catch {
-      // Non-blocking: auth flow should continue even if invite sync fails.
-    }
+  const resolveLinkType = (params: URLSearchParams): 'create_company' | 'join_company' | 'set_password' | null => {
+    const raw = params.get('link_type') as 'create_company' | 'join_company' | 'set_password' | null
+    if (raw) return raw
+    // If the user is on /invite, they arrived via a team invite link.
+    if (window.location.pathname === '/invite') return 'join_company'
+    return null
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      // For already-logged-in users visiting /login?invite_org=xxx,
-      // SIGNED_IN never fires — accept the invite here instead.
-      if (data.session) {
-        const params = new URLSearchParams(window.location.search)
-        const inviteOrg = params.get('invite_org') ?? undefined
-        if (inviteOrg) {
-          await acceptInvitesIfNeeded(data.session, inviteOrg)
-        }
-        // Name is collected only in the combined name+password modal (new invite flow).
-        // Existing users without a name can set it via the Profile page.
-      }
+    supabase.auth.getSession().then(({ data }) => {
+      const params = new URLSearchParams(window.location.search)
+      useAuthStore.getState().setLinkType(resolveLinkType(params))
       setSession(data.session)
       setReady(true)
     })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Only accept invites on a real sign-in, not on every session restore/refresh.
       if (event === 'SIGNED_IN') {
-        // Read invite_org and link_type from the URL (embedded in the magic link redirect).
         const params = new URLSearchParams(window.location.search)
-        const inviteOrg = params.get('invite_org') ?? undefined
-        const linkType = params.get('link_type') as 'create_company' | 'join_company' | 'set_password' | null
-        if (linkType) useAuthStore.getState().setLinkType(linkType)
-        // Only accept invites when the user arrived via an invite link.
-        // Do NOT call accept-invites on regular sign-ins — it causes 500s
-        // for users who are already members and have no pending invites.
-        if (inviteOrg) {
-          await acceptInvitesIfNeeded(session, inviteOrg)
-        }
+        useAuthStore.getState().setLinkType(resolveLinkType(params))
 
         // Decode JWT AMR to detect OTP sign-ins (magic link / invite / email confirm).
         // Email confirmation also comes in as method "otp", but the user already has a

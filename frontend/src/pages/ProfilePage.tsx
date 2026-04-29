@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
-import { User, Lock, Trash2, ChevronLeft, Check } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { User, Lock, Trash2, ChevronLeft, Check, Briefcase } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import api from '../lib/api'
+import type { Skill } from '../types'
 import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import { useCompanyStore } from '../store/companyStore'
@@ -19,6 +20,8 @@ export default function ProfilePage() {
   const currentName: string = session?.user?.user_metadata?.full_name ?? ''
   const currentEmail: string = session?.user?.email ?? ''
   const isCompanyOwner = !!(company && company.owner_id === session?.user?.id)
+  const userId = session?.user?.id ?? ''
+  const qc = useQueryClient()
 
   // ── Name edit ──────────────────────────────────────────────────────────────
   const [name, setName] = useState(currentName)
@@ -81,6 +84,39 @@ export default function ProfilePage() {
 
   // ── Delete account ─────────────────────────────────────────────────────────
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // ── Skills ────────────────────────────────────────────────────────────────
+  const { data: allSkills = [] } = useQuery<Skill[]>({
+    queryKey: ['skills'],
+    queryFn: () => api.get<Skill[]>('/skills').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+  const { data: mySkills = [] } = useQuery<Skill[]>({
+    queryKey: ['user-skills', userId],
+    queryFn: () => api.get<Skill[]>(`/skills/user/${userId}`).then((r) => r.data),
+    enabled: !!userId,
+  })
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(() => [])
+  // Sync once mySkills loads
+  const [skillsSynced, setSkillsSynced] = useState(false)
+  if (!skillsSynced && mySkills.length > 0) {
+    setSelectedSkillIds(mySkills.map((s) => s.id))
+    setSkillsSynced(true)
+  }
+  const toggleSkill = (id: string) =>
+    setSelectedSkillIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  const saveSkills = useMutation({
+    mutationFn: () =>
+      api.put('/skills/user', { user_id: userId, skill_ids: selectedSkillIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user-skills', userId] })
+      toast.success('Skills saved')
+    },
+    onError: () => toast.error('Failed to save skills'),
+  })
+  const skillCategories = [...new Set(allSkills.map((s) => s.category))]
 
   const deleteAccount = useMutation({
     mutationFn: () => api.delete(`/auth/account`),
@@ -185,6 +221,52 @@ export default function ProfilePage() {
               {pwSaved ? <><Check size={14} /> Saved</> : pwLoading ? 'Saving…' : 'Update password'}
             </button>
           </form>
+        </section>
+
+        {/* Skills */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h2 className="font-semibold text-white mb-1 flex items-center gap-2">
+            <Briefcase size={15} className="text-purple-400" /> My skills
+          </h2>
+          <p className="text-gray-500 text-xs mb-4">Select your specialisations — they help assign you to relevant tasks.</p>
+          {allSkills.length === 0 ? (
+            <p className="text-gray-600 text-sm">Loading…</p>
+          ) : (
+            <div className="space-y-3 mb-4">
+              {skillCategories.map((cat) => (
+                <div key={cat}>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">{cat}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {allSkills.filter((s) => s.category === cat).map((skill) => {
+                      const selected = selectedSkillIds.includes(skill.id)
+                      return (
+                        <button
+                          key={skill.id}
+                          type="button"
+                          onClick={() => toggleSkill(skill.id)}
+                          className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                            selected
+                              ? 'bg-purple-700 border-purple-500 text-white'
+                              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+                          }`}
+                        >
+                          {skill.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => saveSkills.mutate()}
+            disabled={saveSkills.isPending}
+            className="flex items-center gap-1.5 px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
+          >
+            {saveSkills.isPending ? 'Saving…' : <><Check size={14} /> Save skills</>}
+          </button>
         </section>
 
         {/* Delete account */}

@@ -39,7 +39,7 @@ jobs:
             git reset --hard origin/main
 
             # ── Write combined env file for docker compose ──────
-            printf 'SUPABASE_URL=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\nOPENAI_API_KEY=%s\nANTHROPIC_API_KEY=%s\nCORS_ORIGINS=https://ownflow.21century.tech\nPOSTMARK_TOKEN=%s\nPOSTMARK_FROM=%s\nSENTRY_DSN=%s\nVITE_API_URL=https://ownflow.21century.tech/api\nVITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
+            printf 'SUPABASE_URL=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\nOPENAI_API_KEY=%s\nANTHROPIC_API_KEY=%s\nCORS_ORIGINS=https://ownflow.21century.tech\nFRONTEND_URL=https://ownflow.21century.tech\nPOSTMARK_TOKEN=%s\nPOSTMARK_FROM=%s\nSENTRY_DSN=%s\nVITE_API_URL=https://ownflow.21century.tech/api\nVITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
               "$SECRET_SUPABASE_URL" "$SECRET_SUPABASE_SERVICE_ROLE_KEY" "$SECRET_OPENAI_API_KEY" "$SECRET_ANTHROPIC_API_KEY" \
               "$SECRET_POSTMARK_TOKEN" "$VAR_POSTMARK_FROM" "$SECRET_SENTRY_DSN" \
               "$SECRET_SUPABASE_URL" "$SECRET_VITE_SUPABASE_ANON_KEY" \

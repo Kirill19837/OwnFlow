@@ -2,6 +2,249 @@
 
 ---
 
+## 2026-04-28 | `be42da5` — docs: update README, auth-flow, pitch deck (remove eMerge refs, new pricing, visible nav buttons)
+
+- `README.md` — full rewrite: presentation link, Skills section, Company Settings section, updated API table, accurate changelog
+- `docs/auth-flow.md` — added skills modal flow (section 9), account deletion paths (section 10), updated key files table
+- `pitch/index.html` — removed all eMerge AI Hackathon references; business model replaced with Free / Pro ($100/company + $3/user) / Enterprise; nav buttons made larger and purple-tinted
+
+## 2026-04-28 | `56cf848` — feat: add delete-account option on company setup page; tests for company PATCH/DELETE endpoints
+
+- `frontend/src/pages/NewCompanyPage.tsx` — added "delete my account" link at bottom of form; expands to inline confirmation panel (red border + warning); on confirm calls `DELETE /auth/account`, signs out, redirects to `/login`
+- `backend/tests/test_invite_flow.py` — 8 new tests for company `PATCH` (rename, phone, 403 for admin/non-member, 400 for empty body) and `DELETE` (cascade verified via call counts, 403 for non-owner/non-member); total 31 tests
+
+## 2026-04-28 | `080e788` — feat: company settings page (rename, phone, delete); fix owner check to use owner_id UUID; skills modal after new company
+
+
+
+- `frontend/src/pages/InvitePage.tsx` — after saving name/password in the profile step, now calls `setNeedsSkills(true)` before navigating to `/`; `SelectSkillsModal` then appears on the dashboard as the next onboarding step
+
+## 2026-04-28 | `58150d4` — refactor: get_role_name helper; fix pending invite role in API; new tests
+
+- `backend/app/api/teams.py` — extracted `get_role_name(role_id, fallback)` helper; replaced all 5 inline `ROLE_NAMES.get()` calls; `GET /teams/{id}` now resolves `pending_invites[].role` UUID → display name and adds `role_id` for the raw UUID
+- `frontend/src/pages/OrgSettingsPage.tsx` — reverted FE workaround (role now correct from API)
+- `backend/tests/test_invite_flow.py` — added 5 new tests (23 total, all passing):
+  - `test_get_role_name_known_uuids` — maps all 3 fixed UUIDs to names
+  - `test_get_role_name_unknown_uuid_returns_raw` — unknown UUID falls back to raw value
+  - `test_get_role_name_none_returns_fallback` — None/empty returns configurable fallback
+  - `test_get_role_name_empty_string_returns_fallback`
+  - `test_get_team_pending_invites_resolve_role_name` — integration test verifying `role`/`role_id` shape in API response
+
+## 2026-04-28 | `d1e4d54` — fix: resolve role UUIDs to names in pending invites list
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `ROLE_NAMES` map + `resolveRole()` helper; pending invites row now shows `member`/`admin`/`owner` instead of raw UUID
+
+## 2026-04-28 | `96a81e2` — feat: skills selection modal after invite onboarding; fix role UUID display on invite card
+
+- `frontend/src/store/authStore.ts` — added `needsSkills: boolean` + `setNeedsSkills` action; clears on sign-out
+- `frontend/src/components/CompleteProfileModal.tsx` — after saving name/password for the `set_password` (invite) flow, sets `needsSkills(true)` before closing
+- `frontend/src/components/SelectSkillsModal.tsx` — new modal: pill multi-select grouped by category, "Save skills" → `PUT /skills/user`, "Skip for now" dismisses without saving
+- `frontend/src/components/AppLayout.tsx` — mounts `SelectSkillsModal` when `needsSkills` is true
+- `frontend/src/pages/InvitePage.tsx` — added `ROLE_NAMES` map + `resolveRole()` helper; invite card now shows `member`/`admin`/`owner` instead of raw UUID
+
+## 2026-04-28 | `2902e2b` — feat: show member skills in team settings page
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — member rows now display skill pills; uses `useQueries` to batch-fetch each member's skills in parallel (cached 5 min); added `Skill` type import
+
+## 2026-04-28 | `b1565bc` — feat: skills catalogue from DB; user skill profile selection; NewProjectPage uses API skills
+
+- `supabase/migrations/007_skills.sql` — new `skills` table (id, name, category, description, actor_type) seeded with 17 roles; `user_skills` join table with RLS policies
+- `supabase/database_full.sql` — added skills + user_skills table definitions and seed data
+- `backend/app/api/skills.py` — new router: `GET /skills`, `GET /skills/categories`, `GET /skills/user/{user_id}`, `PUT /skills/user` (auth-gated, max 10 skills)
+- `backend/app/main.py` — registered skills router at `/skills`
+- `frontend/src/types.ts` — added `Skill` interface
+- `frontend/src/pages/NewProjectPage.tsx` — removed all hardcoded `ROLE_TEMPLATES`; role picker and auto-fill now fetch from `GET /skills` API; used `useRef` guard to fix `react-hooks/set-state-in-effect` lint error
+- `frontend/src/pages/ProfilePage.tsx` — added "My skills" section: pill-style multi-select grouped by category, fetches user's current skills, saves via `PUT /skills/user`
+
+## 2026-04-28 | `13b7f1c` — Security: use role UUIDs for all permission checks (FE+BE); add my_role_id and role_id to API responses
+
+- `backend/app/api/teams.py` — `get_team` now returns `my_role_id` (raw role UUID for the caller) and `role_id` on each member object alongside the human-readable `role`/`my_role` names
+- `frontend/src/types.ts` — added `my_role_id?: string` to `Team`, `role_id: string` to `TeamMember`
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `ROLE_IDS` const (matching backend fixed UUIDs); all permission checks (`canInvite`, `canDelete`, role dropdown condition) now compare against UUID constants instead of name strings — immune to role renames
+
+## 2026-04-28 | `83c69be` — Fix: role UUID display in team members; add role change endpoint; compare roles by UUID not name
+
+- `backend/app/api/teams.py` — `get_team` now converts each member's raw role UUID to a human-readable name before returning; `_require_member` updated to return raw UUID and compare against `ROLE_IDS` constants (not string names); added `PATCH /{team_id}/members/{user_id}` endpoint for owner to change member roles (admin ↔ member); docstring updated
+- `frontend/src/pages/OrgSettingsPage.tsx` — added `changeRole` mutation; member role displays as a dropdown (`<select>`) for owners on non-owner members, static text for everyone else
+
+## 2026-04-28 | `24c7ab3` — UX: show full_name and email for team members, remove user_id display
+
+- `backend/app/api/teams.py` — `get_team` now fetches `user_metadata.full_name` from admin user list and attaches it to each member object alongside `email`
+- `frontend/src/types.ts` — added `full_name?: string` to `TeamMember` interface
+- `frontend/src/pages/OrgSettingsPage.tsx` — member rows show full name (primary) + email (secondary) + role; raw UUID is never displayed; falls back gracefully to email-only or "Unknown user"
+
+## 2026-04-28 | `b96b236` — Security: member role restrictions on team settings + team list filtering
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — hide remove-member trash icon and revoke-invite trash icon for non-admin/owner users (gate on `canInvite`); disable Default AI Model buttons for members (`disabled` + `cursor-not-allowed` + reduced opacity)
+- `backend/app/api/companies.py` — `GET /{company_id}/teams?user_id=…` now filters to only teams the user is a member of; previously returned all teams in the company regardless of membership
+
+---
+
+## 2026-04-28 | `bb3789c` — Fix: auth guards on remove_member/revoke_invite; refactor with _require_member helper
+
+- `backend/app/api/teams.py` — `DELETE /{team_id}/members/{user_id}` had zero authorization: any authenticated user could remove any member from any team. Fixed with full role-based checks (owner can remove anyone, admin can remove members only, members can only leave themselves, owner cannot leave). `DELETE /{team_id}/invites/{invite_id}` (revoke) was similarly unguarded — now requires owner or admin. Introduced `_require_member(db, team_id, user_id) -> str` helper to eliminate the repeated 9-line membership-lookup pattern used in 4 endpoints (`invite_member_by_email`, `delete_team`, `remove_member`, `revoke_invite`).
+
+---
+
+## 2026-04-28 | `af5429c` — Fix InvitePage: show invite card first, collect profile only after Accept
+
+- `frontend/src/pages/InvitePage.tsx` — reordered the step machine: `loading → invite-card → (profile) → accepting`. Previously the profile form (name + password) was shown before the user could see the invite details, meaning declining still asked for a password. Now Decline immediately marks the invite declined and signs the user out; Accept checks if name/password are needed and routes through the profile step only if so. After saving credentials via `supabase.auth.updateUser`, `doAccept()` fires and navigates to dashboard.
+- `docs/auth-flow.md` — updated §4 (team invite new user) and §6 (InvitePage step machine) to reflect new order.
+
+---
+
+## 2026-04-28 | `f9ef148` — Fix CompleteProfileModal: save password immediately for magic-link (set_password) users
+
+- `frontend/src/components/CompleteProfileModal.tsx` — when `linkType === 'set_password'`, the modal now calls `supabase.auth.updateUser({ password, data: { password_set: true, full_name? } })` directly and clears `needsPassword`/`needsName` flags; user stays on dashboard. Previously the modal stored to `pendingProfile` and navigated to `/company/new`, where the existing-company guard redirected back to `/` without ever saving the password. Organic new-user flow (navigate to `/company/new`) unchanged.
+
+---
+
+## 2026-04-28 | `aad8e6c` — Fix magic link: actually send email + BE rate limit + FE cooldown 20 min
+
+- `backend/app/api/auth.py` — `POST /auth/magic-link` was calling `generate_link` but discarding the result and never sending any email; now extracts `action_link` and calls `send_magic_link_email` (same pattern as invite flow); added server-side in-memory rate limit (20 min / email); TODO comment to move to DB table for multi-worker safety
+- `frontend/src/pages/LoginPage.tsx` — `MAGIC_LINK_COOLDOWN_MS` changed from 60 min → 20 min to match BE
+
+---
+
+## 2026-04-27 | `afb0385` — Fix repeated password modal + add FRONTEND_URL to CI/CD
+
+- `frontend/src/pages/NewCompanyPage.tsx` — `supabase.auth.updateUser` now includes `data: { password_set: true }` so Auth.tsx short-circuits the AMR check on any subsequent SIGNED_IN events
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`
+- Root cause: `supabase.auth.updateUser({ password })` fires a new SIGNED_IN event; the refreshed JWT still has `amr = "otp"` and `user_metadata.password_set` was never written client-side, causing the modal to reappear every time the user returned
+- `.github/workflows/deploy.yml` — `FRONTEND_URL=https://ownflow.21century.tech` added to the `.env.prod` printf block
+- `docker-compose.prod.yml` — `FRONTEND_URL` env var wired through to backend container
+- `backend/.env.example` — `FRONTEND_URL` and `CORS_ORIGINS` production values documented
+
+---
+
+## 2026-04-27 | `13cded7` — Fix logout on company creation: set password client-side via supabase.auth.updateUser
+
+- `frontend/src/pages/NewCompanyPage.tsx` — password is now set via `supabase.auth.updateUser({ password })` before `POST /companies`; only `full_name` goes to the backend; removed `refreshSession()` call (no longer needed)
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`; password set client-side before `POST /teams/accept-invites`
+- Root cause: `supabase.auth.admin.update_user_by_id` revokes all tokens including the refresh token, making `refreshSession()` fail and triggering `SIGNED_OUT`; `supabase.auth.updateUser` keeps the session alive
+
+---
+
+## 2026-04-27 | `324a02b` — Fix 401 after onboarding: refresh session after password change
+
+- `frontend/src/pages/NewCompanyPage.tsx` — after `POST /companies` succeeds with a password, `supabase.auth.refreshSession()` is awaited before navigating; `onAuthStateChange` in authStore picks up the new JWT so dashboard requests don't 401
+- `frontend/src/pages/InvitePage.tsx` — same fix in `handleAccept`; converted to `async/await` for clarity
+- Root cause: Supabase invalidates the current JWT when a user's password is changed via the admin API; the old token was still in the Zustand store, causing every subsequent authenticated request to fail with 401
+
+---
+
+## 2026-04-27 | `eec23a8` — Validate name ≥4 chars and password ≥8 chars on profile setup (FE + BE)
+
+- `frontend/src/components/CompleteProfileModal.tsx` — `nameValid` threshold raised from `> 0` to `>= 4`; inline red hint "Name must be at least 4 characters" appears while typing (mirrors existing password-mismatch hint)
+- `frontend/src/pages/InvitePage.tsx` — same name validation change in the inline profile step; removed stale duplicate `interface PendingInvite` at bottom of file
+- `backend/app/api/companies.py` — returns `400 "Full name must be at least 4 characters"` / `"Password must be at least 8 characters"` before any DB writes if either field is provided but too short
+- `backend/app/api/teams.py` — same early validation in `_do_accept_invites` before profile update and invite acceptance
+- Validation — `make check-backend` (18 tests) and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `75ab5b8` — Invite confirmation page: show accept/decline card before joining team
+
+- `frontend/src/pages/InvitePage.tsx` — rewritten: fetches pending invite details from `GET /teams/pending-invite`, shows a card with team name / role / inviter; Accept → calls accept-invites then goes to `/` (CompleteProfileModal handles name+password); Decline → signs out, goes to `/login`; handles no-pending-invite gracefully
+- `backend/app/api/teams.py` — new `GET /teams/pending-invite?email=...` endpoint returning first pending invite with resolved team name and role label; positioned before `/{team_id}` to avoid route conflict
+- `backend/tests/test_invite_flow.py` — tests 16 & 17: `pending-invite` returns correct details / returns `null` when no invite
+- Validation — `make check-backend` (17 tests) and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `19e7b68` — Fix user_signups upsert: add on_conflict='user_id' so status updates correctly
+
+- `backend/app/api/teams.py` — added `on_conflict="user_id"` to both `user_signups` upsert calls (invite creation → `'invited'`, accept-invites → `'team_join'`); without it PostgREST tried to insert a new row, hit the UNIQUE constraint, and the `except: pass` silently left status stuck at `'invited'`
+- `backend/app/api/companies.py` — same fix for the `'company_created'` upsert after company creation
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `c49db2f` — Refactor invite flow: dedicated /invite page, clean URLs, simplified Auth
+
+- `frontend/src/pages/InvitePage.tsx` (new) — dedicated landing page for `/invite`; waits for Zustand session, calls `POST /teams/accept-invites`, then navigates to `/`; uses `useRef` to prevent double execution
+- `frontend/src/App.tsx` — `/invite` route now renders `InvitePage` instead of `LoginPage`
+- `frontend/src/components/Auth.tsx` — removed `acceptInvitesIfNeeded` entirely; `resolveLinkType` now checks `window.location.pathname === '/invite'` instead of `?invite_org` query param
+- `backend/app/api/teams.py` — all `redirect_to` values changed from `/invite?invite_org=…&link_type=join_company` to plain `/invite`
+- `docs/auth-flow.md` — fully rewritten with all 8 flows, JWT AMR claim explanation, `user_signups` funnel table, key files and email templates tables; old stale sections removed
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `b687042` — Fix Supabase lock contention in axios interceptor
+
+- `frontend/src/lib/api.ts` — replaced `async` interceptor that called `supabase.auth.getSession()` with a synchronous read from `useAuthStore.getState().session`; eliminates the `Lock "lock:sb-…-auth-token" was released because another request stole it` error that fired when multiple parallel API calls (e.g. on AppLayout mount) all raced for the same storage lock simultaneously
+- Validation — `make check-backend` and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `d8a76e9` — Add user_signups table, signup funnel tracking, and clean DB bootstrap script
+
+- `supabase/database_full.sql` — fully rewritten as a clean idempotent bootstrap script; single file to run on a fresh Supabase project; replaces the entire migrations chain
+- `supabase/migrations/` — deleted all migration files; `database_full.sql` is now the sole schema reference
+- `user_signups` table (new) — tracks how each user entered the product: `origin` (`organic` / `team_invite`), `signup_status` (`invited` / `company_created` / `team_join`), `completed_at` (set when onboarding completes), plus `invited_by_email`, `team_id`
+- `backend/app/api/auth.py` — `POST /auth/signup` inserts `origin='organic'`; new `GET /auth/my-origin` endpoint returns the user's origin so the frontend can decide whether to show company-setup
+- `backend/app/api/companies.py` — `POST /companies` upserts `signup_status='company_created'` + `completed_at` when a company is created
+- `backend/app/api/teams.py` — invite endpoint sets `signup_status='invited'` for existing users; `_do_accept_invites` upserts `signup_status='team_join'` + `completed_at` when a team invite is accepted
+- `frontend/src/components/CompleteProfileModal.tsx` — after profile completion calls `GET /auth/my-origin`; navigates to `/company/new` for `organic` users, skips redirect for `team_invite` users; URL-based `linkType` kept as fallback
+- Validation — `make check-backend` (13 tests) and `make check-frontend` both passed
+
+---
+
+## 2026-04-27 | `0ec081a` — Fix frontend warnings and refresh FastAPI stack
+
+- `backend/app/config.py` — migrated settings configuration to Pydantic v2 `model_config` to remove the class-based config deprecation warning
+- `backend/requirements.txt` — upgraded `fastapi` from `0.115.0` to `0.136.1` and `python-multipart` from `0.0.26` to `0.0.27`, removing the multipart deprecation warning at the dependency level
+- `frontend/src/hooks/useRealtimeProject.ts` — removed the stale project closure in realtime subscriptions and fixed the React Hooks exhaustive-deps warning
+- `frontend/src/pages/DashboardPage.tsx` — added the missing `setProjects` dependency to the project sync effect
+- `frontend/vite.config.ts` — added manual vendor chunk splitting so the production build no longer warns about oversized chunks
+- Validation — `make check-backend` and `make check-frontend` both passed with no remaining warnings
+
+## 2026-04-27 | `3c8caf8` — Rebuild README and move frontend Docker build to Node 24
+
+- `README.md` — recreated as a concise, current project document (snapshot, capabilities, architecture, DB setup options, local run, quality checks, and summarized recent changes from DEVLOG)
+- `frontend/Dockerfile` — build image upgraded from `node:20-alpine` to `node:24-alpine`
+- README prerequisites updated to `Node.js 20+ (Node.js 24 recommended)`
+- Validation — `make check-backend` and `make check-frontend` passed
+
+---
+
+## 2026-04-27 | `c269a98` — Dependency upgrades: python-dotenv and pytest
+
+- `backend/requirements.txt` — bumped `python-dotenv` from `1.0.1` to `1.2.2`
+- `backend/requirements-dev.txt` — bumped `pytest` from `8.3.5` to `9.0.3`
+- Validation — `make check-backend` and `make check-frontend` both passed after the version upgrades
+
+---
+
+## 2026-04-27 | `5327b92` — Add standalone full database bootstrap SQL script
+
+- `supabase/database_full.sql` (NEW) — single combined SQL script that drops all existing tables and recreates the full current schema without relying on migrations
+- Includes all latest schema updates in one file: `projects.sprint_days`, `projects.roadmap`, `actors.role`, `tasks.task_details`, `tasks.is_ready`, and `task_interactions`
+- Includes indexes, realtime publication setup, RLS enables, and service-role policies so a fresh Supabase project can be bootstrapped from one script
+
+---
+
+## 2026-04-27 | `0e423d4` — Fix invite onboarding for cross-host login links
+
+- `frontend/src/components/Auth.tsx` — invite acceptance now runs on both `getSession` and `SIGNED_IN`, even without `invite_org` in URL; still uses `invite_org` filter when present
+- `frontend/src/components/Auth.tsx` — added robust `resolveLinkType` helper that infers `join_company` from `invite_org` when `link_type` is absent
+- `frontend/src/store/authStore.ts` — `signOut` now clears `linkType`, `needsPassword`, and `needsName` to prevent stale flow state
+- Outcome — invited users logging in from a different host/domain no longer fall into `/company/new` because pending invites are accepted immediately after auth
+
+---
+
+## 2026-04-27 | `7d18746` — Fix my_role in team response; schema migrations; CORS for local dev
+
+- `backend/app/api/teams.py` — `get_team` now resolves `my_role` from the already-fetched members list and includes it in the response; uses `Depends(current_user_id)` so no extra DB round-trip
+- `supabase/migrations/007_projects_sprint_days_roadmap.sql` — expanded to cover all missing columns: `projects.sprint_days`, `projects.roadmap`, `actors.role`, `tasks.task_details`, `tasks.is_ready`, and the new `task_interactions` table with RLS
+- `supabase/migrations/001_schema.sql` — canonical schema updated to match: added `sprint_days`/`roadmap` to `projects`, `role` to `actors`, `task_details`/`is_ready` to `tasks`, `task_interactions` table
+- `docs/database.md` — created full database reference doc covering all 16 tables, columns, FKs, indexes, and migration files
+- `backend/app/api/actors.py` — added `role` to `update_actor` allowed_fields so actor role is patchable
+- `backend/app/config.py` — `cors_origins_list` now always includes `localhost:5173–5180` so Vite's fallback ports (e.g. 5174) work locally without any `.env` changes
+
+---
+
 ## 2026-04-26 | `4a82527` — Security: verify caller identity via JWT; add role-based permissions for invite/delete team
 
 - `backend/app/auth_deps.py` (NEW) — `current_user_id` FastAPI dependency: verifies Supabase JWT via `auth.get_user(token)` and returns the authenticated user's UUID; no client-supplied identity trusted

@@ -27,6 +27,13 @@ ROLE_IDS = {
 ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
 
 
+def get_role_name(role_id: str | None, fallback: str = "member") -> str:
+    """Resolve a role UUID to its display name, falling back gracefully."""
+    if not role_id:
+        return fallback
+    return ROLE_NAMES.get(role_id, role_id)
+
+
 class TeamCreate(BaseModel):
     name: str
     owner_id: str
@@ -79,6 +86,33 @@ def _user_email(user) -> Optional[str]:
     return user.get("email") if isinstance(user, dict) else getattr(user, "email", None)
 
 
+def _require_member(db, team_id: str, user_id: str) -> str:
+    """
+    Verify that user_id is an active member of team_id and return their raw role UUID.
+
+    Raises HTTP 403 if the user is not a member at all.
+    Callers compare the returned UUID against ROLE_IDS constants, e.g.:
+        role = _require_member(db, team_id, requester_id)
+        if role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
+            raise HTTPException(403, "...")
+    Using UUIDs (not names) means permission checks stay correct even if
+    role names are ever renamed in the DB.
+    """
+    row = (
+        db.table("team_members")
+        .select("role")           # role column holds a fixed UUID from ROLE_IDS
+        .eq("team_id", team_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(403, "Not a member of this team")
+    # Return the raw role UUID so callers compare against ROLE_IDS constants,
+    # which are fixed and cannot be affected by role name changes.
+    return row.data[0]["role"]
+
+
 @router.post("", status_code=201)
 def create_team(body: TeamCreate):
     if body.default_ai_model not in AI_MODELS:
@@ -114,7 +148,7 @@ def my_teams(user_id: str):
     if not items:
         return []
     team_ids = [m["team_id"] for m in items]
-    role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in items}
+    role_map = {m["team_id"]: get_role_name(m["role"]) for m in items}
     teams = db.table("teams").select("*").in_("id", team_ids).execute()
     result = teams.data or []
     for t in result:
@@ -125,6 +159,37 @@ def my_teams(user_id: str):
 @router.get("/models")
 def list_models():
     return {"models": AI_MODELS}
+
+
+@router.get("/pending-invite")
+def get_pending_invite(email: str):
+    """Return the first pending invite for the given email, with team details."""
+    db = get_supabase()
+    norm_email = email.strip().lower()
+    invites = (
+        db.table("team_invites")
+        .select("id,team_id,role,invited_by_email")
+        .eq("email", norm_email)
+        .eq("status", "pending")
+        .limit(1)
+        .execute()
+    )
+    rows = invites.data or []
+    if not rows:
+        return {"invite": None}
+    row = rows[0]
+    team = db.table("teams").select("id,name").eq("id", row["team_id"]).single().execute()
+    team_name = (team.data or {}).get("name", "a team") if team.data else "a team"
+    role_name = get_role_name(row["role"])
+    return {
+        "invite": {
+            "id": row["id"],
+            "team_id": row["team_id"],
+            "team_name": team_name,
+            "invited_by_email": row["invited_by_email"],
+            "role": role_name,
+        }
+    }
 
 
 @router.get("/{team_id}")
@@ -138,19 +203,26 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
 
     # Resolve caller's role
     caller_member = next((m for m in members if str(m.get("user_id")) == caller_id), None)
-    my_role = ROLE_NAMES.get(caller_member["role"], "member") if caller_member else None
+    my_role_id = caller_member["role"] if caller_member else None          # raw UUID
+    my_role = get_role_name(my_role_id) if my_role_id else None  # display name
 
     if members:
         users = _extract_auth_users(db.auth.admin.list_users())
-        email_by_user_id = {
-            uid: (_user_email(u) or "")
-            for u in users
-            for uid in [_user_id(u)]
-            if uid
-        }
+        email_by_user_id: dict[str, str] = {}
+        name_by_user_id: dict[str, str] = {}
+        for u in users:
+            uid = _user_id(u)
+            if not uid:
+                continue
+            email_by_user_id[uid] = _user_email(u) or ""
+            meta = (u.get("user_metadata") if isinstance(u, dict) else getattr(u, "user_metadata", None)) or {}
+            name_by_user_id[uid] = meta.get("full_name") or ""
         for member in members:
-            member["email"] = email_by_user_id.get(str(member["user_id"]))
-            member["role"] = ROLE_NAMES.get(member["role"], member["role"])
+            uid = str(member["user_id"])
+            member["email"] = email_by_user_id.get(uid)
+            member["full_name"] = name_by_user_id.get(uid) or None
+            member["role_id"] = member["role"]                              # raw UUID
+            member["role"] = get_role_name(member["role"]) # display name
 
     pending_invites = []
     try:
@@ -166,9 +238,11 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
         # Exclude invites for emails that are already active members
         # (can happen if a previous accept-invites call failed mid-transaction).
         member_emails = {(m.get("email") or "").lower() for m in members if m.get("email")}
-        for i in raw_invites:
-            i["role"] = ROLE_NAMES.get(i["role"], i["role"])
         pending_invites = [i for i in raw_invites if i["email"].lower() not in member_emails]
+        # Resolve role UUID → display name for each invite
+        for inv in pending_invites:
+            inv["role_id"] = inv["role"]
+            inv["role"] = get_role_name(inv["role"])
         # Heal stuck invites in the background — mark them accepted.
         stuck_ids = [i["id"] for i in raw_invites if i["email"].lower() in member_emails]
         for sid in stuck_ids:
@@ -179,7 +253,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
     except Exception:
         pending_invites = []
 
-    return {**team.data, "members": members, "pending_invites": pending_invites, "my_role": my_role}
+    return {**team.data, "members": members, "pending_invites": pending_invites, "my_role": my_role, "my_role_id": my_role_id}
 
 
 @router.patch("/{team_id}")
@@ -223,18 +297,8 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     if not team.data:
         raise HTTPException(404, "Team not found")
 
-    inviter_member = (
-        db.table("team_members")
-        .select("user_id,role")
-        .eq("team_id", team_id)
-        .eq("user_id", body.invited_by_user_id)
-        .limit(1)
-        .execute()
-    )
-    if not inviter_member.data:
-        raise HTTPException(403, "Only team members can invite")
-    inviter_role = ROLE_NAMES.get(inviter_member.data[0]["role"], "member")
-    if inviter_role not in ("owner", "admin"):
+    inviter_role = _require_member(db, team_id, body.invited_by_user_id)
+    if inviter_role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can invite members")
 
     users_resp = db.auth.admin.list_users()
@@ -271,7 +335,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         "org_name": team.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
                 },
             })
             action_link = (
@@ -287,8 +351,9 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             )
         except Exception as exc:
             msg = str(exc).lower()
-            if "already registered" in msg or "already been invited" in msg:
-                login_url = f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company"
+            if "already registered" in msg:
+                # Confirmed existing user — they just need to log in.
+                login_url = f"{settings.frontend_url.rstrip('/')}/invite"
                 try:
                     send_added_to_org_email(
                         to_email=email,
@@ -296,6 +361,30 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         inviter_email=inviter_email,
                         role=body.role,
                         frontend_url=login_url,
+                    )
+                except Exception:
+                    pass
+            elif "already been invited" in msg:
+                # Unconfirmed user with a previous invite — generate a fresh magic link
+                # so the resend email contains a working click-through URL.
+                try:
+                    magic_resp = db.auth.admin.generate_link({
+                        "type": "magiclink",
+                        "email": email,
+                        "options": {
+                            "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
+                        },
+                    })
+                    magic_link = (
+                        getattr(magic_resp, "action_link", None)
+                        or (magic_resp.properties.action_link if hasattr(magic_resp, "properties") else None)
+                    )
+                    send_invite_email(
+                        to_email=email,
+                        invite_url=magic_link or f"{settings.frontend_url}/invite",
+                        org_name=team.data["name"],
+                        inviter_email=inviter_email,
+                        role=body.role,
                     )
                 except Exception:
                     pass
@@ -312,7 +401,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                         "org_name": team.data["name"],
                         "invited_by_email": inviter_email,
                     },
-                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?invite_org={team_id}&link_type=join_company",
+                    "redirect_to": f"{settings.frontend_url.rstrip('/')}/invite",
                 },
             )
         except Exception as exc:
@@ -328,6 +417,25 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
     if invite_error == "rate_limit":
         status = "invite_queued"
 
+    # If the invited email already has an account, record that they've been invited
+    # so the funnel shows 'invited' until they accept.
+    try:
+        existing_user = db.auth.admin.list_users()
+        invited_user = next(
+            (u for u in (existing_user or []) if getattr(u, "email", "") == email),
+            None,
+        )
+        if invited_user:
+            db.table("user_signups").upsert({
+                "user_id": str(invited_user.id),
+                "origin": "team_invite",
+                "signup_status": "invited",
+                "team_id": team_id,
+                "invited_by_email": inviter_email,
+            }, on_conflict="user_id").execute()
+    except Exception:
+        pass  # Non-blocking
+
     return {
         "status": status,
         "email": email,
@@ -342,6 +450,8 @@ class AcceptInvitesBody(BaseModel):
     user_id: str
     email: str
     team_id: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 @router.post("/accept-invites")
@@ -357,6 +467,27 @@ def accept_pending_invites(body: AcceptInvitesBody):
 
 
 def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
+    if body.full_name is not None and len(body.full_name.strip()) < 4:
+        raise HTTPException(400, "Full name must be at least 4 characters")
+    if body.password is not None and len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    # Atomically set password + name BEFORE accepting the invite so the user
+    # always has their profile set if they join a team successfully.
+    if body.password or body.full_name:
+        user_update: dict = {}
+        if body.password:
+            user_update["password"] = body.password
+        user_meta: dict = {"password_set": True} if body.password else {}
+        if body.full_name and body.full_name.strip():
+            user_meta["full_name"] = body.full_name.strip()
+        if user_meta:
+            user_update["user_metadata"] = user_meta
+        try:
+            db.auth.admin.update_user_by_id(body.user_id, user_update)
+        except Exception as exc:
+            raise HTTPException(400, f"Failed to update profile: {exc}")
+
     email = body.email.strip().lower()
     query = (
         db.table("team_invites")
@@ -416,37 +547,91 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
         }).eq("id", row["id"]).execute()
         accepted_team_ids.append(row["team_id"])
 
+    # Upsert the signup record: mark the user as having joined via team invite.
+    # If the user was already tracked as 'organic' we still update signup_status
+    # to 'team_join' so the funnel stays accurate.
+    if accepted_team_ids:
+        try:
+            db.table("user_signups").upsert({
+                "user_id": str(body.user_id),
+                "origin": "team_invite",
+                "signup_status": "team_join",
+                "team_id": accepted_team_ids[0],
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id").execute()
+        except Exception:
+            pass  # Non-blocking
+
     return {"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids}
+
+
+@router.post("/invites/{invite_id}/decline", status_code=204)
+def decline_invite(invite_id: str):
+    """Mark an invite as declined by the invitee."""
+    db = get_supabase()
+    db.table("team_invites").update({"status": "declined"}).eq("id", invite_id).execute()
 
 
 @router.delete("/{team_id}", status_code=204)
 def delete_team(team_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
-    member = (
-        db.table("team_members")
-        .select("role")
-        .eq("team_id", team_id)
-        .eq("user_id", requester_id)
-        .limit(1)
-        .execute()
-    )
-    if not member.data:
-        raise HTTPException(403, "Not a member of this team")
-    requester_role = ROLE_NAMES.get(member.data[0]["role"], "member")
-    if requester_role != "owner":
+    if _require_member(db, team_id, requester_id) != ROLE_IDS["owner"]:
         raise HTTPException(403, "Only the team owner can delete the team")
     db.table("team_members").delete().eq("team_id", team_id).execute()
     db.table("team_invites").delete().eq("team_id", team_id).execute()
     db.table("teams").delete().eq("id", team_id).execute()
 
 
-@router.delete("/{team_id}/members/{user_id}", status_code=204)
-def remove_member(team_id: str, user_id: str):
+class RoleUpdate(BaseModel):
+    role: str  # "admin" | "member"
+
+
+@router.patch("/{team_id}/members/{user_id}", status_code=200)
+def change_member_role(team_id: str, user_id: str, body: RoleUpdate, requester_id: str = Depends(current_user_id)):
+    new_role_name = body.role.lower()
+    if new_role_name not in ("admin", "member"):
+        raise HTTPException(400, "role must be 'admin' or 'member'")
     db = get_supabase()
+    requester_role = _require_member(db, team_id, requester_id)
+    if requester_role != ROLE_IDS["owner"]:
+        raise HTTPException(403, "Only the team owner can change member roles")
+    if requester_id == user_id:
+        raise HTTPException(403, "Cannot change your own role")
+    target_role = _require_member(db, team_id, user_id)
+    if target_role == ROLE_IDS["owner"]:
+        raise HTTPException(403, "Cannot change the owner's role")
+    new_role_id = ROLE_IDS[new_role_name]
+    db.table("team_members").update({"role": new_role_id}).eq("team_id", team_id).eq("user_id", user_id).execute()
+    return {"role": new_role_name}
+
+
+@router.delete("/{team_id}/members/{user_id}", status_code=204)
+def remove_member(team_id: str, user_id: str, requester_id: str = Depends(current_user_id)):
+    db = get_supabase()
+    requester_role = _require_member(db, team_id, requester_id)
+
+    # Allow self-leave without further role check
+    if requester_id == user_id:
+        if requester_role == ROLE_IDS["owner"]:
+            raise HTTPException(403, "Team owner cannot leave — transfer ownership or delete the team first")
+        db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
+        return
+
+    if requester_role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
+        raise HTTPException(403, "Only admins and owners can remove members")
+
+    target_role = _require_member(db, team_id, user_id)
+    if target_role == ROLE_IDS["owner"]:
+        raise HTTPException(403, "Cannot remove the team owner")
+    if target_role == ROLE_IDS["admin"] and requester_role != ROLE_IDS["owner"]:
+        raise HTTPException(403, "Only the team owner can remove an admin")
+
     db.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
 
 
 @router.delete("/{team_id}/invites/{invite_id}", status_code=204)
-def revoke_invite(team_id: str, invite_id: str):
+def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
+    if _require_member(db, team_id, requester_id) not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
+        raise HTTPException(403, "Only admins and owners can revoke invites")
     db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()

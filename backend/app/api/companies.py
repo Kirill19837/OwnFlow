@@ -33,6 +33,8 @@ class CompanyCreate(BaseModel):
     owner_id: str
     default_ai_model: str = "gpt-4o"
     phone: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 class TeamCreate(BaseModel):
@@ -48,6 +50,27 @@ def create_company(body: CompanyCreate):
 
     if body.default_ai_model not in AI_MODELS:
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
+
+    if body.full_name is not None and len(body.full_name.strip()) < 4:
+        raise HTTPException(400, "Full name must be at least 4 characters")
+    if body.password is not None and len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    # Atomically set password + name BEFORE creating company rows.
+    # This ensures profile is never half-saved if company creation fails.
+    if body.password or body.full_name:
+        user_update: dict = {}
+        if body.password:
+            user_update["password"] = body.password
+        user_meta: dict = {"password_set": True} if body.password else {}
+        if body.full_name and body.full_name.strip():
+            user_meta["full_name"] = body.full_name.strip()
+        if user_meta:
+            user_update["user_metadata"] = user_meta
+        try:
+            db.auth.admin.update_user_by_id(body.owner_id, user_update)
+        except Exception as exc:
+            raise HTTPException(400, f"Failed to update profile: {exc}")
 
     # Create company
     slug = _slug(body.name)
@@ -84,6 +107,19 @@ def create_company(body: CompanyCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
 
+    # Mark the owner's onboarding as complete.
+    from datetime import datetime, timezone
+    _now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.table("user_signups").upsert({
+            "user_id": body.owner_id,
+            "origin": "organic",
+            "signup_status": "company_created",
+            "completed_at": _now,
+        }, on_conflict="user_id").execute()
+    except Exception:
+        pass  # Non-blocking
+
     return {**company_row, "my_role": "owner", "default_team_id": team_id}
 
 
@@ -109,25 +145,36 @@ def my_company(user_id: str):
 
 @router.get("/{company_id}/teams")
 def list_teams(company_id: str, user_id: Optional[str] = None):
-    """List teams within a company, optionally annotating with the user's role."""
+    """List teams within a company the user is a member of."""
     db = get_supabase()
-    teams = db.table("teams").select("*").eq("company_id", company_id).execute()
-    result = teams.data or []
 
-    if user_id and result:
-        team_ids = [t["id"] for t in result]
-        members = (
+    if user_id:
+        # Fetch only the teams this user belongs to within the company
+        memberships = (
             db.table("team_members")
             .select("team_id, role")
             .eq("user_id", user_id)
-            .in_("team_id", team_ids)
             .execute()
         )
-        role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in (members.data or [])}
+        member_team_ids = [m["team_id"] for m in (memberships.data or [])]
+        if not member_team_ids:
+            return []
+        teams = (
+            db.table("teams")
+            .select("*")
+            .eq("company_id", company_id)
+            .in_("id", member_team_ids)
+            .execute()
+        )
+        role_map = {m["team_id"]: ROLE_NAMES.get(m["role"], m["role"]) for m in (memberships.data or [])}
+        result = teams.data or []
         for t in result:
             t["my_role"] = role_map.get(t["id"])
+        return result
 
-    return result
+    # No user_id — return all teams without role annotation (admin/internal use)
+    teams = db.table("teams").select("*").eq("company_id", company_id).execute()
+    return teams.data or []
 
 
 @router.post("/{company_id}/teams", status_code=201)
@@ -162,3 +209,57 @@ def create_team(company_id: str, body: TeamCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
     return {**row, "my_role": "owner"}
+
+
+class CompanyUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+def _require_company_owner(db, company_id: str, user_id: str) -> None:
+    row = (
+        db.table("company_members")
+        .select("role")
+        .eq("company_id", company_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(403, "Not a member of this company")
+    if row.data[0]["role"] != ROLE_IDS["owner"]:
+        raise HTTPException(403, "Only the company owner can perform this action")
+
+
+@router.patch("/{company_id}")
+def update_company(company_id: str, body: CompanyUpdate, user_id: str):
+    """Rename or update phone. Only the company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    db.table("companies").update(update).eq("id", company_id).execute()
+    return {"company_id": company_id, **update}
+
+
+@router.delete("/{company_id}", status_code=204)
+def delete_company(company_id: str, user_id: str):
+    """
+    Delete a company and cascade-remove all its teams, memberships and invites.
+    Only the company owner can do this.
+    """
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+
+    # Remove all teams belonging to this company
+    teams = db.table("teams").select("id").eq("company_id", company_id).execute()
+    for t in (teams.data or []):
+        tid = t["id"]
+        db.table("team_invites").delete().eq("team_id", tid).execute()
+        db.table("team_members").delete().eq("team_id", tid).execute()
+        db.table("teams").delete().eq("id", tid).execute()
+
+    db.table("company_members").delete().eq("company_id", company_id).execute()
+    db.table("companies").delete().eq("id", company_id).execute()
+

@@ -12,6 +12,9 @@ import NewCompanyPage from './pages/NewCompanyPage'
 import OrgSettingsPage from './pages/OrgSettingsPage'
 import ProjectActivityPage from './pages/ProjectActivityPage'
 import ProfilePage from './pages/ProfilePage'
+import CompanySettingsPage from './pages/CompanySettingsPage'
+
+import InvitePage from './pages/InvitePage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -24,6 +27,7 @@ export default function App() {
         <Routes>
           <Route element={<AuthProvider />}>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/invite" element={<InvitePage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/company/new" element={<NewCompanyPage />} />
               <Route element={<AppLayout />}>
@@ -33,6 +37,7 @@ export default function App() {
                 <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
                 <Route path="/teams/new" element={<NewOrgPage />} />
                 <Route path="/teams/:teamId/settings" element={<OrgSettingsPage />} />
+                <Route path="/company/settings" element={<CompanySettingsPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
               </Route>
             </Route>

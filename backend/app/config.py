@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 # Resolve .env relative to this file (backend/app/config.py → backend/.env)
@@ -9,6 +9,8 @@ _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE))
+
     supabase_url: str
     supabase_service_role_key: str
     openai_api_key: str = ""
@@ -29,10 +31,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",")]
-
-    class Config:
-        env_file = str(_ENV_FILE)
+        origins = [o.strip() for o in self.cors_origins.split(",")]
+        # Always allow all common Vite dev ports for local development
+        for port in range(5173, 5181):
+            candidate = f"http://localhost:{port}"
+            if candidate not in origins:
+                origins.append(candidate)
+        return origins
 
 
 @lru_cache

@@ -45,7 +45,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (data) setProjects(data)
-  }, [data])
+  }, [data, setProjects])
 
   const deleteProject = useMutation({
     mutationFn: (id: string) => api.delete(`/projects/${id}`),

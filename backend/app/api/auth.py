@@ -56,15 +56,27 @@ def signup(body: SignupBody):
     if not action_link:
         raise HTTPException(500, "Could not generate confirmation link.")
 
+    # Extract the newly-created user ID (shared by name metadata and origin tracking).
+    _new_user_obj = getattr(link_resp, "user", None) or getattr(getattr(link_resp, "properties", None), "user", None)
+    _new_user_id = getattr(_new_user_obj, "id", None)
+
     # Persist the display name in user_metadata if provided.
-    if body.name and body.name.strip():
+    if body.name and body.name.strip() and _new_user_id:
         try:
-            user_obj = getattr(link_resp, "user", None) or getattr(getattr(link_resp, "properties", None), "user", None)
-            user_id = getattr(user_obj, "id", None)
-            if user_id:
-                db.auth.admin.update_user_by_id(user_id, {"user_metadata": {"full_name": body.name.strip()}})
+            db.auth.admin.update_user_by_id(_new_user_id, {"user_metadata": {"full_name": body.name.strip()}})
         except Exception:
             pass  # Non-blocking — account still created
+
+    # Record this user's origin so the frontend knows to show the company-setup flow.
+    if _new_user_id:
+        try:
+            db.table("user_signups").insert({
+                "user_id": str(_new_user_id),
+                "origin": "organic",
+                # signup_status is null for organic users until they create a company
+            }).execute()
+        except Exception:
+            pass  # Non-blocking
 
     try:
         send_signup_confirmation_email(
@@ -103,31 +115,53 @@ class MagicLinkBody(BaseModel):
     link_type: str = "set_password"
 
 
+# In-memory rate limit: one magic link per email per 20 minutes.
+# Keyed by lowercased email, value is the Unix timestamp of the last send.
+# TODO: move to a DB table (e.g. magic_link_rate_limits) so the limit survives
+#       restarts and is enforced across multiple workers/replicas.
+#       Suggested schema:
+#         email TEXT PRIMARY KEY, sent_at TIMESTAMPTZ NOT NULL
+#       Upsert on each send; check (now() - sent_at) < interval '20 minutes'.
+_magic_link_sent_at: dict[str, float] = {}
+_MAGIC_LINK_COOLDOWN_SECONDS = 20 * 60  # 20 minutes
+
+
 @router.post("/magic-link", status_code=200)
 def send_magic_link(body: MagicLinkBody):
     """
     Generate a magic-link (OTP) for an existing user and deliver it via Postmark.
-    The caller is responsible for client-side rate limiting (e.g. once per hour).
+    Server-side rate limit: one email per address per 20 minutes.
     """
+    import time
     db = get_supabase()
     settings = get_settings()
 
     email = body.email.strip().lower()
 
+    # Server-side rate limit — silently drop without leaking account existence
+    last_sent = _magic_link_sent_at.get(email, 0)
+    if time.time() - last_sent < _MAGIC_LINK_COOLDOWN_SECONDS:
+        return {"status": "sent", "email": email}
+
     try:
-        db.auth.admin.generate_link({
+        link_resp = db.auth.admin.generate_link({
             "type": "magiclink",
             "email": email,
             "options": {
                 "redirect_to": f"{settings.frontend_url.rstrip('/')}/login?link_type={body.link_type}",
             },
         })
+        action_link = (
+            getattr(link_resp, "action_link", None)
+            or (link_resp.properties.action_link if hasattr(link_resp, "properties") else None)
+        )
+        if action_link and settings.postmark_enabled:
+            from app.email import send_magic_link_email
+            send_magic_link_email(to_email=email, magic_url=action_link)
+        _magic_link_sent_at[email] = time.time()
     except Exception as exc:
-        # Don't leak whether the email exists — return success either way
-        # to prevent user enumeration.
         import logging
         logging.getLogger(__name__).warning("magic-link generate_link failed for %s: %s", email, exc)
-        return {"status": "sent", "email": email}
 
     return {"status": "sent", "email": email}
 
@@ -188,3 +222,19 @@ def delete_account(user_id: str = Depends(current_user_id)):
         db.auth.admin.delete_user(user_id)
     except Exception as exc:
         raise HTTPException(500, f"Failed to delete auth user: {exc}")
+
+
+@router.get("/my-origin")
+def get_my_origin(user_id: str = Depends(current_user_id)):
+    """
+    Return how the calling user first entered the product.
+    'organic'     → self-signup; frontend should show company-setup flow.
+    'team_invite' → arrived via a team invitation; skip company creation.
+    Defaults to 'organic' for users who signed up before this feature.
+    """
+    db = get_supabase()
+    resp = db.table("user_signups").select("origin").eq("user_id", user_id).maybe_single().execute()
+    if resp.data:
+        return {"origin": resp.data["origin"]}
+    # Safe default: send unknown users through company-setup
+    return {"origin": "organic"}

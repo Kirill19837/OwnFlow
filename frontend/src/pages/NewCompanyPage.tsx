@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore'
 import { useCompanyStore } from '../store/companyStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
+import { supabase } from '../lib/supabase'
 import {
   Layers,
   Bot,
@@ -15,6 +16,7 @@ import {
   Phone,
   Building2,
   Star,
+  Trash2,
 } from 'lucide-react'
 import type { Team } from '../types'
 
@@ -50,7 +52,7 @@ const PERKS = [
 ]
 
 export default function NewCompanyPage() {
-  const { session } = useAuthStore()
+  const { session, signOut, pendingProfile, setPendingProfile, setNeedsPassword, setNeedsName, setNeedsSkills } = useAuthStore()
   const { setCompany } = useCompanyStore()
   const { setTeams, setActiveTeam } = useTeamStore()
   const navigate = useNavigate()
@@ -71,20 +73,49 @@ export default function NewCompanyPage() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [model, setModel] = useState('gpt-4o')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  const deleteAccount = useMutation({
+    mutationFn: () => api.delete('/auth/account'),
+    onSuccess: async () => {
+      setPendingProfile(null)
+      setNeedsPassword(false)
+      setNeedsName(false)
+      await signOut()
+      navigate('/login', { replace: true })
+    },
+  })
 
   const canSubmit = name.trim().length > 0 && phone.trim().length > 0
 
   const create = useMutation({
-    mutationFn: () =>
-      api
+    mutationFn: async () => {
+      // Set password client-side first — supabase.auth.updateUser keeps the
+      // session alive. Never send the password to the backend (admin.update_user_by_id
+      // revokes all tokens and logs the user out).
+      if (pendingProfile?.password) {
+        const { error } = await supabase.auth.updateUser({
+          password: pendingProfile.password,
+          data: { password_set: true },
+        })
+        if (error) throw new Error(`Failed to set password: ${error.message}`)
+      }
+      return api
         .post('/companies', {
           name: name.trim(),
           owner_id: session!.user.id,
           default_ai_model: model,
           phone: phone.trim(),
+          ...(pendingProfile?.name ? { full_name: pendingProfile.name } : {}),
         })
-        .then((r) => r.data),
-    onSuccess: (data) => {
+        .then((r) => r.data)
+    },
+    onSuccess: async (data) => {
+      // Profile is now saved in Supabase — clear the pending state
+      setPendingProfile(null)
+      setNeedsPassword(false)
+      setNeedsName(false)
+      setNeedsSkills(true)
       // Seed the company cache so AppLayout sees the real company immediately
       queryClient.setQueryData(['company', session!.user.id], data)
       setCompany(data)
@@ -255,6 +286,47 @@ export default function NewCompanyPage() {
               <a href="#" className="text-gray-500 underline underline-offset-2">Terms</a> and{' '}
               <a href="#" className="text-gray-500 underline underline-offset-2">Privacy Policy</a>.
             </p>
+
+            {/* Delete account */}
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full text-center text-xs text-gray-600 hover:text-red-400 transition-colors mt-2"
+              >
+                I don't want to continue — delete my account
+              </button>
+            ) : (
+              <div className="border border-red-900/50 bg-red-950/20 rounded-xl p-4 space-y-3 mt-2">
+                <div className="flex items-start gap-2">
+                  <Trash2 size={14} className="text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">
+                    This will permanently delete your account and all associated data. This cannot be undone.
+                  </p>
+                </div>
+                {deleteAccount.isError && (
+                  <p className="text-xs text-red-400">Something went wrong. Please try again.</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deleteAccount.isPending}
+                    className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-colors disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteAccount.mutate()}
+                    disabled={deleteAccount.isPending}
+                    className="flex-1 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors disabled:opacity-40"
+                  >
+                    {deleteAccount.isPending ? 'Deleting…' : 'Yes, delete my account'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

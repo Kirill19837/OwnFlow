@@ -16,7 +16,8 @@ export interface Team {
   company_id?: string
   default_ai_model: string
   created_at: string
-  my_role?: 'owner' | 'admin' | 'member'
+  my_role?: 'owner' | 'admin' | 'member'   // display name, may change
+  my_role_id?: string                       // stable UUID, use for permission checks
   members?: TeamMember[]
   pending_invites?: TeamPendingInvite[]
 }
@@ -25,7 +26,9 @@ export interface TeamMember {
   team_id: string
   user_id: string
   email?: string
-  role: 'owner' | 'admin' | 'member'
+  full_name?: string
+  role: 'owner' | 'admin' | 'member'   // display name
+  role_id: string                       // stable UUID for permission checks
   joined_at: string
 }
 
@@ -39,6 +42,14 @@ export interface TeamPendingInvite {
 }
 
 export type ActorType = 'human' | 'ai'
+
+export interface Skill {
+  id: string
+  name: string
+  category: string
+  description?: string
+  actor_type: 'human' | 'ai' | 'both'
+}
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'rework'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'

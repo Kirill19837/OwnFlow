@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTeamStore } from '../store/teamStore'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
-import type { Team, TeamPendingInvite } from '../types'
+import type { Team, TeamPendingInvite, Skill } from '../types'
 import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil } from 'lucide-react'
+
+// Stable role UUIDs — match backend ROLE_IDS; use these for permission checks
+const ROLE_IDS = {
+  owner:  '00000000-0000-0000-0000-000000000001',
+  admin:  '00000000-0000-0000-0000-000000000002',
+  member: '00000000-0000-0000-0000-000000000003',
+} as const
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
@@ -105,6 +112,12 @@ export default function OrgSettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
   })
 
+  const changeRole = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      api.patch(`/teams/${teamId}/members/${userId}`, { role }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
+  })
+
   const resendInvite = useMutation({
     mutationFn: ({ email, role }: { email: string; role: string }) =>
       api.post(`/teams/${teamId}/invites`, {
@@ -126,13 +139,26 @@ export default function OrgSettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
   })
 
+  const members = org?.members ?? []
+  const memberSkillQueries = useQueries({
+    queries: members.map((m) => ({
+      queryKey: ['user-skills', m.user_id],
+      queryFn: () => api.get<Skill[]>(`/skills/user/${m.user_id}`).then((r) => r.data),
+      staleTime: 5 * 60 * 1000,
+      enabled: !!org,
+    })),
+  })
+  const skillsByUser = new Map<string, Skill[]>(
+    members.map((m, i) => [m.user_id, memberSkillQueries[i]?.data ?? []])
+  )
+
   if (isLoading || !org) {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading…</div>
   }
 
-  const myRole = org.my_role ?? 'member'
-  const canInvite = myRole === 'owner' || myRole === 'admin'
-  const canDelete = myRole === 'owner'
+  const myRoleId = org.my_role_id ?? ''   // stable UUID for permission checks
+  const canInvite = myRoleId === ROLE_IDS.owner || myRoleId === ROLE_IDS.admin
+  const canDelete = myRoleId === ROLE_IDS.owner
 
   return (
     <div className="max-w-2xl mx-auto w-full px-6 py-10">
@@ -194,12 +220,13 @@ export default function OrgSettingsPage() {
             {AI_MODELS.map((m) => (
               <button
                 key={m.value}
-                onClick={() => updateModel.mutate(m.value)}
+                onClick={() => canInvite && updateModel.mutate(m.value)}
+                disabled={!canInvite}
                 className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-all text-left ${
                   org.default_ai_model === m.value
                     ? 'border-purple-500 bg-purple-900/30 text-white'
                     : 'border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-                }`}
+                } ${!canInvite ? 'opacity-60 cursor-not-allowed hover:border-gray-700 hover:bg-transparent' : ''}`}
               >
                 <div>
                   <span className="font-medium">{m.label}</span>
@@ -220,23 +247,50 @@ export default function OrgSettingsPage() {
         <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h2 className="font-semibold text-white mb-4">Members</h2>
           <div className="space-y-2 mb-4">
-            {(org.members ?? []).map((m) => (
-              <div key={m.user_id} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
-                <div>
-                  <p className="text-sm text-white font-mono">{m.email ?? m.user_id}</p>
-                  {!m.email && <p className="text-[11px] text-gray-600">{m.user_id}</p>}
-                  <p className="text-xs text-gray-500 capitalize">{m.role}</p>
+            {(org.members ?? []).map((m) => {
+              const memberSkills = skillsByUser.get(m.user_id) ?? []
+              return (
+                <div key={m.user_id} className="flex items-start justify-between px-3 py-2.5 bg-gray-800 rounded-lg gap-3">
+                  <div className="flex-1 min-w-0">
+                    {m.full_name && <p className="text-sm text-white">{m.full_name}</p>}
+                    {m.email && <p className={`text-sm ${m.full_name ? 'text-gray-400' : 'text-white'}`}>{m.email}</p>}
+                    {!m.email && !m.full_name && <p className="text-sm text-gray-500 italic">Unknown user</p>}
+                    {myRoleId === ROLE_IDS.owner && m.user_id !== session?.user.id && m.role_id !== ROLE_IDS.owner ? (
+                      <select
+                        value={m.role}
+                        onChange={(e) => changeRole.mutate({ userId: m.user_id, role: e.target.value })}
+                        className="mt-0.5 bg-gray-700 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-300 capitalize focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      >
+                        <option value="admin">admin</option>
+                        <option value="member">member</option>
+                      </select>
+                    ) : (
+                      <p className="text-xs text-gray-500 capitalize">{m.role}</p>
+                    )}
+                    {memberSkills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {memberSkills.map((s) => (
+                          <span
+                            key={s.id}
+                            className="text-[11px] px-2 py-0.5 rounded-full bg-purple-900/40 text-purple-300 border border-purple-700/40"
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {canInvite && m.user_id !== session?.user.id && (
+                    <button
+                      onClick={() => removeMember.mutate(m.user_id)}
+                      className="text-gray-600 hover:text-red-400 transition-colors mt-0.5 shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
-                {m.user_id !== session?.user.id && (
-                  <button
-                    onClick={() => removeMember.mutate(m.user_id)}
-                    className="text-gray-600 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {(() => {
@@ -272,7 +326,7 @@ export default function OrgSettingsPage() {
                         <span className="text-[11px] px-2 py-1 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/40">
                           invite sent
                         </span>
-                        {inv.id !== inv.email && (
+                        {canInvite && inv.id !== inv.email && (
                           <button
                             onClick={() => revokeInvite.mutate(inv.id)}
                             disabled={revokeInvite.isPending}

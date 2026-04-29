@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import { Layers, Mail } from 'lucide-react'
 
-const MAGIC_LINK_COOLDOWN_MS = 60 * 60 * 1000 // 1 hour
+const MAGIC_LINK_COOLDOWN_MS = 20 * 60 * 1000 // 20 minutes
 
 function getMagicLinkCooldownRemaining(email: string): number {
   try {
