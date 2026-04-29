@@ -766,8 +766,17 @@ def remove_member(team_id: str, user_id: str, requester_id: str = Depends(curren
 @router.delete("/{team_id}/invites/{invite_id}", status_code=204)
 def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(current_user_id)):
     db = get_supabase()
-    if _require_member(db, team_id, requester_id) not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
+    try:
+        role = _require_member(db, team_id, requester_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not verify membership: {exc}")
+    if role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can revoke invites")
-    db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
+    try:
+        db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to revoke invite: {exc}")
     _log_team_event(db, "revoke_invite", team_id=team_id, user_id=requester_id,
                     detail={"invite_id": invite_id})
