@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-29 | `baf1662` — feat: link human actors to team members via user_id; member picker in project creation
+
+- `supabase/migrations/007_actor_user_id.sql` — new migration: adds `user_id uuid references auth.users(id) on delete set null` to `actors` table
+- `supabase/database_full.sql` — added `user_id` column to `create table actors`
+- `backend/app/models.py` — `ActorCreate` and `Actor` models now include optional `user_id` and `characteristics` fields
+- `backend/app/api/projects.py` — `add_actor` endpoint passes `user_id` to Supabase insert when provided
+- `frontend/src/pages/NewProjectPage.tsx` — human actors now linked to real team members: creator auto-seeded as first human actor with their `user_id`; additional human actors use a `<select>` dropdown of org team members; AI actors retain free-text name input; `teamMembers` stabilised with `useMemo`
+
+---
+
 ## 2026-04-28 | `43d40fa` — feat: make pitch deck mobile-friendly; improve nav button visibility
 
 - `pitch/index.html` — added `@media (max-width: 700px)`: slides scroll vertically, all multi-column grids collapse to 1 col, steps/pricing/two-col stack vertically, typography shrinks with clamp, nav buttons 44px tap targets, dots move to horizontal row above nav, counter hidden on small screens
