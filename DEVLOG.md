@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-29 | `58950af` — feat: add project-creation assistant and extract board/task assistants
+
+- `frontend/src/pages/NewProjectPage.tsx` — added visible AI Assistant panel on project creation: request input, generated suggestion preview, and one-click apply to project name + prompt
+- `backend/app/api/projects.py` — added authenticated `POST /projects/assist` endpoint for project-brief/name drafting and refactored kanban assistant prompt route to use assistant module
+- `backend/app/assistants/project_creation.py` — centralized project-creation assistant prompt + response shaping
+- `backend/app/assistants/project_board.py` — extracted board/kanban assistant message builder used by `/projects/{id}/prompt/stream`
+- `backend/app/assistants/task_assistant.py` — extracted task assistant message builder and response helpers (duplicate detail stripping + `mark_ready` detection)
+- `backend/app/assistants/__init__.py` and `backend/app/api/tasks.py` — exported/wired new assistant helpers so API routes delegate to the assistants package
+
+---
+
 ## 2026-04-29 | `7b50ef1` — feat: show team member skills in human actor picker
 
 - `frontend/src/pages/NewProjectPage.tsx` — human actor member dropdown now shows each member's skills preview (first skills + overflow count)
