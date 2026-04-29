@@ -775,7 +775,7 @@ def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(curr
     if role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can revoke invites")
     try:
-        db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
+        db.table("team_invites").delete().eq("id", invite_id).eq("team_id", team_id).execute()
     except Exception as exc:
         raise HTTPException(500, f"Failed to revoke invite: {exc}")
     _log_team_event(db, "revoke_invite", team_id=team_id, user_id=requester_id,
