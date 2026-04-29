@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-29 | `7b50ef1` — feat: show team member skills in human actor picker
+
+- `frontend/src/pages/NewProjectPage.tsx` — human actor member dropdown now shows each member's skills preview (first skills + overflow count)
+- `frontend/src/pages/NewProjectPage.tsx` — after selecting a human team member, their full declared skills are shown as chips under the selector
+- `frontend/src/pages/NewProjectPage.tsx` — added loading and empty states for selected member skills and per-member skills queries
+
+---
+
 ## 2026-04-29 | `baf1662` — feat: link human actors to team members via user_id; member picker in project creation
 
 - `supabase/migrations/007_actor_user_id.sql` — new migration: adds `user_id uuid references auth.users(id) on delete set null` to `actors` table
