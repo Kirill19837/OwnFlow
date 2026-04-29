@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-29 | `0dcd0d4` — feat: invite existing company members and refine setup copy
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — added an "Invite existing member from other teams" flow that lists company users from other teams and sends a team invite with one click
+- `frontend/src/pages/OrgSettingsPage.tsx` — reuses existing invite endpoint and filters out users already in the team or already pending invite
+- `frontend/src/pages/NewCompanyPage.tsx` — updated onboarding copy to clearly state this step creates both the company and the first team, plus clearer CTA/loading text
+
+---
+
 ## 2026-04-29 | `58950af` — feat: add project-creation assistant and extract board/task assistants
 
 - `frontend/src/pages/NewProjectPage.tsx` — added visible AI Assistant panel on project creation: request input, generated suggestion preview, and one-click apply to project name + prompt
