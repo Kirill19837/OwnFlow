@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-30 | `7b0af28` — fix: invite audit log — partial pending index, restore UPDATE on accept/decline/revoke, notify both parties on join
+
+- `supabase/database_full.sql` + `supabase/migrations/010_team_invites_audit_index.sql` — replaced `UNIQUE (team_id, email, status)` with partial index `UNIQUE (team_id, email) WHERE status = 'pending'`; accepted/declined/revoked rows are now kept as an audit trail
+- `backend/app/api/teams.py` — restored `UPDATE status='accepted'` (with `accepted_user_id` + `accepted_at`), `UPDATE status='declined'`, and `UPDATE status='revoked'` now that the constraint allows multiple terminal-status rows
+- `backend/app/api/teams.py` — `invite_member_by_email` changed from `upsert` to delete-pending-then-insert so re-inviting after decline/revoke always produces a fresh row with correct `invite_id`
+- `backend/app/api/teams.py` — `_do_accept_invites` notifications now use `type_key="team_accepted"` and send two notifications: one to the joining user ("You've joined {team}") and one to the inviter ("{email} joined {team}")
+- `backend/tests/test_invite_flow.py` — updated `test_invite_stores_role_as_uuid` to expect `insert` call instead of `upsert`
+
+---
+
 ## 2026-04-29 | `1ce444a` — fix: mark invite notification read on accept
 
 - `frontend/src/pages/InvitePage.tsx` — `doAccept` now marks the matching invite notification as read (filters by `user_id`, `action=accept_or_decline`, `team_id`) before navigating to `/`

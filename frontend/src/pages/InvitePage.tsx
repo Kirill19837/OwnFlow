@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Layers, Users, X, Check, Lock, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 
 interface PendingInvite {
@@ -25,6 +26,7 @@ type Step = 'loading' | 'invite-card' | 'profile' | 'accepting' | 'declining'
 export default function InvitePage() {
   const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setNeedsSkills, setLinkType } = useAuthStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const teamIdParam = searchParams.get('team_id')
   // If team_id is in the URL the user is already logged in (came from notification bell)
@@ -89,6 +91,8 @@ export default function InvitePage() {
         .eq('read', false)
         .filter('payload->>action', 'eq', 'accept_or_decline')
         .filter('payload->>team_id', 'eq', invite.team_id)
+      // Invalidate teams cache so the new team appears immediately on navigation
+      await queryClient.invalidateQueries({ queryKey: ['teams'] })
     } finally {
       navigate('/', { replace: true })
     }
