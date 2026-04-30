@@ -616,7 +616,7 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
     email = body.email.strip().lower()
     query = (
         db.table("team_invites")
-        .select("id,team_id,role")
+        .select("id,team_id,role,invited_by_email")
         .eq("email", email)
         .eq("status", "pending")
     )
@@ -629,7 +629,7 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
         return {"accepted": 0, "team_ids": []}
 
     target_team_ids = [r["team_id"] for r in rows]
-    teams = db.table("teams").select("id,company_id").in_("id", target_team_ids).execute()
+    teams = db.table("teams").select("id,name,company_id").in_("id", target_team_ids).execute()
     company_ids = list({t["company_id"] for t in (teams.data or []) if t.get("company_id")})
 
     if company_ids:
@@ -671,6 +671,22 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
             "accepted_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", row["id"]).execute()
         accepted_team_ids.append(row["team_id"])
+
+    # Create a notification for each accepted team
+    team_name_map = {t["id"]: t.get("name", "a team") for t in (teams.data or [])}
+    for row in rows:
+        if row["team_id"] not in accepted_team_ids:
+            continue
+        tname = team_name_map.get(row["team_id"], "a team")
+        inviter = row.get("invited_by_email") or "Someone"
+        _create_notification(
+            db,
+            user_id=str(body.user_id),
+            type_key="team_invite",
+            title=f"You've joined {tname}",
+            body=f"{inviter} invited you to {tname}.",
+            payload={"team_id": row["team_id"], "team_name": tname},
+        )
 
     # Upsert the signup record: mark the user as having joined via team invite.
     # If the user was already tracked as 'organic' we still update signup_status

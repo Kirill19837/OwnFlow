@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-29 | `55f0823` — fix: delete revoked invites to avoid unique constraint violation
+
+- `backend/app/api/teams.py` — `revoke_invite` now DELETEs the invite row instead of updating `status` to `"revoked"`, fixing a `23505` unique constraint error on `(team_id, email, status)` when re-inviting the same user after a previous revoke
+
+---
+
 ## 2026-04-29 | `116ac75` — feat: real-time notifications system with notification_types lookup table and invite 400 fix
 
 - `supabase/migrations/009_notifications.sql` — new `notification_types` lookup table (UUID PK, unique `key`, label, description) seeded with 6 types; `notifications` table with FK to `notification_types.key`; per-user RLS (select/update own rows; service role full access)
