@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-04-29 | `1e6d7dc` — feat: navigate to InvitePage from notification bell
+
+- `frontend/src/components/AppLayout.tsx` — removed duplicate accept/decline logic; invite notifications now navigate to `/invite?team_id=<id>` on click
+- `frontend/src/pages/InvitePage.tsx` — reads `team_id` query param to pre-filter invite; decline for established users (already logged in) navigates to `/` instead of signing them out; spinner text updated
+- `backend/app/api/teams.py` — `GET /teams/pending-invite` now accepts optional `team_id` query param to filter to a specific invite
+- `supabase/database_full.sql` — consolidated schema cleanup (no `IF NOT EXISTS`, `skills`/`user_skills` in drop list)
+
+---
+
 ## 2026-04-29 | `9e3ee4c` — fix: notifications not appearing for invited users
 
 - `supabase/migrations/009_notifications.sql` + `supabase/database_full.sql` — added `notifications` to `supabase_realtime` publication (root cause: Realtime events were never delivered without this). **Must run `alter publication supabase_realtime add table notifications;` on production.**

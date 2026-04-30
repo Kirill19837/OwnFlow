@@ -81,6 +81,14 @@ export default function InvitePage() {
         user_id: session.user.id,
         email: session.user.email,
       })
+      // Mark the invite notification as read
+      await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', session.user.id)
+        .eq('read', false)
+        .filter('payload->>action', 'eq', 'accept_or_decline')
+        .filter('payload->>team_id', 'eq', invite.team_id)
     } finally {
       navigate('/', { replace: true })
     }
