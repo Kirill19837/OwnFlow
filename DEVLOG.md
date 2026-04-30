@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-29 | `1ce444a` — fix: mark invite notification read on accept
+
+- `frontend/src/pages/InvitePage.tsx` — `doAccept` now marks the matching invite notification as read (filters by `user_id`, `action=accept_or_decline`, `team_id`) before navigating to `/`
+
+---
+
 ## 2026-04-29 | `1e6d7dc` — feat: navigate to InvitePage from notification bell
 
 - `frontend/src/components/AppLayout.tsx` — removed duplicate accept/decline logic; invite notifications now navigate to `/invite?team_id=<id>` on click

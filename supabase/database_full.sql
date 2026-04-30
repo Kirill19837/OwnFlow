@@ -165,8 +165,10 @@ create table team_invites (
   accepted_at        timestamptz
 );
 
-create unique index team_invites_team_email_status_uniq on team_invites (team_id, email, status);
-create        index team_invites_email_status_idx       on team_invites (email, status);
+-- Only one *pending* invite per (team_id, email) — accepted/declined/revoked rows
+-- are kept for audit purposes and are not subject to the uniqueness constraint.
+create unique index team_invites_pending_uniq      on team_invites (team_id, email) where status = 'pending';
+create        index team_invites_email_status_idx  on team_invites (email, status);
 
 -- ─── User signups ─────────────────────────────────────────────────────────────
 --

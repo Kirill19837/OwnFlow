@@ -444,7 +444,8 @@ def test_invite_stores_role_as_uuid(client):
         [{"user_id": OWNER_ID, "role": ROLE_OWNER}]
     )
     db.auth.admin.list_users.return_value = [_user(OWNER_ID, OWNER_EMAIL)]
-    db.table.return_value.upsert.return_value.execute.return_value = _resp([])
+    db.table.return_value.delete.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = _resp([])
+    db.table.return_value.insert.return_value.execute.return_value = _resp([])
     db.auth.admin.invite_user_by_email.return_value = None
 
     with _patch_db(db):
@@ -460,15 +461,15 @@ def test_invite_stores_role_as_uuid(client):
             })
 
     assert resp.status_code == 201
-    # Find the team_invites upsert — it's the call whose row has "email" key
-    upsert_calls = [
+    # Find the team_invites insert — it's the call whose row has "email" key
+    insert_calls = [
         call.args[0]
-        for call in db.table.return_value.upsert.call_args_list
+        for call in db.table.return_value.insert.call_args_list
         if isinstance(call.args[0], dict) and "email" in call.args[0]
     ]
-    assert upsert_calls, "Expected a team_invites upsert call"
-    assert upsert_calls[0]["role"] == ROLE_MEMBER, (
-        f"Expected UUID {ROLE_MEMBER!r}, got {upsert_calls[0]['role']!r}"
+    assert insert_calls, "Expected a team_invites insert call"
+    assert insert_calls[0]["role"] == ROLE_MEMBER, (
+        f"Expected UUID {ROLE_MEMBER!r}, got {insert_calls[0]['role']!r}"
     )
 
 

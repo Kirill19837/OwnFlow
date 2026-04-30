@@ -314,7 +314,7 @@ def get_team(team_id: str, caller_id: str = Depends(current_user_id)):
         for inv in pending_invites:
             inv["role_id"] = inv["role"]
             inv["role"] = get_role_name(inv["role"])
-        # Heal stuck invites in the background — mark them accepted.
+        # Heal stuck invites in the background — mark them accepted for audit.
         stuck_ids = [i["id"] for i in raw_invites if i["email"].lower() in member_emails]
         for sid in stuck_ids:
             try:
@@ -382,9 +382,13 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
 
     # Always use the pending invite flow — even for confirmed existing users.
     # They will be added to the team when they next log in and accept-invites runs.
+    # Delete any existing pending invite first so re-inviting (after decline/revoke)
+    # always produces a fresh row. The partial unique index prevents two pending
+    # rows for the same (team_id, email) from coexisting.
     invite_id: str | None = None
     try:
-        upsert_result = db.table("team_invites").upsert({
+        db.table("team_invites").delete().eq("team_id", team_id).eq("email", email).eq("status", "pending").execute()
+        insert_result = db.table("team_invites").insert({
             "team_id": team_id,
             "email": email,
             "role": ROLE_IDS[body.role],
@@ -393,7 +397,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             "status": "pending",
             "company_id": (team.data or {}).get("company_id"),
         }).execute()
-        invite_id = ((upsert_result.data or [{}])[0] or {}).get("id")
+        invite_id = ((insert_result.data or [{}])[0] or {}).get("id")
     except Exception:
         pass
 
@@ -598,6 +602,9 @@ def accept_pending_invites(body: AcceptInvitesBody):
 
 
 def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
+    import logging
+    log = logging.getLogger(__name__)
+
     if body.full_name is not None and len(body.full_name.strip()) < 4:
         raise HTTPException(400, "Full name must be at least 4 characters")
     if body.password is not None and len(body.password) < 8:
@@ -622,7 +629,7 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
     email = body.email.strip().lower()
     query = (
         db.table("team_invites")
-        .select("id,team_id,role,invited_by_email")
+        .select("id,team_id,role,invited_by_email,invited_by_user_id")
         .eq("email", email)
         .eq("status", "pending")
     )
@@ -634,80 +641,105 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
     if not rows:
         return {"accepted": 0, "team_ids": []}
 
-    target_team_ids = [r["team_id"] for r in rows]
-    teams = db.table("teams").select("id,name,company_id").in_("id", target_team_ids).execute()
-    company_ids = list({t["company_id"] for t in (teams.data or []) if t.get("company_id")})
-
-    if company_ids:
-        target_company_id = company_ids[0]
-        other_memberships = (
-            db.table("company_members")
-            .select("company_id")
-            .eq("user_id", body.user_id)
-            .neq("company_id", target_company_id)
-            .execute()
-        )
-        for cm in (other_memberships.data or []):
-            old_cid = cm["company_id"]
-            old_teams = db.table("teams").select("id").eq("company_id", old_cid).execute()
-            for ot in (old_teams.data or []):
-                db.table("team_members").delete().eq("user_id", body.user_id).eq("team_id", ot["id"]).execute()
-            db.table("company_members").delete().eq("user_id", body.user_id).eq("company_id", old_cid).execute()
-        db.table("company_members").upsert({
-            "company_id": target_company_id,
-            "user_id": body.user_id,
-            "role": ROLE_IDS["member"],
-        }).execute()
-    else:
-        db.table("team_members").delete().eq("user_id", body.user_id).execute()
-
+    # ── CRITICAL: add to team + mark invite accepted ──────────────────────────
+    # These must complete before any non-critical work. Each failure is logged
+    # but does not abort the others.
     accepted_team_ids: list[str] = []
     for row in rows:
-        # row["role"] is already a UUID from team_invites.role
-        db.table("team_members").upsert({
-            "team_id": row["team_id"],
-            "user_id": body.user_id,
-            "role": row["role"],
-        }).execute()
-        # Always mark the invite accepted — even if the member row already existed
-        # (heals stuck invites from previous partial failures).
-        db.table("team_invites").update({
-            "status": "accepted",
-            "accepted_user_id": body.user_id,
-            "accepted_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", row["id"]).execute()
-        accepted_team_ids.append(row["team_id"])
-
-    # Create a notification for each accepted team
-    team_name_map = {t["id"]: t.get("name", "a team") for t in (teams.data or [])}
-    for row in rows:
-        if row["team_id"] not in accepted_team_ids:
-            continue
-        tname = team_name_map.get(row["team_id"], "a team")
-        inviter = row.get("invited_by_email") or "Someone"
-        _create_notification(
-            db,
-            user_id=str(body.user_id),
-            type_key="team_invite",
-            title=f"You've joined {tname}",
-            body=f"{inviter} invited you to {tname}.",
-            payload={"team_id": row["team_id"], "team_name": tname},
-        )
-
-    # Upsert the signup record: mark the user as having joined via team invite.
-    # If the user was already tracked as 'organic' we still update signup_status
-    # to 'team_join' so the funnel stays accurate.
-    if accepted_team_ids:
         try:
-            db.table("user_signups").upsert({
-                "user_id": str(body.user_id),
-                "origin": "team_invite",
-                "signup_status": "team_join",
-                "team_id": accepted_team_ids[0],
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            }, on_conflict="user_id").execute()
-        except Exception:
-            pass  # Non-blocking
+            db.table("team_members").upsert({
+                "team_id": row["team_id"],
+                "user_id": body.user_id,
+                "role": row["role"],
+            }).execute()
+            # Mark accepted — kept for audit. The partial unique index only
+            # constrains pending rows so this can never conflict.
+            db.table("team_invites").update({
+                "status": "accepted",
+                "accepted_user_id": body.user_id,
+                "accepted_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", row["id"]).execute()
+            accepted_team_ids.append(row["team_id"])
+        except Exception as exc:
+            log.error("accept-invites: failed to add user %s to team %s: %s", body.user_id, row["team_id"], exc)
+
+    if not accepted_team_ids:
+        return {"accepted": 0, "team_ids": []}
+
+    # ── NON-CRITICAL: company membership ─────────────────────────────────────
+    try:
+        target_team_ids = accepted_team_ids
+        teams = db.table("teams").select("id,name,company_id").in_("id", target_team_ids).execute()
+        company_ids = list({t["company_id"] for t in (teams.data or []) if t.get("company_id")})
+
+        if company_ids:
+            target_company_id = company_ids[0]
+            other_memberships = (
+                db.table("company_members")
+                .select("company_id")
+                .eq("user_id", body.user_id)
+                .neq("company_id", target_company_id)
+                .execute()
+            )
+            for cm in (other_memberships.data or []):
+                old_cid = cm["company_id"]
+                old_teams = db.table("teams").select("id").eq("company_id", old_cid).execute()
+                for ot in (old_teams.data or []):
+                    db.table("team_members").delete().eq("user_id", body.user_id).eq("team_id", ot["id"]).execute()
+                db.table("company_members").delete().eq("user_id", body.user_id).eq("company_id", old_cid).execute()
+            db.table("company_members").upsert({
+                "company_id": target_company_id,
+                "user_id": body.user_id,
+                "role": ROLE_IDS["member"],
+            }).execute()
+    except Exception as exc:
+        log.warning("accept-invites: company membership step failed for user %s: %s", body.user_id, exc)
+
+    # ── NON-CRITICAL: notifications ───────────────────────────────────────────
+    try:
+        teams_data = db.table("teams").select("id,name").in_("id", accepted_team_ids).execute().data or []
+        team_name_map = {t["id"]: t.get("name", "a team") for t in teams_data}
+        for row in rows:
+            if row["team_id"] not in accepted_team_ids:
+                continue
+            tname = team_name_map.get(row["team_id"], "a team")
+            inviter = row.get("invited_by_email") or "Someone"
+            inviter_user_id = row.get("invited_by_user_id")
+
+            # Notify the joining user — "Welcome to <team>"
+            _create_notification(
+                db,
+                user_id=str(body.user_id),
+                type_key="team_accepted",
+                title=f"You've joined {tname}",
+                body=f"{inviter} invited you to {tname}. Welcome aboard!",
+                payload={"team_id": row["team_id"], "team_name": tname},
+            )
+
+            # Notify the inviter — "<email> accepted your invite"
+            if inviter_user_id and str(inviter_user_id) != str(body.user_id):
+                _create_notification(
+                    db,
+                    user_id=str(inviter_user_id),
+                    type_key="team_accepted",
+                    title=f"{body.email} joined {tname}",
+                    body=f"{body.email} accepted your invite and joined {tname}.",
+                    payload={"team_id": row["team_id"], "team_name": tname, "joined_user_id": str(body.user_id)},
+                )
+    except Exception as exc:
+        log.warning("accept-invites: notification step failed for user %s: %s", body.user_id, exc)
+
+    # ── NON-CRITICAL: signup record ───────────────────────────────────────────
+    try:
+        db.table("user_signups").upsert({
+            "user_id": str(body.user_id),
+            "origin": "team_invite",
+            "signup_status": "team_join",
+            "team_id": accepted_team_ids[0],
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="user_id").execute()
+    except Exception as exc:
+        log.warning("accept-invites: user_signups step failed for user %s: %s", body.user_id, exc)
 
     _log_team_event(db, "accept_invites", user_id=str(body.user_id),
                     detail={"accepted": len(accepted_team_ids), "team_ids": accepted_team_ids})
@@ -716,7 +748,7 @@ def _do_accept_invites(db, body: AcceptInvitesBody) -> dict:
 
 @router.post("/invites/{invite_id}/decline", status_code=204)
 def decline_invite(invite_id: str):
-    """Mark an invite as declined by the invitee."""
+    """Mark the invite as declined — kept for audit purposes."""
     db = get_supabase()
     db.table("team_invites").update({"status": "declined"}).eq("id", invite_id).execute()
     _log_team_event(db, "decline_invite", detail={"invite_id": invite_id})
@@ -797,7 +829,9 @@ def revoke_invite(team_id: str, invite_id: str, requester_id: str = Depends(curr
     if role not in (ROLE_IDS["owner"], ROLE_IDS["admin"]):
         raise HTTPException(403, "Only admins and owners can revoke invites")
     try:
-        db.table("team_invites").delete().eq("id", invite_id).eq("team_id", team_id).execute()
+        # Mark revoked — kept for audit. The partial unique index only constrains
+        # pending rows so this can never conflict with a previous revoked row.
+        db.table("team_invites").update({"status": "revoked"}).eq("id", invite_id).eq("team_id", team_id).execute()
     except Exception as exc:
         raise HTTPException(500, f"Failed to revoke invite: {exc}")
     _log_team_event(db, "revoke_invite", team_id=team_id, user_id=requester_id,
