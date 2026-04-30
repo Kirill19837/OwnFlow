@@ -55,3 +55,8 @@ do $$ begin
       on notifications for all using (true);
   end if;
 end $$;
+
+-- Enable real-time for the notifications table
+do $$ begin
+  alter publication supabase_realtime add table notifications;
+exception when duplicate_object then null; end $$;

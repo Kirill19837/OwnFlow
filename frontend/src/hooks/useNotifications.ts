@@ -6,8 +6,7 @@ export function useNotifications(userId: string | undefined) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
-  // Initial fetch
-  useEffect(() => {
+  const fetchNotifications = () => {
     if (!userId) return
     supabase
       .from('notifications')
@@ -18,6 +17,20 @@ export function useNotifications(userId: string | undefined) {
       .then(({ data }) => {
         if (data) setNotifications(data as Notification[])
       })
+  }
+
+  // Initial fetch
+  useEffect(() => {
+    fetchNotifications()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
+
+  // Re-fetch when the tab regains focus (catches notifications created while away)
+  useEffect(() => {
+    const onFocus = () => fetchNotifications()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
   // Real-time subscription

@@ -118,6 +118,7 @@ def _create_notification(
     payload: Optional[dict] = None,
 ) -> None:
     """Insert a real-time notification row for a specific user. Never raises."""
+    import logging
     try:
         db.table("notifications").insert({
             "id": str(uuid.uuid4()),
@@ -127,8 +128,8 @@ def _create_notification(
             "body": body,
             "payload": payload or {},
         }).execute()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("_create_notification failed: %s", exc)
 
 
 def _log_team_event(

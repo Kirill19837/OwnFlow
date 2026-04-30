@@ -341,7 +341,8 @@ do $$ begin alter publication supabase_realtime add table tasks;        exceptio
 do $$ begin alter publication supabase_realtime add table assignments;  exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table deliverables; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table projects;     exception when duplicate_object then null; end $$;
-do $$ begin alter publication supabase_realtime add table ai_logs;      exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table ai_logs;           exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table notifications;   exception when duplicate_object then null; end $$;
 
 -- ─── Row-level security ───────────────────────────────────────────────────────
 

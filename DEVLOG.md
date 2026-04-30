@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-29 | `9a6201b` — fix: in-app notification on invite accept
+
+- `backend/app/api/teams.py` — `_do_accept_invites` now creates a `"You've joined {team}"` notification for every accepted invite; also fetches `name` + `invited_by_email` from the relevant tables so the notification body is meaningful. Covers both new users (signup via link) and existing users (who previously got no notification on accept).
+
+---
+
 ## 2026-04-29 | `55f0823` — fix: delete revoked invites to avoid unique constraint violation
 
 - `backend/app/api/teams.py` — `revoke_invite` now DELETEs the invite row instead of updating `status` to `"revoked"`, fixing a `23505` unique constraint error on `(team_id, email, status)` when re-inviting the same user after a previous revoke
