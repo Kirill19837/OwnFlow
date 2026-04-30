@@ -95,6 +95,7 @@ class TaskDraft(BaseModel):
     priority: Literal["low", "medium", "high", "critical"]
     estimated_hours: float
     depends_on: List[int] = Field(default_factory=list)
+    actor_role: Optional[str] = None  # e.g. "UI/UX Designer" — used for role-based assignment
 
 
 class Task(BaseModel):

@@ -29,9 +29,18 @@ async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[
             "content": (
                 "You are a product/project scoping assistant. "
                 "Return ONLY valid JSON with this exact shape: "
-                '{"name":"...","prompt":"...","notes":"..."}. '
+                '{"name":"...","prompt":"...","notes":"...","questions":[]}. '
+                "Populate 'questions' with 2-4 short clarifying questions when the brief is "
+                "vague or missing key information (e.g. available engineer-hours, deadline, "
+                "preferred tech stack, team size, or acceptance criteria). "
+                "Leave 'questions' as an empty list if the brief is already detailed enough "
+                "to write a solid implementation plan. "
+                "Example questions: 'How many engineer-hours are budgeted for this?', "
+                "'What is the target release date?', 'Any preferred tech stack or constraints?', "
+                "'How many people will work on this?'. "
                 "Keep 'name' concise (max 8 words). "
-                "Make 'prompt' implementation-ready with sections: Goal, Scope, Non-goals, Tech context, Constraints, Acceptance criteria. "
+                "Make 'prompt' implementation-ready with sections: Goal, Scope, Non-goals, "
+                "Tech context, Constraints, Acceptance criteria. "
                 "Keep 'notes' very short (1-3 sentences)."
             ),
         },
@@ -60,10 +69,12 @@ async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[
             "name": body.name or "New Project",
             "prompt": body.prompt or user_request,
             "notes": (raw or "")[:500],
+            "questions": [],
         }
 
     return {
         "name": (parsed.get("name") or body.name or "New Project").strip(),
         "prompt": (parsed.get("prompt") or body.prompt or user_request).strip(),
         "notes": (parsed.get("notes") or "").strip(),
+        "questions": parsed.get("questions") or [],
     }

@@ -118,7 +118,8 @@ export default function NewProjectPage() {
   const [planning, setPlanningState] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [assistantRequest, setAssistantRequest] = useState('')
-  const [assistantSuggestion, setAssistantSuggestion] = useState<{ name: string; prompt: string; notes?: string } | null>(null)
+  const [assistantSuggestion, setAssistantSuggestion] = useState<{ name: string; prompt: string; notes?: string; questions?: string[] } | null>(null)
+  const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([])
   const esRef = useRef<EventSource | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
@@ -183,31 +184,38 @@ export default function NewProjectPage() {
   })
 
   const assistProject = useMutation({
-    mutationFn: async () => {
-      const { data } = await api.post<{ name: string; prompt: string; notes?: string }>('/projects/assist', {
+    mutationFn: async (overrideRequest?: string) => {
+      const { data } = await api.post<{ name: string; prompt: string; notes?: string; questions?: string[] }>('/projects/assist', {
         name,
         prompt,
-        request: assistantRequest,
+        request: overrideRequest ?? assistantRequest,
         ai_model: aiModel,
       })
       return data
     },
-    onSuccess: (data) => setAssistantSuggestion(data),
+    onSuccess: (data) => {
+      setAssistantSuggestion(data)
+      setClarifyAnswers([])
+    },
   })
 
   const autoFill = () => {
     _usedNames = []
     const preservedHumans = actors.filter((a) => a.type === 'human')
+    // Roles already covered by a human — don't add an AI duplicate for these
+    const humanRoles = new Set(preservedHumans.map((a) => a.role.trim().toLowerCase()))
     const autoAiActors = AUTO_FILL_NAMES.flatMap((roleName) => {
         const skill = skills.find((s) => s.name === roleName)
         if (!skill) return []
         const type: 'human' | 'ai' = skill.actor_type === 'human' ? 'human' : 'ai'
         if (type === 'human') return []
+        // Skip if a human already covers this role
+        if (humanRoles.has(roleName.trim().toLowerCase())) return []
         return [{
           role: roleName,
-          name: type === 'ai' ? pickAIName() : '',
-          type,
-          model: type === 'ai' ? defaultActorModel : '',
+          name: pickAIName(),
+          type: 'ai' as const,
+          model: defaultActorModel,
           characteristics: skill.description ?? '',
           user_id: undefined,
         }]
@@ -227,7 +235,7 @@ export default function NewProjectPage() {
   const addHumanTeammate = () => {
     setActors((prev) => orderActors([
       ...prev,
-      { role: 'Team Member', name: '', type: 'human', model: '', characteristics: '', user_id: undefined },
+      { role: '', name: '', type: 'human', model: '', characteristics: '', user_id: undefined },
     ]))
   }
 
@@ -294,7 +302,7 @@ export default function NewProjectPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => assistProject.mutate()}
+              onClick={() => assistProject.mutate(undefined)}
               disabled={assistProject.isPending || (!assistantRequest.trim() && !prompt.trim())}
               className="text-xs px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white transition-colors"
             >
@@ -323,6 +331,7 @@ export default function NewProjectPage() {
                   onClick={() => {
                     setName(assistantSuggestion.name)
                     setPrompt(assistantSuggestion.prompt)
+                    setAssistantSuggestion(null)
                   }}
                   className="text-xs px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors"
                 >
@@ -336,6 +345,41 @@ export default function NewProjectPage() {
                   Dismiss
                 </button>
               </div>
+              {(assistantSuggestion.questions?.length ?? 0) > 0 && (
+                <div className="mt-3 border-t border-gray-700 pt-3 space-y-2">
+                  <p className="text-xs font-medium text-yellow-400">A few clarifying questions — answer to get a better brief:</p>
+                  {assistantSuggestion.questions!.map((q, qi) => (
+                    <div key={qi} className="space-y-0.5">
+                      <p className="text-xs text-gray-300">{qi + 1}. {q}</p>
+                      <input
+                        type="text"
+                        value={clarifyAnswers[qi] ?? ''}
+                        onChange={(e) => {
+                          const updated = [...clarifyAnswers]
+                          updated[qi] = e.target.value
+                          setClarifyAnswers(updated)
+                        }}
+                        placeholder="Your answer…"
+                        className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={assistProject.isPending}
+                    onClick={() => {
+                      const qa = assistantSuggestion.questions!
+                        .map((q, qi) => `Q: ${q}\nA: ${clarifyAnswers[qi] || '(not answered)'}`)
+                        .join('\n')
+                      const combined = assistantRequest ? `${assistantRequest}\n\n${qa}` : qa
+                      assistProject.mutate(combined)
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-yellow-700 hover:bg-yellow-600 disabled:opacity-50 text-white transition-colors"
+                  >
+                    {assistProject.isPending ? 'Regenerating…' : 'Regenerate with answers'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -451,7 +495,18 @@ export default function NewProjectPage() {
                   ) : (
                     <User size={15} className="text-blue-400 shrink-0" />
                   )}
-                  <span className="text-xs text-gray-500 shrink-0">{actor.role}</span>
+                  <input
+                    list={`role-list-${i}`}
+                    value={actor.role}
+                    onChange={(e) => updateActor(i, { role: e.target.value })}
+                    placeholder="Role…"
+                    className={`text-xs bg-transparent focus:outline-none min-w-0 flex-1 ${
+                      !actor.role.trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-400 focus:text-gray-200'
+                    }`}
+                  />
+                  <datalist id={`role-list-${i}`}>
+                    {skills.map((s) => <option key={s.id} value={s.name} />)}
+                  </datalist>
                   <div className="flex-1" />
                   {/* AI / Human toggle */}
                   <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
@@ -625,9 +680,13 @@ export default function NewProjectPage() {
           <p className="text-red-400 text-sm">{(createProject.error as Error)?.message}</p>
         )}
 
+        {actors.some((a) => !a.role.trim()) && (
+          <p className="text-sm text-red-400">Please set a role for every actor before creating the project.</p>
+        )}
+
         <button
           onClick={() => createProject.mutate()}
-          disabled={createProject.isPending || planning || !name || !prompt}
+          disabled={createProject.isPending || planning || !name || !prompt || actors.some((a) => !a.role.trim())}
           className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors"
         >
           {createProject.isPending ? 'Creating project…' : '✨ Create Project & Generate Plan'}

@@ -82,6 +82,7 @@ async def plan_and_persist(
                     "type": t.type,
                     "priority": t.priority,
                     "estimated_hours": t.estimated_hours,
+                    "actor_role": t.actor_role,
                     "status": "todo",
                     "depends_on": [],  # resolved after all IDs known
                 }

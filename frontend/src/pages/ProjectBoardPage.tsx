@@ -8,7 +8,7 @@ import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Assignment } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink } from 'lucide-react'
+import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -115,6 +115,14 @@ export default function ProjectBoardPage() {
 
   const removeActor = useMutation({
     mutationFn: (actorId: string) => api.delete(`/actors/${actorId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const autoFillActors = useMutation({
+    mutationFn: () =>
+      api.post(`/projects/${projectId}/actors/auto-fill`, {
+        ai_model: 'gpt-4o',
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
@@ -442,7 +450,18 @@ export default function ProjectBoardPage() {
 
             {/* Divider */}
             <div className="border-t border-gray-700 pt-4">
-              <label className="block text-xs font-medium text-gray-400 mb-3">Team actors</label>
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-xs font-medium text-gray-400">Team actors</label>
+                <button
+                  onClick={() => autoFillActors.mutate()}
+                  disabled={autoFillActors.isPending}
+                  title="Replace AI actors with the standard default set (human actors preserved)"
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 disabled:opacity-40 transition-colors"
+                >
+                  <Zap size={11} />
+                  {autoFillActors.isPending ? 'Filling…' : 'Auto-fill AI actors'}
+                </button>
+              </div>
 
               {/* Existing actors */}
               <div className="space-y-1.5 mb-3">

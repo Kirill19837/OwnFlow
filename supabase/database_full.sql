@@ -261,6 +261,7 @@ create table tasks (
   status          text        not null default 'todo',
   estimated_hours float       not null default 4,
   depends_on      uuid[]      default '{}',
+  actor_role      text,
   github_pr_url   text,
   ai_ready        boolean     not null default false,
   is_ready        boolean     not null default false,

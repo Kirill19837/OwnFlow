@@ -4,9 +4,52 @@ from typing import List
 from app.db import get_supabase
 import uuid
 
-# Task types that should be handled by AI vs. human
+# Task types that should be handled by AI vs. human (fallback when no role match)
 AI_TASK_TYPES = {"code", "research", "qa", "devops"}
 HUMAN_TASK_TYPES = {"design", "review"}
+
+
+def _best_actor(task: dict, actors: list[dict], ai_idx: int, human_idx: int, ai_actors: list, human_actors: list):
+    """
+    Pick the best actor for a task using this priority order:
+      1. Human actor whose role matches task.actor_role  (exact, case-insensitive)
+      2. AI actor whose role matches task.actor_role
+      3. Type-based round-robin fallback (AI for code/research/qa/devops, human for design/review)
+      4. Any remaining actor
+    Returns (actor, new_ai_idx, new_human_idx).
+    """
+    task_role = (task.get("actor_role") or "").strip().lower()
+    task_type = task.get("type", "code")
+
+    if task_role:
+        # 1. Human role match
+        human_match = next((a for a in human_actors if (a.get("role") or "").strip().lower() == task_role), None)
+        if human_match:
+            return human_match, ai_idx, human_idx
+
+        # 2. AI role match
+        ai_match = next((a for a in ai_actors if (a.get("role") or "").strip().lower() == task_role), None)
+        if ai_match:
+            return ai_match, ai_idx, human_idx
+
+    # 3. Type-based fallback
+    prefer_ai = task_type in AI_TASK_TYPES
+    if prefer_ai and ai_actors:
+        actor = ai_actors[ai_idx % len(ai_actors)]
+        return actor, ai_idx + 1, human_idx
+    if not prefer_ai and human_actors:
+        actor = human_actors[human_idx % len(human_actors)]
+        return actor, ai_idx, human_idx + 1
+
+    # 4. Whatever is available
+    if ai_actors:
+        actor = ai_actors[ai_idx % len(ai_actors)]
+        return actor, ai_idx + 1, human_idx
+    if human_actors:
+        actor = human_actors[human_idx % len(human_actors)]
+        return actor, ai_idx, human_idx + 1
+
+    return None, ai_idx, human_idx
 
 
 async def auto_assign(sprint_id: str) -> List[dict]:
@@ -30,29 +73,13 @@ async def auto_assign(sprint_id: str) -> List[dict]:
     ai_actors = [a for a in actors if a["type"] == "ai"]
     human_actors = [a for a in actors if a["type"] == "human"]
 
-    # Simple round-robin counters
     ai_idx = 0
     human_idx = 0
     assignments: list[dict] = []
 
     for task in tasks:
-        task_type = task.get("type", "code")
-        prefer_ai = task_type in AI_TASK_TYPES
-
-        actor = None
-        if prefer_ai and ai_actors:
-            actor = ai_actors[ai_idx % len(ai_actors)]
-            ai_idx += 1
-        elif not prefer_ai and human_actors:
-            actor = human_actors[human_idx % len(human_actors)]
-            human_idx += 1
-        elif ai_actors:
-            actor = ai_actors[ai_idx % len(ai_actors)]
-            ai_idx += 1
-        elif human_actors:
-            actor = human_actors[human_idx % len(human_actors)]
-            human_idx += 1
-        else:
+        actor, ai_idx, human_idx = _best_actor(task, actors, ai_idx, human_idx, ai_actors, human_actors)
+        if not actor:
             continue
 
         row = {

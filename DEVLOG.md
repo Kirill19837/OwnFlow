@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-04-30 | `004db3f` — fix: invalidate teams cache after invite accept so new team appears immediately
+
+- `frontend/src/pages/InvitePage.tsx` — `doAccept` now calls `queryClient.invalidateQueries({ queryKey: ['teams'] })` before navigating to `/`, so the sidebar team list refreshes immediately without a manual page reload
+
+---
+
 ## 2026-04-30 | `7b0af28` — fix: invite audit log — partial pending index, restore UPDATE on accept/decline/revoke, notify both parties on join
 
 - `supabase/database_full.sql` + `supabase/migrations/010_team_invites_audit_index.sql` — replaced `UNIQUE (team_id, email, status)` with partial index `UNIQUE (team_id, email) WHERE status = 'pending'`; accepted/declined/revoked rows are now kept as an audit trail
