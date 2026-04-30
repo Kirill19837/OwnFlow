@@ -232,18 +232,19 @@ def list_models():
 
 
 @router.get("/pending-invite")
-def get_pending_invite(email: str):
+def get_pending_invite(email: str, team_id: Optional[str] = None):
     """Return the first pending invite for the given email, with team details."""
     db = get_supabase()
     norm_email = email.strip().lower()
-    invites = (
+    query = (
         db.table("team_invites")
         .select("id,team_id,role,invited_by_email")
         .eq("email", norm_email)
         .eq("status", "pending")
-        .limit(1)
-        .execute()
     )
+    if team_id:
+        query = query.eq("team_id", team_id)
+    invites = query.limit(1).execute()
     rows = invites.data or []
     if not rows:
         return {"invite": None}
@@ -381,8 +382,9 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
 
     # Always use the pending invite flow — even for confirmed existing users.
     # They will be added to the team when they next log in and accept-invites runs.
+    invite_id: str | None = None
     try:
-        db.table("team_invites").upsert({
+        upsert_result = db.table("team_invites").upsert({
             "team_id": team_id,
             "email": email,
             "role": ROLE_IDS[body.role],
@@ -391,6 +393,7 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
             "status": "pending",
             "company_id": (team.data or {}).get("company_id"),
         }).execute()
+        invite_id = ((upsert_result.data or [{}])[0] or {}).get("id")
     except Exception:
         pass
 
@@ -420,6 +423,8 @@ def invite_member_by_email(team_id: str, body: TeamEmailInvite):
                 "team_name": team.data["name"],
                 "role": body.role,
                 "invited_by_email": inviter_email,
+                "invite_id": invite_id,
+                "action": "accept_or_decline",
             },
         )
 

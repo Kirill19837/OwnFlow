@@ -244,27 +244,39 @@ export default function AppLayout() {
                   {notifications.length === 0 ? (
                     <p className="px-4 py-6 text-center text-sm text-gray-500">No notifications yet</p>
                   ) : (
-                    notifications.map((n) => (
-                      <button
-                        key={n.id}
-                        onClick={() => markRead(n.id)}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-800 transition-colors ${
-                          n.read ? 'opacity-50' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-2">
-                          {!n.read && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />}
-                          {n.read && <span className="mt-1.5 w-1.5 h-1.5 shrink-0" />}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-100 leading-snug">{n.title}</p>
-                            {n.body && <p className="text-xs text-gray-400 mt-0.5 leading-snug">{n.body}</p>}
-                            <p className="text-xs text-gray-600 mt-1">
-                              {new Date(n.created_at).toLocaleString()}
-                            </p>
+                    notifications.map((n) => {
+                      const isInviteAction = n.payload?.action === 'accept_or_decline' && !n.read
+                      const teamId = n.payload?.team_id as string | undefined
+                      return (
+                        <div
+                          key={n.id}
+                          className={`px-4 py-3 hover:bg-gray-800 cursor-pointer transition-colors ${n.read ? 'opacity-50' : ''}`}
+                          onClick={() => {
+                            if (isInviteAction && teamId) {
+                              setNotifOpen(false)
+                              navigate(`/invite?team_id=${teamId}`)
+                            } else {
+                              markRead(n.id)
+                            }
+                          }}
+                        >
+                          <div className="flex items-start gap-2">
+                            {!n.read && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />}
+                            {n.read && <span className="mt-1.5 w-1.5 h-1.5 shrink-0" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-100 leading-snug">{n.title}</p>
+                              {n.body && <p className="text-xs text-gray-400 mt-0.5 leading-snug">{n.body}</p>}
+                              {isInviteAction && (
+                                <p className="text-xs text-purple-400 mt-1">Click to accept or decline →</p>
+                              )}
+                              <p className="text-xs text-gray-600 mt-1">
+                                {new Date(n.created_at).toLocaleString()}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </button>
-                    ))
+                      )
+                    })
                   )}
                 </div>
               </div>

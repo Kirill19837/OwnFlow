@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-04-29 | `9e3ee4c` — fix: notifications not appearing for invited users
+
+- `supabase/migrations/009_notifications.sql` + `supabase/database_full.sql` — added `notifications` to `supabase_realtime` publication (root cause: Realtime events were never delivered without this). **Must run `alter publication supabase_realtime add table notifications;` on production.**
+- `backend/app/api/teams.py` — `_create_notification` now logs a warning on failure instead of silently swallowing errors
+- `frontend/src/hooks/useNotifications.ts` — added `window focus` listener to re-fetch notifications when the tab regains focus (catches notifications created while on the invite page)
+
+---
+
 ## 2026-04-29 | `9a6201b` — fix: in-app notification on invite accept
 
 - `backend/app/api/teams.py` — `_do_accept_invites` now creates a `"You've joined {team}"` notification for every accepted invite; also fetches `name` + `invited_by_email` from the relevant tables so the notification body is meaningful. Covers both new users (signup via link) and existing users (who previously got no notification on accept).

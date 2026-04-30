@@ -11,8 +11,8 @@ create extension if not exists "pgcrypto";
 
 -- ─── Drop existing tables (dependency order: children first) ─────────────────
 
-drop table if exists user_signups        cascade;
 drop table if exists user_skills         cascade;
+drop table if exists user_signups        cascade;
 drop table if exists skills              cascade;
 drop table if exists task_interactions   cascade;
 drop table if exists github_connections  cascade;
@@ -341,8 +341,8 @@ do $$ begin alter publication supabase_realtime add table tasks;        exceptio
 do $$ begin alter publication supabase_realtime add table assignments;  exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table deliverables; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table projects;     exception when duplicate_object then null; end $$;
-do $$ begin alter publication supabase_realtime add table ai_logs;           exception when duplicate_object then null; end $$;
-do $$ begin alter publication supabase_realtime add table notifications;   exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table ai_logs;         exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table notifications;  exception when duplicate_object then null; end $$;
 
 -- ─── Row-level security ───────────────────────────────────────────────────────
 
@@ -395,7 +395,7 @@ create policy "service_role_all_github"            on github_connections for all
 
 -- ─── Skills catalogue ────────────────────────────────────────────────────────
 
-create table if not exists skills (
+create table skills (
   id          uuid        primary key default gen_random_uuid(),
   name        text        not null unique,
   category    text        not null,
@@ -421,10 +421,9 @@ insert into skills (name, category, description, actor_type) values
   ('AI Project Manager', 'Management',  'Plans sprints, assigns tasks to actors, tracks progress, and surfaces blockers.',                'both'),
   ('Scrum Master',       'Management',  'Facilitates stand-ups, retrospectives, and sprint ceremonies; removes impediments.',             'human'),
   ('Beta User',          'Feedback',    'Stress-tests the product as a real user and reports friction points and bugs.',                  'human'),
-  ('Stakeholder',        'Feedback',    'Approves major decisions, aligns product direction, and reviews key deliverables.',              'human')
-on conflict (name) do nothing;
+  ('Stakeholder',        'Feedback',    'Approves major decisions, aligns product direction, and reviews key deliverables.',              'human');
 
-create table if not exists user_skills (
+create table user_skills (
   user_id    uuid        not null,
   skill_id   uuid        not null references skills(id) on delete cascade,
   created_at timestamptz not null default now(),
