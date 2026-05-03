@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-03 | `db5a994` — fix: add pytest-asyncio to requirements-dev.txt so CI can run async tests
+
+- `backend/requirements-dev.txt` — added `pytest-asyncio==0.25.3`; was missing so CI failed with "async def functions are not natively supported"
+
+---
+
 ## 2026-05-03 | `c583e1f` — feat: structured agent logging, docker socket mount, agent callback logs+prompt persistence
 
 - `agents/builtin/main.py` — builtin agent now collects timestamped structured log lines (`[HH:MM:SS] [INFO/ERROR]`) throughout execution (task start, AI call, response size, files parsed, PR result, callback); sends them back in callback body as `logs: [...]`
