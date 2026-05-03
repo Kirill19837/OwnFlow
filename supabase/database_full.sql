@@ -231,7 +231,7 @@ create table actors (
   id           uuid        primary key default gen_random_uuid(),
   project_id   uuid        not null references projects(id) on delete cascade,
   name         text        not null,
-  type         text        not null check (type in ('human', 'ai', 'external')),
+  type         text        not null check (type in ('human', 'ai')),
   role         text,
   model        text,
   capabilities text[]      default '{}',

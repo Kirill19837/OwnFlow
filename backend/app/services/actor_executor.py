@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import secrets
 import httpx
 from app.db import get_supabase
@@ -74,6 +76,11 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
             "repo": f"{github_conn['owner']}/{github_conn['repo']}" if github_conn else None,
             "token": github_conn["token"] if github_conn else None,
         },
+        "actor": {
+            "name": actor.get("name", ""),
+            "role": actor.get("role") or "",
+            "capabilities": actor.get("capabilities") or [],
+        },
     }
 
     headers = {"Content-Type": "application/json"}
@@ -94,6 +101,88 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
         }).execute()
 
     return {"task_id": task["id"], "dispatched": True, "actor": actor["name"]}
+
+
+async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> dict:
+    """Spawn the built-in ownflow-agent Docker container for this task."""
+    settings = get_settings()
+    callback_token = secrets.token_hex(32)
+    now = datetime.now(timezone.utc).isoformat()
+
+    db.table("tasks").update({
+        "status": "in_progress",
+        "agent_callback_token": callback_token,
+        "agent_dispatched_at": now,
+    }).eq("id", task["id"]).execute()
+
+    backend_url = settings.backend_url or "https://ownflow.21century.tech/api"
+    github_conn = await get_connection_for_project(project["id"])
+
+    # Prefer company-level AI keys; fall back to server-level keys
+    company_resp = (
+        db.table("companies")
+        .select("openai_api_key, anthropic_api_key")
+        .eq("id", project["company_id"])
+        .single()
+        .execute()
+    )
+    company = company_resp.data or {}
+
+    payload = {
+        "task_id": task["id"],
+        "callback_url": f"{backend_url.rstrip('/')}/agents/callback",
+        "callback_token": callback_token,
+        "task": {
+            "title": task["title"],
+            "description": task.get("description", ""),
+            "type": task.get("type", "code"),
+            "priority": task.get("priority", "medium"),
+        },
+        "project": {
+            "name": project["name"],
+            "brief": project.get("prompt", ""),
+        },
+        "github": {
+            "repo": f"{github_conn['owner']}/{github_conn['repo']}" if github_conn else None,
+            "token": github_conn["token"] if github_conn else None,
+        },
+        "model": actor.get("model") or "gpt-4o",
+        "actor": {
+            "name": actor.get("name", ""),
+            "role": actor.get("role") or "",
+            "capabilities": actor.get("capabilities") or [],
+        },
+    }
+
+    openai_key = company.get("openai_api_key") or settings.openai_api_key
+    anthropic_key = company.get("anthropic_api_key") or settings.anthropic_api_key
+
+    image = settings.builtin_agent_image
+    cmd = ["docker", "run", "--rm", "-d",
+           "-e", f"PAYLOAD={json.dumps(payload)}"]
+    if openai_key:
+        cmd += ["-e", f"OPENAI_API_KEY={openai_key}"]
+    if anthropic_key:
+        cmd += ["-e", f"ANTHROPIC_API_KEY={anthropic_key}"]
+    cmd.append(image)
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "phase": "docker_dispatch",
+            "message": f"docker run {image} failed: {stderr.decode()[:500]}",
+            "level": "error",
+        }).execute()
+
+    return {"task_id": task["id"], "dispatched": True, "via": "docker", "actor": actor["name"]}
 
 
 async def execute_task(task_id: str, actor_id: str) -> dict:
@@ -118,81 +207,12 @@ async def execute_task(task_id: str, actor_id: str) -> dict:
     )
     project = project_resp.data
 
-    prior_deliverables_resp = (
-        db.table("deliverables")
-        .select("content")
-        .eq("task_id", task_id)
-        .order("created_at")
-        .execute()
-    )
-    prior = prior_deliverables_resp.data or []
-    prior_text = "\n\n---\n\n".join(d["content"] for d in prior) if prior else ""
-
-    # ── External agent dispatch — triggered by webhook_url presence ─────────────
+    # ── Webhook agent dispatch ──────────────────────────────────────────────────
     if actor.get("webhook_url"):
         return await _dispatch_external_agent(task, actor, project, db)
 
-    context_parts = [
-        f"Project: {project['name']}\nProject brief: {project['prompt']}",
-        f"Task title: {task['title']}",
-        f"Task description: {task['description']}",
-        f"Task type: {task['type']}  |  Priority: {task['priority']}",
-    ]
-    if prior_text:
-        context_parts.append(f"Prior deliverables for this task:\n{prior_text}")
-
-    messages = [
-        {"role": "system", "content": EXECUTOR_SYSTEM},
-        {"role": "user", "content": "\n\n".join(context_parts)},
-    ]
-
-    model = actor.get("model") or "gpt-4o"
-    provider = get_provider(model)
-    content = await provider.complete(messages)
-
-    # Persist full prompt + response
-    try:
-        db.table("ai_messages").insert({
-            "id": str(uuid.uuid4()),
-            "project_id": project["id"],
-            "task_id": task_id,
-            "actor_id": actor_id,
-            "phase": "task_execution",
-            "model": model,
-            "messages": messages,
-            "response": content,
-        }).execute()
-        # Log to ai_logs too
-        db.table("ai_logs").insert({
-            "id": str(uuid.uuid4()),
-            "project_id": project["id"],
-            "phase": "task_execution",
-            "message": f"Actor '{actor.get('name', actor_id)}' completed task: {task['title']}",
-            "level": "info",
-        }).execute()
-    except Exception:
-        pass
-
-    # Update task status
-    db.table("tasks").update({"status": "done"}).eq("id", task_id).execute()
-
-    row = {
-        "id": str(uuid.uuid4()),
-        "task_id": task_id,
-        "actor_id": actor_id,
-        "content": content,
-        "tool_calls_log": [],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    db.table("deliverables").insert(row).execute()
-
-    # Create GitHub PR if connected
-    try:
-        await create_pr_for_task(task_id, task["title"], content)
-    except Exception:
-        pass
-
-    return row
+    # ── Docker agent dispatch (built-in) ────────────────────────────────────────
+    return await _dispatch_docker_agent(task, actor, project, db)
 
 
 async def stream_task_execution(task_id: str, actor_id: str):

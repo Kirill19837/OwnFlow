@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Override with your ngrok/cloudflare tunnel URL for local dev
     backend_url: str = ""
 
+    # Built-in agent Docker image — spawned per task when actor has no webhook_url
+    builtin_agent_image: str = "ownflow-agent:latest"
+
     @property
     def postmark_enabled(self) -> bool:
         return bool(self.postmark_token and self.postmark_from)

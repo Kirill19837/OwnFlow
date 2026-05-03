@@ -29,6 +29,9 @@ class AgentCallbackBody(BaseModel):
     task_id: str
     content: str
     files: Optional[List[FileEntry]] = None
+    logs: Optional[List[str]] = None        # structured log lines from the agent
+    prompt: Optional[str] = None            # user prompt sent to the model (for ai_messages)
+    model: Optional[str] = None             # model used (for ai_messages)
 
 
 @router.post("/callback")
@@ -84,6 +87,38 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         "created_at": datetime.utcnow().isoformat(),
     }
     db.table("deliverables").insert(deliverable_row).execute()
+
+    # ── Persist agent logs to ai_logs ─────────────────────────────────────────
+    if body.logs:
+        project_id = task.get("project_id")
+        for line in body.logs:
+            try:
+                db.table("ai_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                    "phase": "agent_execution",
+                    "message": line,
+                    "level": "error" if "ERROR" in line.upper() or "FAILED" in line.upper() else "info",
+                }).execute()
+            except Exception:
+                pass
+
+    # ── Persist prompt + response to ai_messages ──────────────────────────────
+    if body.prompt and body.model:
+        project_id = task.get("project_id")
+        try:
+            db.table("ai_messages").insert({
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "task_id": body.task_id,
+                "actor_id": actor_id,
+                "phase": "agent_execution",
+                "model": body.model,
+                "messages": [{"role": "user", "content": body.prompt}],
+                "response": body.content,
+            }).execute()
+        except Exception:
+            pass
 
     # ── Update task: done, clear callback token ───────────────────────────────
     db.table("tasks").update({
