@@ -22,8 +22,8 @@ jobs:
           SECRET_POSTMARK_TOKEN: ${{ secrets.POSTMARK_TOKEN }}
           VAR_POSTMARK_FROM: ${{ vars.POSTMARK_FROM }}
           SECRET_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SECRET_GITHUB_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
-          SECRET_GITHUB_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+          SECRET_GITHUB_CLIENT_ID: ${{ vars.GH_CLIENT_ID }}
+          SECRET_GITHUB_CLIENT_SECRET: ${{ vars.GH_CLIENT_SECRET }}
         with:
           host: ${{ vars.HOST_DEPLOY_IP }}
           username: ${{ vars.HOST_USER }}
