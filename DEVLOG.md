@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-05-03 | `0763687` — fix: move GitHub OAuth connect to Team Settings; project settings shows repo picker only
+
+- `backend/app/api/github.py` — `GET /github/status` now returns `has_token: true` when OAuth token exists but no repo is set yet
+- `frontend/src/pages/ProjectBoardPage.tsx` — removed OAuth connect button and PAT fallback from project settings; when no token → "Connect GitHub in Team Settings" button; when token exists → repo picker with yellow "Token saved — pick a repo" badge until repo is set; removed unused `connectGithub`, `tokenInput`, `githubError`, `showPatFallback`
+
+---
+
 ## 2026-05-03 | `49d1703` — fix: redirect browser to GitHub OAuth URL instead of returning JSON
 
 - `backend/app/api/github.py` — `GET /github/oauth/start` now returns a 302 redirect to the GitHub authorization page instead of `{"url": "..."}` JSON

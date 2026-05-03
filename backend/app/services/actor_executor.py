@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import secrets
+import httpx
 from app.db import get_supabase
 from app.providers.registry import get_provider
-from app.services.github_service import create_pr_for_task
+from app.services.github_service import create_pr_for_task, get_connection_for_project
+from app.config import get_settings
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 EXECUTOR_SYSTEM = """You are an AI actor working on a software project.
 You will be given a task with its description and project context.
@@ -29,6 +32,68 @@ Only include actual source/config/test files in the ###FILES### block.
 Never include binary files or generated lock files.
 If the task is not code-related (design, research, review, etc.) omit the ###FILES### block entirely.
 """
+
+
+async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -> dict:
+    """Fire-and-forget dispatch to an external webhook agent."""
+    webhook_url = actor.get("webhook_url")
+    if not webhook_url:
+        raise ValueError(f"External actor '{actor['name']}' has no webhook_url configured.")
+
+    settings = get_settings()
+    callback_token = secrets.token_hex(32)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Store token + dispatch timestamp so we can validate the callback
+    db.table("tasks").update({
+        "status": "in_progress",
+        "agent_callback_token": callback_token,
+        "agent_dispatched_at": now,
+    }).eq("id", task["id"]).execute()
+
+    backend_url = settings.backend_url or "https://ownflow.21century.tech/api"
+
+    # Resolve GitHub repo + token for this project (if connected)
+    github_conn = await get_connection_for_project(project["id"])
+
+    payload = {
+        "task_id": task["id"],
+        "callback_url": f"{backend_url.rstrip('/')}/agents/callback",
+        "callback_token": callback_token,
+        "task": {
+            "title": task["title"],
+            "description": task.get("description", ""),
+            "type": task.get("type", "code"),
+            "priority": task.get("priority", "medium"),
+        },
+        "project": {
+            "name": project["name"],
+            "brief": project.get("prompt", ""),
+        },
+        "github": {
+            "repo": f"{github_conn['owner']}/{github_conn['repo']}" if github_conn else None,
+            "token": github_conn["token"] if github_conn else None,
+        },
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if actor.get("agent_api_key"):
+        headers["X-Api-Key"] = actor["agent_api_key"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(webhook_url, json=payload, headers=headers)
+    except Exception as exc:
+        # Don't fail hard — task is already in_progress; agent may retry
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "phase": "external_dispatch",
+            "message": f"Dispatch to external agent '{actor['name']}' failed: {exc}",
+            "level": "error",
+        }).execute()
+
+    return {"task_id": task["id"], "dispatched": True, "actor": actor["name"]}
 
 
 async def execute_task(task_id: str, actor_id: str) -> dict:
@@ -62,6 +127,10 @@ async def execute_task(task_id: str, actor_id: str) -> dict:
     )
     prior = prior_deliverables_resp.data or []
     prior_text = "\n\n---\n\n".join(d["content"] for d in prior) if prior else ""
+
+    # ── External agent dispatch — triggered by webhook_url presence ─────────────
+    if actor.get("webhook_url"):
+        return await _dispatch_external_agent(task, actor, project, db)
 
     context_parts = [
         f"Project: {project['name']}\nProject brief: {project['prompt']}",

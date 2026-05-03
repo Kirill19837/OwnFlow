@@ -208,6 +208,10 @@ def add_actor(project_id: str, body: ActorCreate):
     }
     if body.user_id:
         row["user_id"] = body.user_id
+    if body.webhook_url:
+        row["webhook_url"] = body.webhook_url
+    if body.agent_api_key:
+        row["agent_api_key"] = body.agent_api_key
     db.table("actors").insert(row).execute()
     return row
 

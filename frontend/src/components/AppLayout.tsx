@@ -6,7 +6,7 @@ import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Team } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle, Bell } from 'lucide-react'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle, Bell, Bot } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
 import SelectSkillsModal from './SelectSkillsModal'
 import { useThemeStore } from '../store/themeStore'
@@ -139,14 +139,24 @@ export default function AppLayout() {
         {company && (
           company.owner_id === session?.user?.id
             ? (
-              <button
-                onClick={() => navigate('/company/settings')}
-                className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
-                title="Company settings"
-              >
-                <Building2 size={12} />
-                <span>{company.name}</span>
-              </button>
+              <>
+                <button
+                  onClick={() => navigate('/company/settings')}
+                  className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                  title="Company settings"
+                >
+                  <Building2 size={12} />
+                  <span>{company.name}</span>
+                </button>
+                <button
+                  onClick={() => navigate('/company/agents')}
+                  className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                  title="Agents"
+                >
+                  <Bot size={12} />
+                  <span>Agents</span>
+                </button>
+              </>
             ) : (
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500">
                 <Building2 size={12} />

@@ -214,6 +214,8 @@ def create_team(company_id: str, body: TeamCreate):
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
 
 
 def _require_company_owner(db, company_id: str, user_id: str) -> None:
@@ -262,4 +264,83 @@ def delete_company(company_id: str, user_id: str):
 
     db.table("company_members").delete().eq("company_id", company_id).execute()
     db.table("companies").delete().eq("id", company_id).execute()
+
+
+# ── Company Agents ────────────────────────────────────────────────────────────
+
+class CompanyAgentCreate(BaseModel):
+    name: str
+    role: Optional[str] = None
+    webhook_url: str
+    agent_api_key: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CompanyAgentUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    webhook_url: Optional[str] = None
+    agent_api_key: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.get("/{company_id}/agents")
+def list_company_agents(company_id: str, user_id: str):
+    """List all reusable agents registered for the company."""
+    db = get_supabase()
+    # Any member can read agents
+    member = (
+        db.table("company_members")
+        .select("role")
+        .eq("company_id", company_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not member.data:
+        raise HTTPException(403, "Not a member of this company")
+    resp = db.table("company_agents").select("*").eq("company_id", company_id).order("created_at").execute()
+    # Never return agent_api_key in list — mask it
+    agents = []
+    for a in (resp.data or []):
+        agents.append({**a, "agent_api_key": "***" if a.get("agent_api_key") else None})
+    return agents
+
+
+@router.post("/{company_id}/agents", status_code=201)
+def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str):
+    """Register a new agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    row = {
+        "id": str(uuid.uuid4()),
+        "company_id": company_id,
+        "name": body.name,
+        "role": body.role,
+        "webhook_url": body.webhook_url,
+        "agent_api_key": body.agent_api_key,
+        "description": body.description,
+    }
+    db.table("company_agents").insert(row).execute()
+    return {**row, "agent_api_key": "***" if row.get("agent_api_key") else None}
+
+
+@router.patch("/{company_id}/agents/{agent_id}")
+def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdate, user_id: str):
+    """Update an agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
+    return {"agent_id": agent_id, **update}
+
+
+@router.delete("/{company_id}/agents/{agent_id}", status_code=204)
+def delete_company_agent(company_id: str, agent_id: str, user_id: str):
+    """Delete an agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    db.table("company_agents").delete().eq("id", agent_id).eq("company_id", company_id).execute()
 
