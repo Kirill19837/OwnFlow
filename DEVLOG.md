@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-05-03 | `0136cbe` — chore: add pytest.ini, copilot-instructions.md, AGENTS.md; silence asyncio warning
+
+- `backend/pytest.ini` — set `asyncio_mode = strict` and `asyncio_default_fixture_loop_scope = function`; silences PytestDeprecationWarning
+- `.github/copilot-instructions.md` — Copilot commit/push discipline, checks, GitHub Actions versions, coding rules
+- `AGENTS.md` — same rules for all AI coding agents working in this repo
+
+---
+
 ## 2026-05-03 | `db5a994` — fix: add pytest-asyncio to requirements-dev.txt so CI can run async tests
 
 - `backend/requirements-dev.txt` — added `pytest-asyncio==0.25.3`; was missing so CI failed with "async def functions are not natively supported"

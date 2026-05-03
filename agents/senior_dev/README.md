@@ -28,17 +28,16 @@ docker run -p 8080:8080 --env-file .env senior-dev-agent
 
 ## Registering in OwnFlow
 
-In a project's settings → Actors, add a new actor:
+Go to **Team Settings → Agents** and create a new agent:
 
 | Field | Value |
 |-------|-------|
 | Name | Senior Developer |
 | Role | Lead Developer |
-| Type | External agent |
 | Webhook URL | `https://your-agent-host/run` |
 | API key | value of `AGENT_API_KEY` in your `.env` |
 
-When a task is assigned to this actor and "Run" is triggered, OwnFlow will POST the task to the webhook. The agent processes it and the task will automatically move to **Done** with the deliverable attached.
+Once registered, assign this agent as an actor on any project. OwnFlow dispatches tasks to the webhook URL automatically when the actor has one set; actors without a webhook URL use the built-in Docker runner.
 
 ## Payload OwnFlow sends
 

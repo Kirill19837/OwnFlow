@@ -6,6 +6,7 @@ export interface Company {
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'
   default_team_id?: string
+  phone?: string | null
   openai_api_key?: string | null
   anthropic_api_key?: string | null
 }

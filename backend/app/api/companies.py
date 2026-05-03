@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.db import get_supabase
 
@@ -268,12 +268,23 @@ def delete_company(company_id: str, user_id: str):
 
 # ── Company Agents ────────────────────────────────────────────────────────────
 
+def _validate_webhook_url(v: str) -> str:
+    if not v.startswith(("https://", "http://")):
+        raise ValueError("webhook_url must start with https:// or http://")
+    return v
+
+
 class CompanyAgentCreate(BaseModel):
     name: str
     role: Optional[str] = None
     webhook_url: str
     agent_api_key: Optional[str] = None
     description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str) -> str:
+        return _validate_webhook_url(v)
 
 
 class CompanyAgentUpdate(BaseModel):
@@ -282,6 +293,13 @@ class CompanyAgentUpdate(BaseModel):
     webhook_url: Optional[str] = None
     agent_api_key: Optional[str] = None
     description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_webhook_url(v)
+        return v
 
 
 @router.get("/{company_id}/agents")

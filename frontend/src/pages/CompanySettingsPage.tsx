@@ -199,9 +199,9 @@ export default function CompanySettingsPage() {
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-white">{(company as { phone?: string }).phone ?? <span className="text-gray-500 italic">Not set</span>}</span>
+              <span className="text-white">{company.phone ?? <span className="text-gray-500 italic">Not set</span>}</span>
               <button
-                onClick={() => { setNewPhone((company as { phone?: string }).phone ?? ''); setEditingPhone(true) }}
+                onClick={() => { setNewPhone(company.phone ?? ''); setEditingPhone(true) }}
                 className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
               >
                 <Pencil size={13} /> Edit
@@ -248,15 +248,15 @@ export default function CompanySettingsPage() {
             ) : (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-white font-mono">
-                  {(company as { openai_api_key?: string | null }).openai_api_key
-                    ? '••••••••••••' + ((company as { openai_api_key?: string }).openai_api_key ?? '').slice(-4)
+                  {company.openai_api_key
+                    ? '••••••••••••' + company.openai_api_key.slice(-4)
                     : <span className="text-gray-500 italic font-sans">Not set</span>}
                 </span>
                 <button
                   onClick={() => setEditingOpenAI(true)}
                   className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
                 >
-                  <Pencil size={13} /> {(company as { openai_api_key?: string | null }).openai_api_key ? 'Rotate' : 'Set key'}
+                  <Pencil size={13} /> {company.openai_api_key ? 'Rotate' : 'Set key'}
                 </button>
               </div>
             )}
@@ -291,15 +291,15 @@ export default function CompanySettingsPage() {
             ) : (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-white font-mono">
-                  {(company as { anthropic_api_key?: string | null }).anthropic_api_key
-                    ? '••••••••••••' + ((company as { anthropic_api_key?: string }).anthropic_api_key ?? '').slice(-4)
+                  {company.anthropic_api_key
+                    ? '••••••••••••' + company.anthropic_api_key.slice(-4)
                     : <span className="text-gray-500 italic font-sans">Not set</span>}
                 </span>
                 <button
                   onClick={() => setEditingAnthropic(true)}
                   className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
                 >
-                  <Pencil size={13} /> {(company as { anthropic_api_key?: string | null }).anthropic_api_key ? 'Rotate' : 'Set key'}
+                  <Pencil size={13} /> {company.anthropic_api_key ? 'Rotate' : 'Set key'}
                 </button>
               </div>
             )}

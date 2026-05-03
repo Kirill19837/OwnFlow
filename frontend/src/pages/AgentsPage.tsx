@@ -315,14 +315,16 @@ export default function AgentsPage() {
                   <div className="flex items-center gap-1.5 mt-2">
                     <LinkIcon size={11} className="text-gray-500 shrink-0" />
                     <span className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</span>
-                    <a
-                      href={a.webhook_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-gray-600 hover:text-gray-400 shrink-0"
-                    >
-                      <ExternalLink size={11} />
-                    </a>
+                    {/^https?:\/\//.test(a.webhook_url) && (
+                      <a
+                        href={a.webhook_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-gray-600 hover:text-gray-400 shrink-0"
+                      >
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
                   </div>
                 </div>
                 {isOwner && (

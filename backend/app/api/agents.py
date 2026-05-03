@@ -69,6 +69,19 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     if not stored_token or not secrets.compare_digest(provided_token, stored_token):
         raise HTTPException(403, "Invalid callback token.")
 
+    # ── Atomically consume the token ──────────────────────────────────────────
+    # UPDATE ... WHERE id=? AND agent_callback_token=? ensures only the first
+    # concurrent request wins. Any duplicate callback finds 0 rows updated.
+    consumed = (
+        db.table("tasks")
+        .update({"status": "done", "agent_callback_token": None})
+        .eq("id", body.task_id)
+        .eq("agent_callback_token", provided_token)
+        .execute()
+    )
+    if not consumed.data:
+        raise HTTPException(409, "Callback token already consumed.")
+
     # ── Save deliverable ──────────────────────────────────────────────────────
     actor_id = None
     assignments = task.get("assignments")
@@ -120,12 +133,6 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         except Exception:
             pass
 
-    # ── Update task: done, clear callback token ───────────────────────────────
-    db.table("tasks").update({
-        "status": "done",
-        "agent_callback_token": None,
-    }).eq("id", body.task_id).execute()
-
     # ── GitHub PR (if files provided and repo connected) ──────────────────────
     if body.files:
         # Reconstruct deliverable content with ###FILES### block for create_pr_for_task
@@ -134,11 +141,6 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         content_with_files = body.content + "\n\n###FILES###\n" + json.dumps(files_json, indent=2)
         try:
             await create_pr_for_task(body.task_id, task.get("title", ""), content_with_files)
-        except Exception:
-            pass
-    else:
-        try:
-            await create_pr_for_task(body.task_id, task.get("title", ""), body.content)
         except Exception:
             pass
 
