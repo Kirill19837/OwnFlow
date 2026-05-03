@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-05-03 | `c583e1f` — feat: structured agent logging, docker socket mount, agent callback logs+prompt persistence
+
+- `agents/builtin/main.py` — builtin agent now collects timestamped structured log lines (`[HH:MM:SS] [INFO/ERROR]`) throughout execution (task start, AI call, response size, files parsed, PR result, callback); sends them back in callback body as `logs: [...]`
+- `agents/builtin/main.py` — also sends `prompt` and `model` fields back in callback body for full audit trail
+- `backend/app/api/agents.py` — `AgentCallbackBody` extended with `logs`, `prompt`, `model` optional fields; callback handler persists each log line to `ai_logs` (level auto-detected), and writes prompt+response to `ai_messages` table
+- `docker-compose.prod.yml` — mounted `/var/run/docker.sock` into backend container (required for docker-per-task dispatch to work on the VPS)
+- `backend/tests/test_actor_executor.py` — 10 new tests for `actor_executor.py` (all passing, 41 total)
+- `agents/builtin/` — new built-in agent Docker image (Dockerfile, main.py, requirements.txt)
+
+---
+
 ## 2026-05-03 | `0763687` — fix: move GitHub OAuth connect to Team Settings; project settings shows repo picker only
 
 - `backend/app/api/github.py` — `GET /github/status` now returns `has_token: true` when OAuth token exists but no repo is set yet
