@@ -352,7 +352,10 @@ def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdat
     if not update:
         raise HTTPException(400, "No fields to update")
     db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
-    return {"agent_id": agent_id, **update}
+    response = {"agent_id": agent_id, **update}
+    if "agent_api_key" in response:
+        response["agent_api_key"] = "***"
+    return response
 
 
 @router.delete("/{company_id}/agents/{agent_id}", status_code=204)

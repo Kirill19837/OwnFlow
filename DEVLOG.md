@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-05-03 | `435ceba` — fix: security hardening — webhook_url validation, XSS guard, atomic callback token, PR-only-with-files, remove redundant type casts
+
+- `backend/app/api/companies.py` — `field_validator` rejects `webhook_url` values that don't start with `https://` or `http://` on both create and update
+- `frontend/src/pages/AgentsPage.tsx` — `<ExternalLink>` anchor only rendered for `http(s)://` URLs (prevents `javascript:` XSS via user-controlled webhook_url)
+- `backend/app/api/agents.py` — callback token atomically consumed with `UPDATE … WHERE agent_callback_token=?`; duplicate concurrent callbacks now get 409 before any deliverable is inserted; removed spurious `else` PR attempt (PR now only triggered when `body.files` is present)
+- `frontend/src/types.ts` — added `phone?: string | null` to `Company` interface
+- `frontend/src/pages/CompanySettingsPage.tsx` — replaced all inline `as { … }` type casts with direct `company.phone / .openai_api_key / .anthropic_api_key` access
+- `agents/senior_dev/README.md` — corrected registration instructions (Team Settings → Agents, no Type field, webhook_url drives routing)
+
+---
+
 ## 2026-05-03 | `0136cbe` — chore: add pytest.ini, copilot-instructions.md, AGENTS.md; silence asyncio warning
 
 - `backend/pytest.ini` — set `asyncio_mode = strict` and `asyncio_default_fixture_loop_scope = function`; silences PytestDeprecationWarning
