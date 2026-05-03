@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-03 | `49d1703` — fix: redirect browser to GitHub OAuth URL instead of returning JSON
+
+- `backend/app/api/github.py` — `GET /github/oauth/start` now returns a 302 redirect to the GitHub authorization page instead of `{"url": "..."}` JSON
+
+---
+
 ## 2026-05-03 | `3084a45` — feat: GitHub OAuth App, team-level tokens, webhooks, real code commits, PR state badges
 
 - `supabase/migrations/012_github_oauth_webhooks.sql` — `github_oauth_states` table for CSRF state; `github_connections` gains `github_user_login`, `webhook_secret`; `tasks` gains `github_pr_state`, `github_pr_number`

@@ -226,13 +226,16 @@ def github_team_disconnect(team_id: str):
 @router.get("/status")
 def github_status(project_id: str):
     db = get_supabase()
-    resp = db.table("github_connections").select("repo_owner,repo_name,github_user_login").eq("project_id", project_id).execute()
-    if not resp.data or not resp.data[0].get("repo_name"):
+    resp = db.table("github_connections").select("repo_owner,repo_name,github_user_login,github_token").eq("project_id", project_id).execute()
+    if not resp.data:
         return {"connected": False}
     row = resp.data[0]
+    has_token = bool(row.get("github_token") or row.get("github_user_login"))
+    has_repo = bool(row.get("repo_name"))
     return {
-        "connected": True,
-        "repo": f"{row['repo_owner']}/{row['repo_name']}",
+        "connected": has_repo,
+        "has_token": has_token,
+        "repo": f"{row['repo_owner']}/{row['repo_name']}" if has_repo else None,
         "github_user": row.get("github_user_login"),
     }
 

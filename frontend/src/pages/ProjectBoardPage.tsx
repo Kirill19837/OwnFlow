@@ -55,9 +55,6 @@ export default function ProjectBoardPage() {
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
   const [repoInput, setRepoInput] = useState('')
-  const [tokenInput, setTokenInput] = useState('')
-  const [githubError, setGithubError] = useState('')
-  const [showPatFallback, setShowPatFallback] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -146,7 +143,7 @@ export default function ProjectBoardPage() {
 
   const { data: githubStatus, refetch: refetchGithub } = useQuery({
     queryKey: ['github-status', projectId],
-    queryFn: () => api.get<{ connected: boolean; repo?: string; github_user?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
+    queryFn: () => api.get<{ connected: boolean; has_token?: boolean; repo?: string; github_user?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
     enabled: !!projectId && showSettings,
   })
 
@@ -158,6 +155,7 @@ export default function ProjectBoardPage() {
 
   // Team is connected if either the project has its own connection or the team has one
   const teamGithubConnected = !!githubTeamStatus?.connected
+  const githubTokenAvailable = !!githubStatus?.has_token || teamGithubConnected
   const githubFullyConnected = !!githubStatus?.connected || teamGithubConnected
 
   const { data: githubRepos } = useQuery({
@@ -166,10 +164,11 @@ export default function ProjectBoardPage() {
       const param = data?.team_id ? `team_id=${data.team_id}` : `project_id=${projectId}`
       return api.get<{ repos: { full_name: string; private: boolean }[] }>(`/github/repos?${param}`).then(r => r.data.repos)
     },
-    enabled: !!projectId && githubFullyConnected,
+    enabled: !!projectId && githubTokenAvailable,
   })
 
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  void apiBase // reserved for future use
 
   // Auto-open settings when GitHub redirects back with ?github_connected=1
   useEffect(() => {
@@ -182,21 +181,6 @@ export default function ProjectBoardPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  const connectGithub = useMutation({
-    mutationFn: ({ token, repo }: { token: string; repo: string }) =>
-      api.post(`/github/connect?project_id=${projectId}`, { token, repo }),
-    onSuccess: () => {
-      refetchGithub()
-      setTokenInput('')
-      setRepoInput('')
-      setGithubError('')
-    },
-    onError: (err: unknown) => {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setGithubError(detail ?? 'Connection failed')
-    },
-  })
 
   const setRepo = useMutation({
     mutationFn: (repo: string) => api.patch(`/github/repo?project_id=${projectId}`, { repo }),
@@ -566,11 +550,15 @@ export default function ProjectBoardPage() {
               <div className="flex items-center gap-2">
                 <GitBranch size={13} className="text-gray-400" />
                 <span className="text-xs font-medium text-gray-400">GitHub integration</span>
-                {githubFullyConnected && (
-                  <span className="text-xs text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full">Connected</span>
+                {githubTokenAvailable && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                    githubFullyConnected
+                      ? 'text-green-400 bg-green-900/30 border-green-800/50'
+                      : 'text-yellow-400 bg-yellow-900/30 border-yellow-800/50'
+                  }`}>{githubFullyConnected ? 'Connected' : 'Token saved — pick a repo'}</span>
                 )}
               </div>
-              {githubFullyConnected ? (
+              {githubTokenAvailable ? (
                 <div className="space-y-3">
                   {/* Show who authenticated — prefer project-level user, fall back to team */}
                   {(githubStatus?.github_user || githubTeamStatus?.github_user) && (
@@ -633,72 +621,18 @@ export default function ProjectBoardPage() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {/* Primary: OAuth (team-level recommended) */}
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500">
-                      Connect via GitHub OAuth. For a shared connection, go to{' '}
-                      <button
-                        onClick={() => { if (data?.team_id) window.location.href = `/teams/${data.team_id}/settings` }}
-                        className="text-purple-400 hover:text-purple-300 underline underline-offset-2"
-                      >
-                        Team Settings
-                      </button>
-                      {' '}to connect once for all projects.
-                    </p>
-                    <a
-                      href={`${apiBase}/github/oauth/start?project_id=${projectId}`}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-sm rounded-lg transition-colors font-medium"
-                    >
-                      <GitBranch size={14} />
-                      Connect with GitHub
-                    </a>
-                  </div>
-
-                  {/* Secondary: PAT fallback */}
-                  <div>
-                    <button
-                      onClick={() => setShowPatFallback((v) => !v)}
-                      className="text-xs text-gray-500 hover:text-gray-400 underline underline-offset-2"
-                    >
-                      {showPatFallback ? 'Hide' : 'Or use a Personal Access Token'}
-                    </button>
-                    {showPatFallback && (
-                      <div className="mt-2 space-y-2">
-                        <div>
-                          <label className="block text-xs text-gray-400 mb-1">
-                            PAT
-                            <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="ml-2 text-purple-400 hover:text-purple-300">(create token)</a>
-                          </label>
-                          <input
-                            type="password"
-                            placeholder="ghp_..."
-                            value={tokenInput}
-                            onChange={(e) => { setTokenInput(e.target.value); setGithubError('') }}
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-400 mb-1">Repository</label>
-                          <input
-                            placeholder="owner/repo-name"
-                            value={repoInput}
-                            onChange={(e) => { setRepoInput(e.target.value); setGithubError('') }}
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          />
-                        </div>
-                        {githubError && <p className="text-xs text-red-400">{githubError}</p>}
-                        <button
-                          onClick={() => connectGithub.mutate({ token: tokenInput.trim(), repo: repoInput.trim() })}
-                          disabled={connectGithub.isPending || !tokenInput.trim() || !repoInput.trim()}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-                        >
-                          {connectGithub.isPending ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
-                          Connect
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">
+                    GitHub is not connected for this team yet.
+                  </p>
+                  <button
+                    onClick={() => { if (data?.team_id) window.location.href = `/teams/${data.team_id}/settings` }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-sm rounded-lg transition-colors font-medium"
+                  >
+                    <GitBranch size={14} />
+                    Connect GitHub in Team Settings
+                  </button>
+                  <p className="text-xs text-gray-600">Connect once — all projects in this team will share the token.</p>
                 </div>
               )}
             </div>
