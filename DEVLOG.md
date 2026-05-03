@@ -2,6 +2,20 @@
 
 ---
 
+## 2026-04-30 | `bfdc70c` — feat: role-based actor assignment, editable actor roles, AI clarifying questions, auto-fill respects human roles
+
+- `supabase/migrations/011_tasks_actor_role.sql` + `database_full.sql` — new `actor_role text` column on `tasks`
+- `backend/app/models.py` — `TaskDraft` gains optional `actor_role` field
+- `backend/app/services/sprint_planner.py` — persists `actor_role` when writing task rows
+- `backend/app/services/ai_orchestrator.py` — `plan_sprint_one` + `generate_next_sprint` accept `actors` list; AI prompt instructs model to output `actor_role` per task matching an actor's role, preferring humans
+- `backend/app/services/assignment_engine.py` — new role-based priority: human role match → AI role match → type-based fallback → any actor
+- `backend/app/api/projects.py` — passes project actors into both planning calls; new `POST /projects/{id}/actors/auto-fill` endpoint (replaces AI actors, skips roles covered by humans)
+- `backend/app/assistants/project_creation.py` — AI assistant now returns `questions: []` with 2-4 clarifying questions when brief is vague
+- `frontend/src/pages/NewProjectPage.tsx` — editable role input with datalist autocomplete on every actor card; role validation blocks submit; `autoFill` skips AI roles already covered by a human actor; clarifying questions UI with per-question answer inputs and "Regenerate with answers" button
+- `frontend/src/pages/ProjectBoardPage.tsx` — "⚡ Auto-fill AI actors" button in Settings panel; `autoFillActors` mutation
+
+---
+
 ## 2026-04-30 | `004db3f` — fix: invalidate teams cache after invite accept so new team appears immediately
 
 - `frontend/src/pages/InvitePage.tsx` — `doAccept` now calls `queryClient.invalidateQueries({ queryKey: ['teams'] })` before navigating to `/`, so the sidebar team list refreshes immediately without a manual page reload

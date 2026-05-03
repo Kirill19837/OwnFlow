@@ -318,6 +318,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             const branchName = `ownflow/${task.id.slice(0, 8)}`
             const safeTitle = task.title.replace(/[^a-zA-Z0-9\-_ ]/g, '').trim().replace(/ /g, '_').slice(0, 50)
             const filePath = `.ownflow/tasks/${task.id.slice(0, 8)}_${safeTitle}.md`
+            const prState = task.github_pr_state
+            const stateBadge =
+              prState === 'merged'
+                ? { label: 'Merged', cls: 'bg-purple-900/40 text-purple-300 border border-purple-700/50' }
+                : prState === 'closed'
+                ? { label: 'Closed', cls: 'bg-gray-800 text-gray-400 border border-gray-700' }
+                : { label: 'Open', cls: 'bg-green-900/40 text-green-400 border border-green-800/50' }
             return (
               <div className="bg-gray-900 border border-purple-800/40 rounded-xl p-4 space-y-3">
                 <h3 className="text-xs font-medium text-gray-400 uppercase flex items-center gap-1.5">
@@ -343,6 +350,9 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                       <GitPullRequest size={12} />
                       View pull request ↗
                     </a>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${stateBadge.cls}`}>
+                      {stateBadge.label}
+                    </span>
                   </div>
                 </div>
               </div>

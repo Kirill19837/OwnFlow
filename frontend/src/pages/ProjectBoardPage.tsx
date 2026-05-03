@@ -33,7 +33,9 @@ export default function ProjectBoardPage() {
   const { currentProject, setCurrentProject } = useProjectStore()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = useState(
+    () => new URLSearchParams(window.location.search).get('github_connected') === '1'
+  )
 
   // Board-level prompt
   const [boardPrompt, setBoardPrompt] = useState('')
@@ -55,6 +57,7 @@ export default function ProjectBoardPage() {
   const [repoInput, setRepoInput] = useState('')
   const [tokenInput, setTokenInput] = useState('')
   const [githubError, setGithubError] = useState('')
+  const [showPatFallback, setShowPatFallback] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -143,9 +146,42 @@ export default function ProjectBoardPage() {
 
   const { data: githubStatus, refetch: refetchGithub } = useQuery({
     queryKey: ['github-status', projectId],
-    queryFn: () => api.get<{ connected: boolean; repo?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
+    queryFn: () => api.get<{ connected: boolean; repo?: string; github_user?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
     enabled: !!projectId && showSettings,
   })
+
+  const { data: githubTeamStatus } = useQuery({
+    queryKey: ['github-team-status', data?.team_id],
+    queryFn: () => api.get<{ connected: boolean; github_user?: string }>(`/github/team-status?team_id=${data?.team_id}`).then(r => r.data),
+    enabled: !!data?.team_id && showSettings,
+  })
+
+  // Team is connected if either the project has its own connection or the team has one
+  const teamGithubConnected = !!githubTeamStatus?.connected
+  const githubFullyConnected = !!githubStatus?.connected || teamGithubConnected
+
+  const { data: githubRepos } = useQuery({
+    queryKey: ['github-repos', projectId, data?.team_id],
+    queryFn: () => {
+      const param = data?.team_id ? `team_id=${data.team_id}` : `project_id=${projectId}`
+      return api.get<{ repos: { full_name: string; private: boolean }[] }>(`/github/repos?${param}`).then(r => r.data.repos)
+    },
+    enabled: !!projectId && githubFullyConnected,
+  })
+
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+  // Auto-open settings when GitHub redirects back with ?github_connected=1
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('github_connected') === '1') {
+      refetchGithub()
+      // Clean the URL
+      const clean = window.location.pathname
+      window.history.replaceState({}, '', clean)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const connectGithub = useMutation({
     mutationFn: ({ token, repo }: { token: string; repo: string }) =>
@@ -530,30 +566,63 @@ export default function ProjectBoardPage() {
               <div className="flex items-center gap-2">
                 <GitBranch size={13} className="text-gray-400" />
                 <span className="text-xs font-medium text-gray-400">GitHub integration</span>
-                {githubStatus?.connected && (
+                {githubFullyConnected && (
                   <span className="text-xs text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full">Connected</span>
                 )}
               </div>
-              {githubStatus?.connected ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400">
-                    Repo: <span className="text-white font-mono">{githubStatus.repo}</span>
-                  </p>
-                  <p className="text-xs text-gray-500">AI agents will open PRs to this repo when tasks are executed.</p>
-                  <div className="flex gap-2 flex-wrap items-center">
-                    <input
-                      placeholder="owner/repo-name"
-                      value={repoInput}
-                      onChange={(e) => setRepoInput(e.target.value)}
-                      className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-48 font-mono"
-                    />
-                    <button
-                      onClick={() => { if (repoInput.trim()) setRepo.mutate(repoInput.trim()) }}
-                      disabled={setRepo.isPending || !repoInput.trim()}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-                    >
-                      <LinkIcon size={12} /> Change repo
-                    </button>
+              {githubFullyConnected ? (
+                <div className="space-y-3">
+                  {/* Show who authenticated — prefer project-level user, fall back to team */}
+                  {(githubStatus?.github_user || githubTeamStatus?.github_user) && (
+                    <p className="text-xs text-gray-400">
+                      {teamGithubConnected && !githubStatus?.github_user
+                        ? <>Team GitHub: <span className="text-white font-mono">@{githubTeamStatus!.github_user}</span></>
+                        : <>Signed in as <span className="text-white font-mono">@{githubStatus!.github_user}</span></>
+                      }
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500">AI agents will commit code and open PRs to this repo when tasks are executed.</p>
+
+                  {/* Repo selector */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Repository for this project</label>
+                    <div className="flex gap-2 items-center flex-wrap">
+                      {githubRepos && githubRepos.length > 0 ? (
+                        <select
+                          value={repoInput || githubStatus?.repo || ''}
+                          onChange={(e) => setRepoInput(e.target.value)}
+                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="">— select a repo —</option>
+                          {githubRepos.map((r) => (
+                            <option key={r.full_name} value={r.full_name}>
+                              {r.private ? '🔒 ' : ''}{r.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          placeholder="owner/repo-name"
+                          value={repoInput || githubStatus?.repo || ''}
+                          onChange={(e) => setRepoInput(e.target.value)}
+                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      )}
+                      <button
+                        onClick={() => { const r = (repoInput || githubStatus?.repo || '').trim(); if (r) setRepo.mutate(r) }}
+                        disabled={setRepo.isPending || !(repoInput || githubStatus?.repo)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                      >
+                        <LinkIcon size={12} /> {githubStatus?.repo ? 'Change' : 'Set repo'}
+                      </button>
+                    </div>
+                    {githubStatus?.repo && !repoInput && (
+                      <p className="text-xs text-gray-500 mt-1">Current: <span className="font-mono text-gray-400">{githubStatus.repo}</span></p>
+                    )}
+                  </div>
+
+                  {/* Only show disconnect if the project has its own connection */}
+                  {githubStatus?.connected && (
                     <button
                       onClick={() => disconnectGithub.mutate()}
                       disabled={disconnectGithub.isPending}
@@ -561,47 +630,74 @@ export default function ProjectBoardPage() {
                     >
                       <Unlink size={12} /> Disconnect
                     </button>
-                  </div>
+                  )}
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-500">Enter your GitHub credentials so AI agents can commit code and open pull requests.</p>
+                <div className="space-y-3">
+                  {/* Primary: OAuth (team-level recommended) */}
                   <div className="space-y-2">
-                    <div>
-                      <label className="block text-xs text-gray-400 mb-1">
-                        Personal Access Token <span className="text-red-400">*</span>
-                        <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="ml-2 text-purple-400 hover:text-purple-300">(create token)</a>
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="ghp_..."
-                        value={tokenInput}
-                        onChange={(e) => { setTokenInput(e.target.value); setGithubError('') }}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-400 mb-1">
-                        Repository <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        placeholder="owner/repo-name"
-                        value={repoInput}
-                        onChange={(e) => { setRepoInput(e.target.value); setGithubError('') }}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
-                    </div>
-                    {githubError && (
-                      <p className="text-xs text-red-400">{githubError}</p>
-                    )}
-                    <button
-                      onClick={() => connectGithub.mutate({ token: tokenInput.trim(), repo: repoInput.trim() })}
-                      disabled={connectGithub.isPending || !tokenInput.trim() || !repoInput.trim()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    <p className="text-xs text-gray-500">
+                      Connect via GitHub OAuth. For a shared connection, go to{' '}
+                      <button
+                        onClick={() => { if (data?.team_id) window.location.href = `/teams/${data.team_id}/settings` }}
+                        className="text-purple-400 hover:text-purple-300 underline underline-offset-2"
+                      >
+                        Team Settings
+                      </button>
+                      {' '}to connect once for all projects.
+                    </p>
+                    <a
+                      href={`${apiBase}/github/oauth/start?project_id=${projectId}`}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-sm rounded-lg transition-colors font-medium"
                     >
-                      {connectGithub.isPending ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
-                      Connect
+                      <GitBranch size={14} />
+                      Connect with GitHub
+                    </a>
+                  </div>
+
+                  {/* Secondary: PAT fallback */}
+                  <div>
+                    <button
+                      onClick={() => setShowPatFallback((v) => !v)}
+                      className="text-xs text-gray-500 hover:text-gray-400 underline underline-offset-2"
+                    >
+                      {showPatFallback ? 'Hide' : 'Or use a Personal Access Token'}
                     </button>
+                    {showPatFallback && (
+                      <div className="mt-2 space-y-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            PAT
+                            <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="ml-2 text-purple-400 hover:text-purple-300">(create token)</a>
+                          </label>
+                          <input
+                            type="password"
+                            placeholder="ghp_..."
+                            value={tokenInput}
+                            onChange={(e) => { setTokenInput(e.target.value); setGithubError('') }}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Repository</label>
+                          <input
+                            placeholder="owner/repo-name"
+                            value={repoInput}
+                            onChange={(e) => { setRepoInput(e.target.value); setGithubError('') }}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          />
+                        </div>
+                        {githubError && <p className="text-xs text-red-400">{githubError}</p>}
+                        <button
+                          onClick={() => connectGithub.mutate({ token: tokenInput.trim(), repo: repoInput.trim() })}
+                          disabled={connectGithub.isPending || !tokenInput.trim() || !repoInput.trim()}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                        >
+                          {connectGithub.isPending ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                          Connect
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

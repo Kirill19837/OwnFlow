@@ -44,9 +44,24 @@ export default function TaskCard({ task, actors, onClick }: Props) {
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              title="View PR on GitHub"
+              title={
+                task.github_pr_state === 'merged'
+                  ? 'PR merged'
+                  : task.github_pr_state === 'closed'
+                  ? 'PR closed'
+                  : 'View open PR on GitHub'
+              }
             >
-              <GitPullRequest size={13} className="text-purple-400 hover:text-purple-300" />
+              <GitPullRequest
+                size={13}
+                className={
+                  task.github_pr_state === 'merged'
+                    ? 'text-purple-400 hover:text-purple-300'
+                    : task.github_pr_state === 'closed'
+                    ? 'text-gray-500 hover:text-gray-400'
+                    : 'text-green-400 hover:text-green-300'
+                }
+              />
             </a>
           )}
           <span

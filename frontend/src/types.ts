@@ -107,6 +107,8 @@ export interface Task {
   ai_ready?: boolean
   task_details?: Record<string, string>
   github_pr_url?: string
+  github_pr_state?: 'open' | 'merged' | 'closed'
+  github_pr_number?: number
 }
 
 export interface TaskInteraction {

@@ -1,11 +1,16 @@
-"""GitHub integration service — per-project Personal Access Token.
+"""GitHub integration service — per-project Personal Access Token or OAuth token.
 
 Each project stores its own github_token + repo in the github_connections table.
-No shared GitHub App credentials required.
+The token may come from a manually-entered PAT or from the GitHub OAuth App flow.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
+import json
+import re
+
 import httpx
 
 from app.db import get_supabase
@@ -20,7 +25,13 @@ def _auth(token: str) -> dict:
 
 
 async def get_connection_for_project(project_id: str) -> dict | None:
-    """Return {token, owner, repo} for a project, or None if not connected."""
+    """
+    Return {token, owner, repo} for a project, or None if not connected.
+
+    Token resolution order:
+      1. Project-level token in github_connections (PAT or project-scoped OAuth)
+      2. Team-level token in team_github_tokens (team-wide OAuth connection)
+    """
     db = get_supabase()
     resp = (
         db.table("github_connections")
@@ -28,16 +39,53 @@ async def get_connection_for_project(project_id: str) -> dict | None:
         .eq("project_id", project_id)
         .execute()
     )
+    if resp.data:
+        row = resp.data[0]
+        owner = row.get("repo_owner") or ""
+        repo_name = row.get("repo_name") or ""
+        token = row.get("github_token") or ""
+        if not token:
+            # No project-level token — try team-level
+            token = await _get_team_token_for_project(project_id, db)
+        if token and repo_name:
+            return {"token": token, "owner": owner, "repo": repo_name}
+
+    # No github_connections row at all — still try team token
+    # (project might not have connected a repo yet)
+    return None
+
+
+async def _get_team_token_for_project(project_id: str, db=None) -> str:
+    """Look up the team-level GitHub token for the project's team."""
+    if db is None:
+        db = get_supabase()
+    project_resp = db.table("projects").select("team_id").eq("id", project_id).execute()
+    if not project_resp.data or not project_resp.data[0].get("team_id"):
+        return ""
+    team_id = project_resp.data[0]["team_id"]
+    token_resp = (
+        db.table("team_github_tokens")
+        .select("github_token")
+        .eq("team_id", team_id)
+        .execute()
+    )
+    if not token_resp.data:
+        return ""
+    return token_resp.data[0].get("github_token") or ""
+
+
+async def get_team_token(team_id: str) -> str | None:
+    """Return the stored GitHub token for a team, or None."""
+    db = get_supabase()
+    resp = (
+        db.table("team_github_tokens")
+        .select("github_token")
+        .eq("team_id", team_id)
+        .execute()
+    )
     if not resp.data:
         return None
-    row = resp.data[0]
-    if not row.get("github_token") or not row.get("repo_name"):
-        return None
-    return {
-        "token": row["github_token"],
-        "owner": row["repo_owner"],
-        "repo": row["repo_name"],
-    }
+    return resp.data[0].get("github_token") or None
 
 
 async def verify_token(token: str, owner: str, repo: str) -> str | None:
@@ -55,6 +103,139 @@ async def verify_token(token: str, owner: str, repo: str) -> str | None:
         # Also grab the authenticated user
         user_resp = await client.get(f"{GITHUB_API}/user", headers=_auth(token))
         return user_resp.json().get("login") if user_resp.status_code == 200 else "unknown"
+
+
+# ─── OAuth App flow ───────────────────────────────────────────────────────────
+
+async def exchange_code(client_id: str, client_secret: str, code: str) -> str | None:
+    """
+    Exchange a GitHub OAuth callback code for an access token.
+    Returns the access_token string or None on failure.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            json={"client_id": client_id, "client_secret": client_secret, "code": code},
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data.get("access_token") or None
+
+
+async def get_authenticated_user(token: str) -> str | None:
+    """Return the GitHub login for this token, or None."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{GITHUB_API}/user", headers=_auth(token))
+        return resp.json().get("login") if resp.status_code == 200 else None
+
+
+# ─── Repository listing ───────────────────────────────────────────────────────
+
+async def list_repos(token: str) -> list[dict]:
+    """
+    Return all repos accessible by this token.
+    Shape: [{"full_name": "owner/repo", "private": bool}]
+    Fetches up to 10 pages (1000 repos) to handle large accounts.
+    """
+    results: list[dict] = []
+    async with httpx.AsyncClient() as client:
+        page = 1
+        while True:
+            resp = await client.get(
+                f"{GITHUB_API}/user/repos",
+                headers=_auth(token),
+                params={"type": "all", "per_page": 100, "sort": "updated", "page": page},
+            )
+            if resp.status_code != 200:
+                break
+            batch = resp.json()
+            if not batch:
+                break
+            results.extend({"full_name": r["full_name"], "private": r["private"]} for r in batch)
+            if len(batch) < 100:
+                break
+            page += 1
+            if page > 10:
+                break
+    return results
+
+
+# ─── Webhook registration ─────────────────────────────────────────────────────
+
+async def register_webhook(
+    token: str,
+    owner: str,
+    repo: str,
+    webhook_url: str,
+    secret: str,
+) -> bool:
+    """
+    Register an OwnFlow webhook on the repo for pull_request events.
+    Returns True if created (201) or already exists (422).
+    Silently returns False if the token doesn't have admin rights.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{GITHUB_API}/repos/{owner}/{repo}/hooks",
+            headers=_auth(token),
+            json={
+                "name": "web",
+                "active": True,
+                "events": ["pull_request"],
+                "config": {
+                    "url": webhook_url,
+                    "content_type": "json",
+                    "secret": secret,
+                    "insecure_ssl": "0",
+                },
+            },
+        )
+        return resp.status_code in (201, 422)
+
+
+# ─── HMAC signature validation ────────────────────────────────────────────────
+
+def verify_webhook_signature(body: bytes, signature_header: str, secret: str) -> bool:
+    """Validate GitHub's X-Hub-Signature-256 header."""
+    if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    received = signature_header[len("sha256="):]
+    return hmac.compare_digest(expected, received)
+
+
+# ─── Real code file extraction ────────────────────────────────────────────────
+
+def parse_code_files(content: str) -> list[dict]:
+    """
+    Extract a ###FILES### block from an AI deliverable.
+
+    The AI is instructed to end code-related responses with:
+
+        ###FILES###
+        [{"path": "src/foo.py", "content": "..."}]
+
+    Returns a list of {path, content} dicts, or [] if not present / malformed.
+    """
+    marker = "###FILES###"
+    idx = content.rfind(marker)
+    if idx == -1:
+        return []
+    after = content[idx + len(marker):].strip()
+    match = re.search(r"(\[[\s\S]*\])", after)
+    if not match:
+        return []
+    try:
+        items = json.loads(match.group(1))
+        return [
+            {"path": str(f["path"]), "content": str(f["content"])}
+            for f in items
+            if isinstance(f, dict) and "path" in f and "content" in f
+        ]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
 
 
 async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
@@ -119,10 +300,9 @@ async def open_pull_request(
     branch: str,
     title: str,
     body: str,
-) -> str | None:
-    """Open a PR against the default branch. Returns HTML URL or None."""
+) -> dict | None:
+    """Open a PR against the default branch. Returns {"url": ..., "number": ...} or None."""
     async with httpx.AsyncClient() as client:
-        # Get default branch
         repo_resp = await client.get(
             f"{GITHUB_API}/repos/{owner}/{repo}",
             headers=_auth(token),
@@ -135,13 +315,14 @@ async def open_pull_request(
             json={"title": title, "body": body, "head": branch, "base": default_branch},
         )
         if resp.status_code == 201:
-            return resp.json()["html_url"]
+            data = resp.json()
+            return {"url": data["html_url"], "number": data["number"]}
     return None
 
 
 async def create_pr_for_task(task_id: str, task_title: str, deliverable_content: str) -> str | None:
     """
-    Full flow: look up project connection → create branch → commit deliverable → open PR.
+    Full flow: look up project connection → create branch → commit files → open PR.
     Returns PR URL or None if not connected / any step fails.
     """
     db = get_supabase()
@@ -164,27 +345,59 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
             .strip()
             .replace(" ", "_")[:50]
         )
-        file_path = f".ownflow/tasks/{task_id[:8]}_{safe_title}.md"
-        await commit_file(
-            token, owner, repo, branch, file_path,
-            deliverable_content,
-            f"feat: OwnFlow deliverable — {task_title}",
+
+        # Extract real code files from ###FILES### block
+        code_files = parse_code_files(deliverable_content)
+        narrative = (
+            deliverable_content[: deliverable_content.rfind("###FILES###")].strip()
+            if code_files
+            else deliverable_content
         )
 
-        pr_url = await open_pull_request(
+        if code_files:
+            for f in code_files:
+                await commit_file(
+                    token, owner, repo, branch,
+                    f["path"], f["content"],
+                    f"feat: {task_title} — {f['path']}",
+                )
+            # Also commit a summary note
+            summary_path = f".ownflow/tasks/{task_id[:8]}_{safe_title}.md"
+            await commit_file(
+                token, owner, repo, branch, summary_path,
+                narrative or deliverable_content,
+                f"docs: OwnFlow task summary — {task_title}",
+            )
+        else:
+            file_path = f".ownflow/tasks/{task_id[:8]}_{safe_title}.md"
+            await commit_file(
+                token, owner, repo, branch, file_path,
+                deliverable_content,
+                f"feat: OwnFlow deliverable — {task_title}",
+            )
+
+        pr_result = await open_pull_request(
             token, owner, repo, branch,
             title=f"[OwnFlow] {task_title}",
             body=(
                 f"**Task:** {task_title}\n\n"
                 f"**Task ID:** `{task_id}`\n\n"
-                f"---\n\n{deliverable_content[:3000]}"
-                + ("…\n\n_(truncated — see file for full deliverable)_" if len(deliverable_content) > 3000 else "")
+                + (f"_{len(code_files)} file(s) committed_\n\n" if code_files else "")
+                + "---\n\n"
+                + narrative[:3000]
+                + ("\n\n_(truncated — see commits for full content)_" if len(narrative) > 3000 else "")
             ),
         )
 
-        if pr_url:
-            db.table("tasks").update({"github_pr_url": pr_url}).eq("id", task_id).execute()
+        if pr_result:
+            db.table("tasks").update({
+                "github_pr_url": pr_result["url"],
+                "github_pr_state": "open",
+                "github_pr_number": pr_result["number"],
+            }).eq("id", task_id).execute()
+            return pr_result["url"]
 
-        return pr_url
     except Exception:
         return None
+
+    return None

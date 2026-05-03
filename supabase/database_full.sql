@@ -15,6 +15,8 @@ drop table if exists user_skills         cascade;
 drop table if exists user_signups        cascade;
 drop table if exists skills              cascade;
 drop table if exists task_interactions   cascade;
+drop table if exists team_github_tokens   cascade;
+drop table if exists github_oauth_states cascade;
 drop table if exists github_connections  cascade;
 drop table if exists ai_messages         cascade;
 drop table if exists ai_logs             cascade;
@@ -263,6 +265,8 @@ create table tasks (
   depends_on      uuid[]      default '{}',
   actor_role      text,
   github_pr_url   text,
+  github_pr_state text,
+  github_pr_number int,
   ai_ready        boolean     not null default false,
   is_ready        boolean     not null default false,
   task_details    jsonb,
@@ -330,12 +334,29 @@ create table ai_messages (
 -- ─── GitHub integration ───────────────────────────────────────────────────────
 
 create table github_connections (
-  id           uuid        primary key default gen_random_uuid(),
-  project_id   uuid        references projects(id) on delete cascade unique,
-  github_token text        not null,
-  repo_owner   text        default '',
-  repo_name    text        default '',
-  created_at   timestamptz default now()
+  id                uuid        primary key default gen_random_uuid(),
+  project_id        uuid        references projects(id) on delete cascade unique,
+  github_token      text        not null default '',
+  repo_owner        text        default '',
+  repo_name         text        default '',
+  github_user_login text,
+  webhook_secret    text,
+  created_at        timestamptz default now()
+);
+
+create table team_github_tokens (
+  id                uuid        primary key default gen_random_uuid(),
+  team_id           uuid        not null unique references teams(id) on delete cascade,
+  github_token      text        not null,
+  github_user_login text,
+  created_at        timestamptz not null default now()
+);
+
+create table github_oauth_states (
+  state       text        primary key,
+  project_id  uuid        references projects(id) on delete cascade,
+  team_id     uuid        references teams(id) on delete cascade,
+  created_at  timestamptz not null default now()
 );
 
 -- ─── Realtime ────────────────────────────────────────────────────────────────
@@ -369,7 +390,9 @@ alter table assignments        enable row level security;
 alter table deliverables       enable row level security;
 alter table ai_logs            enable row level security;
 alter table ai_messages        enable row level security;
-alter table github_connections enable row level security;
+alter table github_connections   enable row level security;
+alter table team_github_tokens   enable row level security;
+alter table github_oauth_states  enable row level security;
 
 create policy "service_role_all_roles"             on roles              for all using (true);
 create policy "service_role_all_companies"         on companies          for all using (true);
@@ -395,6 +418,8 @@ create policy "service_role_all_deliverables"      on deliverables       for all
 create policy "service_role_all_ai_logs"           on ai_logs            for all using (true);
 create policy "service_role_all_ai_messages"       on ai_messages        for all using (true);
 create policy "service_role_all_github"            on github_connections for all using (true);
+create policy "service_role_all_team_github_tokens" on team_github_tokens for all using (true);
+create policy "service_role_all_github_oauth"      on github_oauth_states for all using (true);
 
 -- ─── Skills catalogue ────────────────────────────────────────────────────────
 
