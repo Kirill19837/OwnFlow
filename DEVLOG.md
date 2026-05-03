@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-05-03 | `3084a45` — feat: GitHub OAuth App, team-level tokens, webhooks, real code commits, PR state badges
+
+- `supabase/migrations/012_github_oauth_webhooks.sql` — `github_oauth_states` table for CSRF state; `github_connections` gains `github_user_login`, `webhook_secret`; `tasks` gains `github_pr_state`, `github_pr_number`
+- `supabase/migrations/013_team_github_tokens.sql` — new `team_github_tokens` table (one per team); `github_oauth_states` extended with `team_id`; `github_connections.github_token` made nullable
+- `supabase/database_full.sql` — synced with all migrations
+- `backend/app/config.py` — added `github_client_id`, `github_client_secret`, `backend_url` settings
+- `backend/app/services/github_service.py` — OAuth code exchange, user/repo listing, webhook registration + HMAC validation, real code file extraction (`###FILES###` block), team token fallback for `get_connection_for_project`
+- `backend/app/api/github.py` — team + project OAuth flows; `GET /github/oauth/start`, `GET /github/oauth/callback`; team-status/disconnect endpoints; webhook receiver; `_backend_base()` helper uses `BACKEND_URL` env var
+- `backend/app/services/actor_executor.py` — system prompt instructs AI to emit `###FILES###` JSON block for code tasks
+- `.github/workflows/deploy.yml` — passes `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `BACKEND_URL=https://ownflow.21century.tech/api` to container
+- `docker-compose.prod.yml` — added `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `BACKEND_URL` env vars
+- `frontend/src/types.ts` — `Task` interface gains `github_pr_state` and `github_pr_number`
+- `frontend/src/pages/ProjectBoardPage.tsx` — team-aware GitHub UI; OAuth connect link; repo dropdown; `showSettings` initialized from URL param
+- `frontend/src/pages/OrgSettingsPage.tsx` — GitHub Integration section; team connect/disconnect; `useEffect` ordered after query declaration
+- `frontend/src/components/TaskCard.tsx` — PR icon colors by state (green/purple/gray)
+- `frontend/src/components/TaskDrawer.tsx` — PR state badge (Open/Merged/Closed pill)
+
+---
+
 ## 2026-04-30 | `bfdc70c` — feat: role-based actor assignment, editable actor roles, AI clarifying questions, auto-fill respects human roles
 
 - `supabase/migrations/011_tasks_actor_role.sql` + `database_full.sql` — new `actor_role text` column on `tasks`

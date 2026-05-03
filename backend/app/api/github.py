@@ -78,7 +78,7 @@ async def github_oauth_start(project_id: str = "", team_id: str = ""):
         f"&scope=repo%20admin%3Arepo_hook"
         f"&state={state}"
     )
-    return {"url": authorize_url}
+    return Response(status_code=302, headers={"Location": authorize_url})
 
 
 @router.get("/oauth/callback")
