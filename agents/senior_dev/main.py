@@ -34,7 +34,7 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "")
-MODEL = os.environ.get("MODEL", "claude-opus-4-5")
+MODEL = os.environ.get("MODEL", "claude-haiku-4-5")
 
 app = FastAPI(title="OwnFlow Senior Developer Agent")
 
