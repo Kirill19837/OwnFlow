@@ -3,9 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import api from '../lib/api'
+import { useAuthStore } from '../store/authStore'
+import { useCompanyStore } from '../store/companyStore'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
-import type { Project, Assignment, TeamMember, Skill } from '../types'
+import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
@@ -45,7 +47,10 @@ type AgentRuntimeStatus = {
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const { session } = useAuthStore()
+  const { company } = useCompanyStore()
   const { currentProject, setCurrentProject } = useProjectStore()
+  const userId = session?.user?.id ?? ''
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(
@@ -69,10 +74,9 @@ export default function ProjectBoardPage() {
   const [newActorRole, setNewActorRole] = useState('')
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
-  const [newActorWebhookUrl, setNewActorWebhookUrl] = useState('')
-  const [newActorApiKey, setNewActorApiKey] = useState('')
+  const [newActorCompanyAgentId, setNewActorCompanyAgentId] = useState('')
   const [repoInput, setRepoInput] = useState('')
-  const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'github'>('general')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'team-actors' | 'github'>('general')
   const [showRolePicker, setShowRolePicker] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -121,7 +125,6 @@ export default function ProjectBoardPage() {
       model?: string
       user_id?: string | null
       webhook_url?: string
-      agent_api_key?: string
     }) =>
       api.post(`/projects/${projectId}/actors`, {
         project_id: projectId,
@@ -134,8 +137,7 @@ export default function ProjectBoardPage() {
       setNewActorRole('')
       setNewActorType('ai')
       setNewActorModel('gpt-4o')
-      setNewActorWebhookUrl('')
-      setNewActorApiKey('')
+      setNewActorCompanyAgentId('')
     },
   })
 
@@ -199,17 +201,27 @@ export default function ProjectBoardPage() {
     enabled: !!projectId && githubTokenAvailable,
   })
 
+  const { data: companyAgents = [] } = useQuery<CompanyAgent[]>({
+    queryKey: ['company-agents', company?.id],
+    queryFn: () =>
+      api
+        .get<CompanyAgent[]>(`/companies/${company!.id}/agents`, { params: { user_id: userId } })
+        .then((r) => r.data),
+    enabled: !!company?.id && !!userId && showSettings && settingsTab === 'team-actors',
+    staleTime: 5 * 60 * 1000,
+  })
+
   const { data: teamData, isLoading: teamMembersLoading } = useQuery({
     queryKey: ['team', data?.team_id],
     queryFn: () => api.get<{ members?: TeamMember[] }>(`/teams/${data!.team_id}`).then((r) => r.data),
-    enabled: !!data?.team_id && showSettings && settingsTab === 'agents',
+    enabled: !!data?.team_id && showSettings && settingsTab === 'team-actors',
   })
   const teamMembers: TeamMember[] = useMemo(() => teamData?.members ?? [], [teamData?.members])
 
   const { data: skills = [] } = useQuery<Skill[]>({
     queryKey: ['skills'],
     queryFn: () => api.get<Skill[]>('/skills').then((r) => r.data),
-    enabled: showSettings && settingsTab === 'agents',
+    enabled: showSettings && settingsTab === 'team-actors',
     staleTime: 5 * 60 * 1000,
   })
   const roleCategories = useMemo(() => [...new Set(skills.map((s) => s.category))], [skills])
@@ -496,11 +508,12 @@ export default function ProjectBoardPage() {
               {[
                 { id: 'general', label: 'General' },
                 { id: 'agents', label: 'Agents' },
+                { id: 'team-actors', label: 'Team actors' },
                 { id: 'github', label: 'GitHub' },
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setSettingsTab(tab.id as 'general' | 'agents' | 'github')}
+                  onClick={() => setSettingsTab(tab.id as 'general' | 'agents' | 'team-actors' | 'github')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     settingsTab === tab.id
                       ? 'bg-purple-600 text-white'
@@ -573,7 +586,7 @@ export default function ProjectBoardPage() {
                     <span className="text-purple-300 font-medium">Built-in agents</span> run inside OwnFlow and use each actor's selected model.
                   </p>
                   <p className="text-xs text-gray-500">
-                    If a Webhook URL is provided, tasks for that actor are dispatched to your external agent endpoint instead.
+                    If an actor is linked to a registered Company agent, tasks for that actor are dispatched to that external endpoint.
                   </p>
                 </div>
                 <div className="mb-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-2">
@@ -616,6 +629,12 @@ export default function ProjectBoardPage() {
                     </div>
                   </div>
                 </div>
+                <p className="text-xs text-gray-500">Manage actor roles, teammates, and webhooks in the Team actors tab.</p>
+              </div>
+            )}
+
+            {settingsTab === 'team-actors' && (
+              <div className="border-t border-gray-700 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <label className="block text-xs font-medium text-gray-400">Team actors</label>
                 <div className="flex gap-2">
@@ -806,12 +825,33 @@ export default function ProjectBoardPage() {
                     )}
 
                     <div className="space-y-2 mt-1">
-                      <input
-                        placeholder="Webhook URL — optional external dispatch target"
-                        defaultValue={a.webhook_url || ''}
-                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { webhook_url: e.target.value.trim() || null } })}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
+                      <select
+                        value={companyAgents.find((agent) => agent.webhook_url === (a.webhook_url || ''))?.id || ''}
+                        onChange={(e) => {
+                          const selected = companyAgents.find((agent) => agent.id === e.target.value)
+                          updateActor.mutate({
+                            actorId: a.id,
+                            patch: {
+                              webhook_url: selected?.webhook_url || null,
+                              agent_api_key: null,
+                            },
+                          })
+                        }}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
+                        {companyAgents.map((agent) => (
+                          <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
+                            {agent.name}{agent.role ? ` - ${agent.role}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {a.webhook_url && (
+                        <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
+                      )}
+                      {companyAgents.length === 0 && (
+                        <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -855,8 +895,7 @@ export default function ProjectBoardPage() {
                     role: newActorRole.trim() || undefined,
                     type: newActorType,
                     model: newActorType === 'ai' ? newActorModel : undefined,
-                    webhook_url: newActorWebhookUrl.trim() || undefined,
-                    agent_api_key: newActorWebhookUrl.trim() && newActorApiKey.trim() ? newActorApiKey.trim() : undefined,
+                    webhook_url: companyAgents.find((agent) => agent.id === newActorCompanyAgentId)?.webhook_url || undefined,
                   })}
                   disabled={addActor.isPending}
                   className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
@@ -865,20 +904,25 @@ export default function ProjectBoardPage() {
                 </button>
               </div>
               <div className="space-y-2 mt-2">
-                <input
-                  placeholder="Webhook URL for new actor (optional)"
-                  value={newActorWebhookUrl}
-                  onChange={(e) => setNewActorWebhookUrl(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                {newActorWebhookUrl && (
-                  <input
-                    placeholder="API key (sent as X-Api-Key header, optional)"
-                    value={newActorApiKey}
-                    onChange={(e) => setNewActorApiKey(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    type="password"
-                  />
+                <select
+                  value={newActorCompanyAgentId}
+                  onChange={(e) => setNewActorCompanyAgentId(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
+                  {companyAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
+                      {agent.name}{agent.role ? ` - ${agent.role}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {newActorCompanyAgentId && (
+                  <p className="text-xs text-gray-500 font-mono truncate">
+                    {companyAgents.find((agent) => agent.id === newActorCompanyAgentId)?.webhook_url}
+                  </p>
+                )}
+                {companyAgents.length === 0 && (
+                  <p className="text-xs text-gray-500">Register reusable webhook agents in Company Settings -&gt; Agents.</p>
                 )}
               </div>
               </div>

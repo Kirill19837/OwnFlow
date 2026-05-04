@@ -141,8 +141,33 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
     }
 
     headers = {"Content-Type": "application/json"}
-    if actor.get("agent_api_key"):
-        headers["X-Api-Key"] = actor["agent_api_key"]
+    agent_api_key = actor.get("agent_api_key")
+    if not agent_api_key:
+        company_id = project.get("company_id")
+        if not company_id and project.get("team_id"):
+            team_resp = (
+                db.table("teams")
+                .select("company_id")
+                .eq("id", project["team_id"])
+                .single()
+                .execute()
+            )
+            company_id = (team_resp.data or {}).get("company_id")
+        if company_id:
+            company_agent_resp = (
+                db.table("company_agents")
+                .select("agent_api_key")
+                .eq("company_id", company_id)
+                .eq("webhook_url", webhook_url)
+                .limit(1)
+                .execute()
+            )
+            first = (company_agent_resp.data or [None])[0]
+            if isinstance(first, dict):
+                agent_api_key = first.get("agent_api_key")
+
+    if agent_api_key:
+        headers["X-Api-Key"] = agent_api_key
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
