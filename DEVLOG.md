@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-05-04 | `db064e0` — feat: project settings tabs, agents runtime panel, and executor-state schema fix
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — split Project Settings into `General`, `Agents`, and `GitHub` tabs; moved actor setup into `Agents`; added per-AI-actor model selector; repo picker now supports search via input+datalist
+- `frontend/src/pages/ProjectBoardPage.tsx` — added built-in agent runtime read-only panel (image source + OpenAI/Anthropic key source) fed by new project runtime endpoint
+- `backend/app/api/projects.py` — added `GET /projects/{project_id}/agent-runtime` (non-secret runtime metadata)
+- `backend/app/api/projects.py` — fixed `dashboard_executor_state` query to use existing `tasks.agent_dispatched_at` / `tasks.created_at` instead of missing `tasks.updated_at`
+
+---
+
 ## 2026-05-04 | `76241c7` — fix: use valid docker-socket-proxy image tag in prod compose
 
 - `docker-compose.prod.yml` — changed `tecnativa/docker-socket-proxy:0.4.2` to `tecnativa/docker-socket-proxy:v0.4.2` to match published image tag and fix deploy pull error (`manifest unknown`)
