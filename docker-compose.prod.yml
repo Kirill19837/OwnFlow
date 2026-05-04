@@ -2,7 +2,7 @@ services:
   # Security boundary: backend never mounts the raw Docker socket directly.
   # It talks to this proxy, which only exposes the Docker API scopes we enable below.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.4.2
+    image: tecnativa/docker-socket-proxy:v0.4.2
     restart: unless-stopped
     environment:
       CONTAINERS: 1
