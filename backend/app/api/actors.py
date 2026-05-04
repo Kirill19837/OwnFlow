@@ -41,15 +41,34 @@ def update_actor(actor_id: str, body: dict):
         "docker_image",
         "extra_env",
     }
-    # company_agent_id: resolve template and copy dispatch fields server-side
+    # company_agent_id: resolve template and copy dispatch fields server-side.
+    # Scope the lookup to the actor's own company to prevent cross-tenant leakage.
     company_agent_id = body.get("company_agent_id")
     update = {k: v for k, v in body.items() if k in allowed_fields}
     if company_agent_id is not None:
         if company_agent_id:
-            ca_resp = db.table("company_agents").select("*").eq("id", company_agent_id).single().execute()
-            if not ca_resp.data:
-                raise HTTPException(404, "Company agent not found")
+            # Resolve actor → project → team → company
+            actor_resp = db.table("actors").select("project_id").eq("id", actor_id).single().execute()
+            project_id = (actor_resp.data or {}).get("project_id")
+            company_id = None
+            if project_id:
+                proj_resp = db.table("projects").select("team_id").eq("id", project_id).single().execute()
+                team_id = (proj_resp.data or {}).get("team_id")
+                if team_id:
+                    team_resp = db.table("teams").select("company_id").eq("id", team_id).single().execute()
+                    company_id = (team_resp.data or {}).get("company_id")
+            ca_resp = (
+                db.table("company_agents")
+                .select("*")
+                .eq("id", company_agent_id)
+                .single()
+                .execute()
+            )
             ca = ca_resp.data
+            if not ca:
+                raise HTTPException(404, "Company agent not found")
+            if not company_id or ca.get("company_id") != company_id:
+                raise HTTPException(403, "Company agent does not belong to this actor's company")
             update["webhook_url"] = ca.get("webhook_url")
             update["docker_image"] = ca.get("docker_image")
             update["agent_api_key"] = ca.get("agent_api_key")

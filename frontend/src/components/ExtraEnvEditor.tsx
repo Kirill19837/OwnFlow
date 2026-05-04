@@ -34,10 +34,10 @@ export function ExtraEnvEditor({
             value={p.value}
             onChange={(e) => {
               const n = [...pairs]
-              n[i] = { ...n[i], value: e.target.value }
+              n[i] = { ...n[i], value: e.target.value, isMasked: false }
               onChange(n)
             }}
-            placeholder="value"
+            placeholder={p.isMasked ? '(unchanged)' : 'value'}
             type="password"
             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
           />

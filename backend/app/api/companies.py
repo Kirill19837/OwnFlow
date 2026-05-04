@@ -401,8 +401,14 @@ def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdat
     """Update an agent. Only company owner.
 
     Omitted fields are left unchanged.
-    Send null explicitly to clear agent_api_key, description, or role.
-    name and webhook_url cannot be cleared (400 if sent as null).
+    Send null explicitly to clear optional fields (agent_api_key, description,
+    role, webhook_url, docker_image).  name cannot be cleared (400 if sent as null).
+
+    Invariants enforced after the patch:
+    - webhook agents must have a non-null webhook_url
+    - builtin agents must have a non-null docker_image
+    Switching agent_type auto-clears the dispatch field that no longer applies
+    (unless the client explicitly supplies a replacement in the same request).
     """
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
@@ -413,6 +419,37 @@ def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdat
         raise HTTPException(400, "No fields to update")
     if "name" in update and not update["name"]:
         raise HTTPException(400, "name cannot be empty or null")
+
+    # Fetch current row to evaluate the effective state after the patch.
+    current_resp = (
+        db.table("company_agents")
+        .select("agent_type,webhook_url,docker_image")
+        .eq("id", agent_id)
+        .eq("company_id", company_id)
+        .single()
+        .execute()
+    )
+    if not current_resp.data:
+        raise HTTPException(404, "Company agent not found")
+    current = current_resp.data
+
+    effective_type = update.get("agent_type") or current["agent_type"]
+    effective_webhook = update["webhook_url"] if "webhook_url" in update else current.get("webhook_url")
+    effective_docker = update["docker_image"] if "docker_image" in update else current.get("docker_image")
+
+    if effective_type == "webhook" and not effective_webhook:
+        raise HTTPException(400, "webhook_url is required for webhook agents")
+    if effective_type == "builtin" and not effective_docker:
+        raise HTTPException(400, "docker_image is required for builtin agents")
+
+    # On type change, clear the dispatch field that no longer applies
+    # (only if the client did not supply an explicit value for it).
+    if "agent_type" in update and update["agent_type"] != current["agent_type"]:
+        if update["agent_type"] == "webhook":
+            update.setdefault("docker_image", None)
+        elif update["agent_type"] == "builtin":
+            update.setdefault("webhook_url", None)
+
     db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
     response = {"agent_id": agent_id, **update}
     if "agent_api_key" in response:

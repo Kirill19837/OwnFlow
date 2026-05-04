@@ -534,19 +534,36 @@ def add_actor(project_id: str, body: ActorCreate):
     }
     if body.user_id:
         row["user_id"] = body.user_id
-    # If a company agent template is specified, copy its dispatch fields server-side
+    # If a company agent template is specified, resolve and copy its dispatch fields.
+    # Scope the lookup to the project's own company to prevent cross-tenant leakage.
     if body.company_agent_id:
-        ca_resp = db.table("company_agents").select("*").eq("id", body.company_agent_id).single().execute()
-        if ca_resp.data:
-            ca = ca_resp.data
-            if ca.get("webhook_url"):
-                row["webhook_url"] = ca["webhook_url"]
-            if ca.get("docker_image"):
-                row["docker_image"] = ca["docker_image"]
-            if ca.get("agent_api_key"):
-                row["agent_api_key"] = ca["agent_api_key"]
-            if ca.get("extra_env"):
-                row["extra_env"] = ca["extra_env"]
+        # Resolve project's company via team
+        proj_resp = db.table("projects").select("team_id").eq("id", project_id).single().execute()
+        team_id = (proj_resp.data or {}).get("team_id")
+        company_id = None
+        if team_id:
+            team_resp = db.table("teams").select("company_id").eq("id", team_id).single().execute()
+            company_id = (team_resp.data or {}).get("company_id")
+        ca_resp = (
+            db.table("company_agents")
+            .select("*")
+            .eq("id", body.company_agent_id)
+            .single()
+            .execute()
+        )
+        ca = ca_resp.data
+        if not ca:
+            raise HTTPException(404, "Company agent not found")
+        if not company_id or ca.get("company_id") != company_id:
+            raise HTTPException(403, "Company agent does not belong to this project's company")
+        if ca.get("webhook_url"):
+            row["webhook_url"] = ca["webhook_url"]
+        if ca.get("docker_image"):
+            row["docker_image"] = ca["docker_image"]
+        if ca.get("agent_api_key"):
+            row["agent_api_key"] = ca["agent_api_key"]
+        if ca.get("extra_env"):
+            row["extra_env"] = ca["extra_env"]
     else:
         if body.webhook_url:
             row["webhook_url"] = body.webhook_url
