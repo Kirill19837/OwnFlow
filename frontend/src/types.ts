@@ -29,9 +29,10 @@ export interface Team {
   owner_id: string
   company_id?: string
   default_ai_model: string
+  log_level?: number  // 0=debug 1=info 2=warning 3=error; defaults to 1
   created_at: string
-  my_role?: 'owner' | 'admin' | 'member'   // display name, may change
-  my_role_id?: string                       // stable UUID, use for permission checks
+  my_role?: 'owner' | 'admin' | 'member'
+  my_role_id?: string
   members?: TeamMember[]
   pending_invites?: TeamPendingInvite[]
 }

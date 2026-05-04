@@ -93,9 +93,10 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "external_dispatch",
+            "task_id": task["id"],
+            "phase": 2,
             "message": f"Blocked dispatch to '{actor['name']}': {exc}",
-            "level": "error",
+            "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "actor": actor["name"], "error": str(exc)}
 
@@ -110,9 +111,16 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
         "agent_dispatched_at": now,
     }).eq("id", task["id"]).execute()
 
-    backend_url = settings.backend_url or "https://ownflow.21century.tech/api"
+    db.table("ai_logs").insert({
+        "id": str(uuid.uuid4()),
+        "project_id": project["id"],
+        "task_id": task["id"],
+        "phase": 2,
+        "message": f"Dispatching to external agent '{actor['name']}' at {webhook_url}",
+        "level": 1,
+    }).execute()
 
-    # Resolve GitHub repo + token for this project (if connected)
+    backend_url = settings.backend_url or "https://ownflow.21century.tech/api"
     github_conn = await get_connection_for_project(project["id"])
 
     payload = {
@@ -176,9 +184,10 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
             db.table("ai_logs").insert({
                 "id": str(uuid.uuid4()),
                 "project_id": project["id"],
-                "phase": "external_dispatch",
+                "task_id": task["id"],
+                "phase": 2,
                 "message": f"Dispatch to external agent '{actor['name']}' returned HTTP {resp.status_code}: {resp.text[:200]}",
-                "level": "error",
+                "level": 3,
             }).execute()
             return {"task_id": task["id"], "dispatched": False, "actor": actor["name"], "error": f"HTTP {resp.status_code}"}
     except Exception as exc:
@@ -186,9 +195,10 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "external_dispatch",
+            "task_id": task["id"],
+            "phase": 2,
             "message": f"Dispatch to external agent '{actor['name']}' failed: {exc}",
-            "level": "error",
+            "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "actor": actor["name"], "error": str(exc)}
 
@@ -206,6 +216,15 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         "agent_callback_token": callback_token,
         "agent_dispatched_at": now,
     }).eq("id", task["id"]).execute()
+
+    db.table("ai_logs").insert({
+        "id": str(uuid.uuid4()),
+        "project_id": project["id"],
+        "task_id": task["id"],
+        "phase": 3,
+        "message": f"Spawning built-in Docker agent '{actor['name']}' for task",
+        "level": 1,
+    }).execute()
 
     backend_url = settings.backend_url or "https://ownflow.21century.tech/api"
     github_conn = await get_connection_for_project(project["id"])
@@ -260,13 +279,14 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "docker_dispatch",
+            "task_id": task["id"],
+            "phase": 3,
             "message": (
                 f"Payload for task '{task['title']}' is "
                 f"{len(payload_json.encode()):,} bytes — larger than expected. "
                 "Consider trimming project brief or task description."
             ),
-            "level": "warning",
+            "level": 2,
         }).execute()
 
     # Build env dict for the container.  Passing env as a dict to the Docker
@@ -295,18 +315,20 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "docker_dispatch",
+            "task_id": task["id"],
+            "phase": 3,
             "message": f"docker image '{image}' not found",
-            "level": "error",
+            "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": f"image not found: {image}"}
     except docker.errors.APIError as exc:
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "docker_dispatch",
+            "task_id": task["id"],
+            "phase": 3,
             "message": f"Docker API error launching '{image}': {exc}",
-            "level": "error",
+            "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": str(exc)}
 
@@ -419,7 +441,7 @@ async def stream_task_execution(task_id: str, actor_id: str):
             "project_id": project["id"],
             "task_id": task_id,
             "actor_id": actor_id,
-            "phase": "task_execution",
+            "phase": 4,
             "model": model,
             "messages": messages,
             "response": final_content,
@@ -427,9 +449,9 @@ async def stream_task_execution(task_id: str, actor_id: str):
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
-            "phase": "task_execution",
+            "phase": 4,
             "message": f"Actor '{actor.get('name', actor_id)}' streamed task: {task['title']}",
-            "level": "info",
+            "level": 1,
         }).execute()
     except Exception:
         pass

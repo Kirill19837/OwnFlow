@@ -84,6 +84,14 @@ export default function OrgSettingsPage() {
     },
   })
 
+  const updateLogLevel = useMutation({
+    mutationFn: (log_level: number) => api.patch(`/teams/${teamId}`, { log_level }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
+      qc.invalidateQueries({ queryKey: ['teams'] })
+    },
+  })
+
   const renameTeam = useMutation({
     mutationFn: (name: string) => api.patch(`/teams/${teamId}`, { name }),
     onSuccess: (_, name) => {
@@ -336,6 +344,38 @@ export default function OrgSettingsPage() {
             ))}
           </div>
           {saved && <p className="text-green-400 text-sm mt-2">✓ Saved</p>}
+        </section>
+
+        {/* Agent log level */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h2 className="font-semibold text-white mb-1">Agent Log Level</h2>
+          <p className="text-gray-500 text-sm mb-4">
+            Only logs at or above this level are stored. Lower = more data.
+          </p>
+          <div className="grid grid-cols-4 gap-2">
+            {([
+              { value: 0, label: 'Debug', desc: 'Everything', color: 'text-gray-400' },
+              { value: 1, label: 'Info', desc: 'Normal', color: 'text-gray-300' },
+              { value: 2, label: 'Warning', desc: 'Issues only', color: 'text-yellow-400' },
+              { value: 3, label: 'Error', desc: 'Errors only', color: 'text-red-400' },
+            ] as const).map((opt) => {
+              const current = org.log_level ?? 1
+              const active = current === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => canInvite && updateLogLevel.mutate(opt.value)}
+                  disabled={!canInvite}
+                  className={`flex flex-col items-start px-3 py-2.5 rounded-lg border transition-all text-left ${
+                    active ? 'border-purple-500 bg-purple-900/30' : 'border-gray-700 hover:border-gray-500 hover:bg-gray-800'
+                  } ${!canInvite ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <span className={`font-medium text-sm ${opt.color}`}>{opt.label}</span>
+                  <span className="text-xs text-gray-500 mt-0.5">{opt.desc}</span>
+                </button>
+              )
+            })}
+          </div>
         </section>
 
         {/* Members */}

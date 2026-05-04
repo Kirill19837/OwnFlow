@@ -313,7 +313,7 @@ async def test_dispatch_docker_logs_error_on_api_error():
 
     assert result["dispatched"] is False
     assert result["task_id"] == TASK_ID
-    assert logged.get("level") == "error"
+    assert logged.get("level") == 3
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ async def test_dispatch_external_logs_on_http_failure():
 
     # Should not raise — logs the error and returns dispatched=False
     assert result["dispatched"] is False
-    assert logged.get("level") == "error"
+    assert logged.get("level") == 3
     assert "connection refused" in logged.get("message", "")
 
 
@@ -574,5 +574,5 @@ async def test_dispatch_external_blocked_by_ssrf_guard():
 
     assert result["dispatched"] is False
     assert "error" in result
-    assert logged.get("level") == "error"
+    assert logged.get("level") == 3
     assert "Blocked" in logged.get("message", "")

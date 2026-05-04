@@ -11,15 +11,20 @@ import { formatDistanceToNow } from 'date-fns'
 
 interface TaskActivity {
   task: { id: string; title: string; status: string; priority: string; agent_dispatched_at?: string }
-  logs: { id: string; phase: string; message: string; level: string; created_at: string }[]
+  logs: { id: string; phase: number; message: string; level: number; created_at: string }[]
   latest_response?: string | null
   model?: string | null
 }
 
-const LOG_LEVEL_STYLE: Record<string, string> = {
-  error: 'text-red-400',
-  warning: 'text-yellow-400',
-  info: 'text-gray-300',
+const LOG_LEVEL_STYLE: Record<number, string> = {
+  0: 'text-gray-500',   // debug
+  1: 'text-gray-300',   // info
+  2: 'text-yellow-400', // warning
+  3: 'text-red-400',    // error
+}
+const LOG_LEVEL_LABEL: Record<number, string> = { 0: 'DBG', 1: 'INF', 2: 'WRN', 3: 'ERR' }
+const LOG_PHASE_LABEL: Record<number, string> = {
+  0: 'planning', 1: 'exec', 2: 'ext-dispatch', 3: 'docker', 4: 'task-exec',
 }
 
 interface ExecutorRunningTask {
@@ -105,6 +110,14 @@ export default function DashboardPage() {
         .then((r) => r.data),
     enabled: !!expandedTaskId && !!expandedTask,
     refetchInterval: 5000,
+  })
+
+  const rerunTask = useMutation({
+    mutationFn: (task_id: string) => api.post(`/tasks/${task_id}/execute`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['executor-state'] })
+      queryClient.invalidateQueries({ queryKey: ['task-activity', expandedTaskId] })
+    },
   })
 
   useEffect(() => {
@@ -240,6 +253,14 @@ export default function DashboardPage() {
                         onClick={(e) => e.stopPropagation()}
                         className="text-gray-600 hover:text-purple-400 text-xs shrink-0"
                       >→</Link>
+                      <button
+                        title="Re-run task"
+                        onClick={(e) => { e.stopPropagation(); rerunTask.mutate(item.task_id) }}
+                        disabled={rerunTask.isPending}
+                        className="text-gray-600 hover:text-yellow-400 transition-colors disabled:opacity-40 shrink-0"
+                      >
+                        <RefreshCw size={12} className={rerunTask.isPending && rerunTask.variables === item.task_id ? 'animate-spin' : ''} />
+                      </button>
                       {isExpanded ? <ChevronUp size={12} className="text-gray-600 shrink-0" /> : <ChevronDown size={12} className="text-gray-600 shrink-0" />}
                     </div>
                     {isExpanded && (
@@ -255,8 +276,8 @@ export default function DashboardPage() {
                                 {taskActivity.logs.map((log) => (
                                   <div key={log.id} className="flex gap-2 leading-snug">
                                     <span className="text-gray-600 shrink-0">{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                                    <span className={`uppercase shrink-0 w-10 ${LOG_LEVEL_STYLE[log.level] ?? 'text-gray-400'}`}>{log.level}</span>
-                                    <span className="text-gray-400 shrink-0 w-24 truncate">{log.phase}</span>
+                                    <span className={`shrink-0 w-8 ${LOG_LEVEL_STYLE[log.level] ?? 'text-gray-400'}`}>{LOG_LEVEL_LABEL[log.level] ?? log.level}</span>
+                                    <span className="text-gray-500 shrink-0 w-20 truncate">{LOG_PHASE_LABEL[log.phase] ?? log.phase}</span>
                                     <span className={LOG_LEVEL_STYLE[log.level] ?? 'text-gray-300'}>{log.message}</span>
                                   </div>
                                 ))}

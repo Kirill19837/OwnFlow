@@ -67,6 +67,7 @@ class TeamCreate(BaseModel):
 class TeamUpdate(BaseModel):
     name: Optional[str] = None
     default_ai_model: Optional[str] = None
+    log_level: Optional[int] = None
 
 
 class TeamMemberInvite(BaseModel):
@@ -332,6 +333,8 @@ def update_team(team_id: str, body: TeamUpdate):
     db = get_supabase()
     if body.default_ai_model and body.default_ai_model not in AI_MODELS:
         raise HTTPException(400, f"model must be one of {AI_MODELS}")
+    if body.log_level is not None and body.log_level not in (0, 1, 2, 3):
+        raise HTTPException(400, "log_level must be 0 (debug), 1 (info), 2 (warning), or 3 (error)")
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No valid fields to update")

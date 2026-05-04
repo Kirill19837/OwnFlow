@@ -228,14 +228,15 @@ async def main() -> None:
     callback_token: str = payload["callback_token"]
     task_id: str = payload["task_id"]
 
-    logs: list[str] = []
+    logs: list[dict] = []
+    _LEVELS = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    _PHASES = {"planning": 0, "agent_execution": 1, "external_dispatch": 2, "docker_dispatch": 3, "task_execution": 4}
 
-    def log(msg: str, level: str = "INFO") -> None:
+    def log(msg: str, level: str = "INFO", phase: str = "agent_execution") -> None:
         from datetime import datetime
         ts = datetime.utcnow().strftime("%H:%M:%S")
-        line = f"[{ts}] [{level}] {msg}"
-        logs.append(line)
-        print(line, flush=True)
+        print(f"[{ts}] [{level}] {msg}", flush=True)
+        logs.append({"level": _LEVELS.get(level.upper(), 1), "phase": _PHASES.get(phase, 1), "message": msg})
 
     log(f"task={task_id!r} role={ACTOR_ROLE!r} model={MODEL}")
 

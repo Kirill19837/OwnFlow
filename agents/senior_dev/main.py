@@ -120,12 +120,14 @@ Rules:
 
 
 async def _process(body: RunPayload) -> None:
-    logs: list[str] = []
+    logs: list[dict] = []
+    _LEVELS = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    _PHASES = {"planning": 0, "agent_execution": 1, "external_dispatch": 2, "docker_dispatch": 3, "task_execution": 4}
 
-    def log(msg: str):
+    def log(msg: str, level: str = "INFO", phase: str = "agent_execution"):
         ts = datetime.utcnow().strftime("%H:%M:%S")
-        logs.append(f"[{ts}] {msg}")
-        print(msg)
+        print(f"[{ts}] [{level}] {msg}")
+        logs.append({"level": _LEVELS.get(level.upper(), 1), "phase": _PHASES.get(phase, 1), "message": msg})
 
     try:
         log(f"Task received: {body.task.title!r} (id={body.task_id})")
@@ -175,8 +177,7 @@ async def _process(body: RunPayload) -> None:
                 log("No GitHub connection — skipping PR")
 
         # ── 4. Build deliverable content ──────────────────────────────────────
-        log_block = "\n\n---\n### Agent logs\n```\n" + "\n".join(logs) + "\n```"
-        deliverable = content_text + log_block
+        deliverable = content_text
         if pr_url:
             deliverable += f"\n\n**GitHub PR:** {pr_url}"
 
@@ -188,6 +189,7 @@ async def _process(body: RunPayload) -> None:
             "content": deliverable,
             "files": files if (files and not pr_url) else None,
             "pr_url": pr_url,
+            "logs": logs,
         }
         log(f"Calling back to OwnFlow at {body.callback_url}")
         async with httpx.AsyncClient(timeout=30.0) as client:

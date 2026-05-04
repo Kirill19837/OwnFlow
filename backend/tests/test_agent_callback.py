@@ -280,24 +280,27 @@ def test_success_resolves_actor_id_from_dict_assignment():
 # ---------------------------------------------------------------------------
 
 def test_logs_are_persisted_to_ai_logs():
-    body = {**BASE_BODY, "logs": ["[10:00:00] [INFO] started", "[10:00:01] [INFO] done"]}
+    body = {**BASE_BODY, "logs": [
+        {"level": 1, "phase": 1, "message": "started"},
+        {"level": 1, "phase": 1, "message": "done"},
+    ]}
     db = _make_db(task=BASE_TASK)
     with patch("app.api.agents.get_supabase", return_value=db), \
          patch("app.api.agents.create_pr_for_task", new_callable=AsyncMock):
         resp = _post(body=body)
     assert resp.status_code == 200
     assert len(db._ai_log_inserts) == 2
-    assert db._ai_log_inserts[0]["message"] == "[10:00:00] [INFO] started"
-    assert db._ai_log_inserts[0]["level"] == "info"
+    assert db._ai_log_inserts[0]["message"] == "started"
+    assert db._ai_log_inserts[0]["level"] == 1
 
 
 def test_error_log_line_gets_level_error():
-    body = {**BASE_BODY, "logs": ["[10:00:02] [ERROR] something failed"]}
+    body = {**BASE_BODY, "logs": [{"level": 3, "phase": 1, "message": "something failed"}]}
     db = _make_db(task=BASE_TASK)
     with patch("app.api.agents.get_supabase", return_value=db), \
          patch("app.api.agents.create_pr_for_task", new_callable=AsyncMock):
         _post(body=body)
-    assert db._ai_log_inserts[0]["level"] == "error"
+    assert db._ai_log_inserts[0]["level"] == 3
 
 
 def test_no_logs_field_skips_ai_logs():

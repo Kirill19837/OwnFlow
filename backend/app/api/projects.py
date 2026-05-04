@@ -91,14 +91,16 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
     sprint_days: int = project.get("sprint_days") or 3
 
     async def event_stream():
+        _LOG_LEVEL_MAP = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+
         def _persist_log(msg: str, level: str = "info") -> None:
             try:
                 db.table("ai_logs").insert({
                     "id": str(uuid.uuid4()),
                     "project_id": project_id,
-                    "phase": "planning",
+                    "phase": 0,
                     "message": msg,
-                    "level": level,
+                    "level": _LOG_LEVEL_MAP.get(level, 1),
                 }).execute()
             except Exception:
                 pass
@@ -284,12 +286,10 @@ def get_task_activity(project_id: str, task_id: str):
     logs_q = (
         db.table("ai_logs")
         .select("id,phase,message,level,created_at")
-        .eq("project_id", project_id)
+        .eq("task_id", task_id)
         .order("created_at", desc=False)
         .limit(40)
     )
-    if dispatched_at:
-        logs_q = logs_q.gte("created_at", dispatched_at)
     logs = logs_q.execute().data or []
 
     messages_resp = (

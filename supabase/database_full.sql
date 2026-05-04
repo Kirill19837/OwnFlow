@@ -84,6 +84,7 @@ create table teams (
   owner_id         uuid        not null,
   company_id       uuid        references companies(id) on delete cascade,
   default_ai_model text        not null default 'gpt-4o',
+  log_level        smallint    not null default 1 check (log_level between 0 and 3),
   created_at       timestamptz not null default now()
 );
 
@@ -318,9 +319,10 @@ create table deliverables (
 create table ai_logs (
   id         uuid        primary key default gen_random_uuid(),
   project_id uuid        not null references projects(id) on delete cascade,
-  phase      text        not null default 'planning',
+  task_id    uuid        references tasks(id) on delete cascade,
+  phase      smallint    not null default 0,
   message    text        not null,
-  level      text        not null default 'info',
+  level      smallint    not null default 1,
   created_at timestamptz not null default now()
 );
 

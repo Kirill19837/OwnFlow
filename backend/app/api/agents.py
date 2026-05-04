@@ -43,7 +43,7 @@ class AgentCallbackBody(BaseModel):
     content: str
     files: Optional[List[FileEntry]] = None
     pr_url: Optional[str] = None            # PR already created by the agent — skips handler-side PR creation
-    logs: Optional[List[str]] = None        # structured log lines from the agent
+    logs: Optional[List[dict]] = None       # [{level: int, phase: str, message: str}, ...]
     prompt: Optional[str] = None            # user prompt sent to the model (for ai_messages)
     model: Optional[str] = None             # model used (for ai_messages)
 
@@ -131,14 +131,31 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # ── Persist agent logs to ai_logs ─────────────────────────────────────────
     if body.logs:
         project_id = task.get("project_id")
-        for line in body.logs:
+        # Resolve team log_level threshold (default 1=info)
+        team_log_level = 1
+        try:
+            proj_team_id = None
+            proj_resp = db.table("projects").select("team_id").eq("id", task.get("project_id", "")).single().execute()
+            if proj_resp.data:
+                proj_team_id = proj_resp.data.get("team_id")
+            if proj_team_id:
+                team_resp = db.table("teams").select("log_level").eq("id", proj_team_id).single().execute()
+                if team_resp.data:
+                    team_log_level = team_resp.data.get("log_level", 1)
+        except Exception:
+            pass
+        for entry in body.logs:
             try:
+                lvl = int(entry.get("level", 1))
+                if lvl < team_log_level:
+                    continue  # below team threshold — drop
                 db.table("ai_logs").insert({
                     "id": str(uuid.uuid4()),
                     "project_id": project_id,
-                    "phase": "agent_execution",
-                    "message": line,
-                    "level": "error" if "ERROR" in line.upper() or "FAILED" in line.upper() else "info",
+                    "task_id": body.task_id,
+                    "phase": entry.get("phase", 1),
+                    "message": str(entry.get("message", "")),
+                    "level": lvl,
                 }).execute()
             except Exception:
                 pass
@@ -152,7 +169,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
                 "project_id": project_id,
                 "task_id": body.task_id,
                 "actor_id": actor_id,
-                "phase": "agent_execution",
+                "phase": 1,
                 "model": body.model,
                 "messages": [{"role": "user", "content": body.prompt}],
                 "response": body.content,
