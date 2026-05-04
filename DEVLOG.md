@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-05-04 | `66ebb8e` — feat: executor dashboard monitor, proxy docs, and UTC callback timestamp fix
+
+- `frontend/src/pages/DashboardPage.tsx` — added Executor Monitor panel with auto-refresh, running task list, and recent executor failures feed
+- `backend/app/api/projects.py` — added `GET /projects/dashboard/executor-state` aggregate endpoint returning running executor jobs and recent executor error logs (`docker_dispatch`, `external_dispatch`, `agent_execution`)
+- `docker-compose.prod.yml` — documented why `docker-socket-proxy` is used and why backend routes Docker SDK via `DOCKER_HOST=tcp://docker-socket-proxy:2375`
+- `docs/agent-flow.md` + `README.md` — documented production docker-socket-proxy security rationale
+- `backend/app/api/agents.py` — replaced deprecated `datetime.utcnow()` with timezone-aware `datetime.now(UTC)` for deliverable timestamps
+
+---
+
 ## 2026-05-03 | `229ac42` — feat: webhook agents — SSRF guard, Docker SDK, callback protocol, key masking, sprint dispatch, RLS, docs
 
 Branch: `feature/agents` (branched off `feature/webhook-agents`)
