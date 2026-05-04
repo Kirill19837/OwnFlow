@@ -26,12 +26,22 @@ def get_actor(actor_id: str):
 @router.patch("/{actor_id}")
 def update_actor(actor_id: str, body: dict):
     db = get_supabase()
-    allowed_fields = {"name", "role", "model", "capabilities", "avatar_url"}
+    allowed_fields = {
+        "name",
+        "role",
+        "type",
+        "model",
+        "capabilities",
+        "avatar_url",
+        "user_id",
+        "webhook_url",
+        "agent_api_key",
+    }
     update = {k: v for k, v in body.items() if k in allowed_fields}
     if not update:
         raise HTTPException(400, "No valid fields to update")
     db.table("actors").update(update).eq("id", actor_id).execute()
-    return {"actor_id": actor_id, **update}
+    return _mask_actor({"actor_id": actor_id, **update})
 
 
 @router.delete("/{actor_id}", status_code=204)

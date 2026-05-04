@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import api from '../lib/api'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
-import type { Project, Assignment } from '../types'
+import type { Project, Assignment, TeamMember, Skill } from '../types'
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
@@ -73,6 +73,7 @@ export default function ProjectBoardPage() {
   const [newActorApiKey, setNewActorApiKey] = useState('')
   const [repoInput, setRepoInput] = useState('')
   const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'github'>('general')
+  const [showRolePicker, setShowRolePicker] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -113,15 +114,18 @@ export default function ProjectBoardPage() {
   })
 
   const addActor = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: {
+      name: string
+      role?: string
+      type: 'ai' | 'human'
+      model?: string
+      user_id?: string | null
+      webhook_url?: string
+      agent_api_key?: string
+    }) =>
       api.post(`/projects/${projectId}/actors`, {
         project_id: projectId,
-        name: newActorName,
-        role: newActorRole || undefined,
-        type: newActorType,
-        model: newActorType === 'ai' ? newActorModel : undefined,
-        webhook_url: newActorWebhookUrl || undefined,
-        agent_api_key: newActorWebhookUrl && newActorApiKey ? newActorApiKey : undefined,
+        ...payload,
         capabilities: [],
       }),
     onSuccess: () => {
@@ -194,6 +198,21 @@ export default function ProjectBoardPage() {
     },
     enabled: !!projectId && githubTokenAvailable,
   })
+
+  const { data: teamData, isLoading: teamMembersLoading } = useQuery({
+    queryKey: ['team', data?.team_id],
+    queryFn: () => api.get<{ members?: TeamMember[] }>(`/teams/${data!.team_id}`).then((r) => r.data),
+    enabled: !!data?.team_id && showSettings && settingsTab === 'agents',
+  })
+  const teamMembers: TeamMember[] = useMemo(() => teamData?.members ?? [], [teamData?.members])
+
+  const { data: skills = [] } = useQuery<Skill[]>({
+    queryKey: ['skills'],
+    queryFn: () => api.get<Skill[]>('/skills').then((r) => r.data),
+    enabled: showSettings && settingsTab === 'agents',
+    staleTime: 5 * 60 * 1000,
+  })
+  const roleCategories = useMemo(() => [...new Set(skills.map((s) => s.category))], [skills])
 
   const { data: agentRuntimeStatus } = useQuery({
     queryKey: ['agent-runtime', projectId],
@@ -281,6 +300,27 @@ export default function ProjectBoardPage() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const project = currentProject ?? data
+
+  const addFromTemplate = (skill: Skill, typeOverride?: 'human' | 'ai') => {
+    const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
+    addActor.mutate({
+      name: type === 'ai' ? skill.name : 'Unassigned teammate',
+      role: skill.name,
+      type,
+      model: type === 'ai' ? (newActorModel || 'gpt-4o') : undefined,
+    })
+  }
+
+  const addHumanTeammate = () => {
+    const used = new Set((project?.actors ?? []).map((a) => a.user_id).filter(Boolean))
+    const candidate = teamMembers.find((m) => !used.has(m.user_id))
+    addActor.mutate({
+      name: candidate?.full_name || candidate?.email || 'Unassigned teammate',
+      role: 'Contributor',
+      type: 'human',
+      user_id: candidate?.user_id ?? null,
+    })
+  }
 
   const handleDragEnd = async (result: DropResult) => {
     if (!result.destination) return
@@ -537,8 +577,26 @@ export default function ProjectBoardPage() {
                   </p>
                 </div>
                 <div className="mb-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-2">
-                  <p className="text-xs text-gray-300 font-medium">Built-in agent runtime</p>
-                  <p className="text-xs text-gray-500">These values are read-only here and come from server/runtime configuration.</p>
+                  <p className="text-xs text-gray-300 font-medium">How execution works</p>
+                  <p className="text-xs text-gray-500">Each actor runs in one of two modes:</p>
+                  <div className="grid gap-1 text-xs text-gray-300">
+                    <p><span className="text-purple-300 font-medium">Built-in</span> — no webhook URL; OwnFlow runs the task in its internal agent container.</p>
+                    <p><span className="text-green-300 font-medium">Webhook</span> — webhook URL set; OwnFlow sends the task to your external agent endpoint.</p>
+                  </div>
+                  <div className="mt-2 rounded-lg border border-gray-800 bg-gray-900/70 p-2">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Actor execution modes</p>
+                    <div className="space-y-1">
+                      {(project.actors ?? []).map((a) => (
+                        <div key={`mode-${a.id}`} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="text-gray-300 truncate">{a.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded border ${a.webhook_url ? 'text-green-300 border-green-800/60 bg-green-900/20' : 'text-purple-300 border-purple-800/60 bg-purple-900/20'}`}>
+                            {a.webhook_url ? 'Webhook' : 'Built-in'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">Runtime defaults used by built-in mode:</p>
                   <div className="grid gap-2 text-xs">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-gray-400">Docker image</span>
@@ -560,64 +618,217 @@ export default function ProjectBoardPage() {
                 </div>
               <div className="flex items-center justify-between mb-3">
                 <label className="block text-xs font-medium text-gray-400">Team actors</label>
-                <button
-                  onClick={() => autoFillActors.mutate()}
-                  disabled={autoFillActors.isPending}
-                  title="Replace AI actors with the standard default set (human actors preserved)"
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 disabled:opacity-40 transition-colors"
-                >
-                  <Zap size={11} />
-                  {autoFillActors.isPending ? 'Filling…' : 'Auto-fill AI actors'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={addHumanTeammate}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-blue-900/40 text-blue-300 hover:bg-blue-900/70 transition-colors"
+                  >
+                    <User size={11} /> Add teammate
+                  </button>
+                  <button
+                    onClick={() => autoFillActors.mutate()}
+                    disabled={autoFillActors.isPending}
+                    title="Replace AI actors with the standard default set (human actors preserved)"
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 disabled:opacity-40 transition-colors"
+                  >
+                    <Zap size={11} />
+                    {autoFillActors.isPending ? 'Filling…' : 'Auto-fill AI actors'}
+                  </button>
+                  <button
+                    onClick={() => setShowRolePicker((v) => !v)}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+                  >
+                    <Plus size={11} /> Add role
+                  </button>
+                </div>
               </div>
 
-              {/* Existing actors */}
-              <div className="space-y-1.5 mb-3">
+              {showRolePicker && (
+                <div className="mb-3 bg-gray-900 border border-gray-700 rounded-lg p-3 space-y-3">
+                  {skills.length === 0 && <p className="text-xs text-gray-500">Loading skills…</p>}
+                  {roleCategories.map((cat) => (
+                    <div key={cat}>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1.5">{cat}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {skills.filter((s) => s.category === cat).map((skill) => {
+                          const hasAI = (project.actors ?? []).some((a) => a.role === skill.name && a.type === 'ai')
+                          const hasHuman = (project.actors ?? []).some((a) => a.role === skill.name && a.type === 'human')
+
+                          if (skill.actor_type === 'both') {
+                            return (
+                              <span key={skill.name} className="inline-flex rounded-md overflow-hidden border border-gray-700 text-xs">
+                                <button
+                                  type="button"
+                                  disabled={hasAI}
+                                  onClick={() => addFromTemplate(skill, 'ai')}
+                                  className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                                    hasAI ? 'text-gray-600 cursor-default' : 'text-purple-300 hover:bg-purple-900/40'
+                                  }`}
+                                >
+                                  <Bot size={10} />{skill.name}
+                                </button>
+                                <span className="w-px bg-gray-700" />
+                                <button
+                                  type="button"
+                                  disabled={hasHuman}
+                                  onClick={() => addFromTemplate(skill, 'human')}
+                                  className={`flex items-center gap-1 px-1.5 py-1 transition-colors ${
+                                    hasHuman ? 'text-gray-600 cursor-default' : 'text-blue-300 hover:bg-blue-900/40'
+                                  }`}
+                                >
+                                  <User size={10} />
+                                </button>
+                              </span>
+                            )
+                          }
+
+                          const already = skill.actor_type === 'ai' ? hasAI : hasHuman
+                          return (
+                            <button
+                              key={skill.name}
+                              type="button"
+                              disabled={already}
+                              onClick={() => addFromTemplate(skill)}
+                              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${
+                                already
+                                  ? 'border-gray-700 text-gray-600 cursor-default'
+                                  : skill.actor_type === 'ai'
+                                    ? 'border-purple-700/60 text-purple-300 hover:bg-purple-900/40'
+                                    : 'border-blue-700/60 text-blue-300 hover:bg-blue-900/40'
+                              }`}
+                            >
+                              {skill.actor_type === 'ai' ? <Bot size={10} /> : <User size={10} />}
+                              {skill.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
                 {(project.actors ?? []).map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 text-sm flex-wrap">
-                    {a.type === 'ai'
-                      ? <Bot size={13} className="text-purple-400 shrink-0" />
-                      : <User size={13} className="text-blue-400 shrink-0" />}
-                    <span className="text-white flex-1">{a.name}</span>
-                    {a.webhook_url && <LinkIcon size={10} className="text-green-400 shrink-0" />}
-                    {a.role && <span className="text-gray-500 text-xs">{a.role}</span>}
-                    {a.type === 'ai' && (
-                      <select
-                        value={a.model || 'gpt-4o'}
-                        onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
-                        disabled={updateActor.isPending}
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        title="Language model"
+                  <div key={a.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      {a.type === 'ai' ? (
+                        <Bot size={15} className="text-purple-400 shrink-0" />
+                      ) : (
+                        <User size={15} className="text-blue-400 shrink-0" />
+                      )}
+                      <input
+                        list={`role-list-${a.id}`}
+                        defaultValue={a.role || ''}
+                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { role: e.target.value.trim() || null } })}
+                        placeholder="Role…"
+                        className={`text-xs bg-transparent focus:outline-none min-w-0 flex-1 ${
+                          !(a.role || '').trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-400 focus:text-gray-200'
+                        }`}
+                      />
+                      <datalist id={`role-list-${a.id}`}>
+                        {skills.map((s) => <option key={s.id} value={s.name} />)}
+                      </datalist>
+                      <div className="flex-1" />
+                      <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => updateActor.mutate({ actorId: a.id, patch: { type: 'ai', model: a.model || 'gpt-4o', user_id: null } })}
+                          className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
+                            a.type === 'ai' ? 'bg-purple-900 text-purple-300' : 'text-gray-500 hover:text-gray-300'
+                          }`}
+                        >
+                          <Bot size={10} /> AI
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateActor.mutate({ actorId: a.id, patch: { type: 'human', model: null } })}
+                          className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
+                            a.type === 'human' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'
+                          }`}
+                        >
+                          <User size={10} /> Human
+                        </button>
+                      </div>
+                      {a.type === 'ai' && (
+                        <select
+                          value={a.model || 'gpt-4o'}
+                          onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
+                          disabled={updateActor.isPending}
+                          className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none"
+                        >
+                          {AI_MODELS.map((m) => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      <button
+                        onClick={() => removeActor.mutate(a.id)}
+                        disabled={removeActor.isPending}
+                        className="text-gray-600 hover:text-red-400 transition-colors"
                       >
-                        {AI_MODELS.map((m) => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+
+                    {a.type === 'ai' ? (
+                      <input
+                        type="text"
+                        defaultValue={a.name}
+                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { name: e.target.value.trim() || a.name } })}
+                        placeholder="AI agent name"
+                        className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
+                      />
+                    ) : (
+                      <div className="pl-6 border-t border-gray-800 pt-1.5">
+                        <select
+                          value={a.user_id ?? ''}
+                          disabled={teamMembersLoading}
+                          onChange={(e) => {
+                            const uid = e.target.value
+                            if (!uid) {
+                              updateActor.mutate({ actorId: a.id, patch: { user_id: null, name: 'Unassigned teammate' } })
+                            } else {
+                              const member = teamMembers.find((m) => m.user_id === uid)
+                              updateActor.mutate({ actorId: a.id, patch: { user_id: uid, name: member?.full_name || member?.email || uid } })
+                            }
+                          }}
+                          className="w-full bg-transparent text-white text-sm font-medium focus:outline-none focus:text-purple-300 appearance-none"
+                        >
+                          <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
+                          {teamMembers.map((m) => (
+                            <option key={m.user_id} value={m.user_id} className="bg-gray-900">
+                              {m.full_name || m.email || m.user_id}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                    <button
-                      onClick={() => removeActor.mutate(a.id)}
-                      disabled={removeActor.isPending}
-                      className="text-gray-600 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+
+                    <div className="space-y-2 mt-1">
+                      <input
+                        placeholder="Webhook URL — optional external dispatch target"
+                        defaultValue={a.webhook_url || ''}
+                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { webhook_url: e.target.value.trim() || null } })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
 
-              {/* Add actor */}
-              <div className="flex gap-2 items-end flex-wrap">
+              <div className="mt-3 flex gap-2 items-end flex-wrap">
                 <input
                   placeholder="Name"
                   value={newActorName}
                   onChange={(e) => setNewActorName(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-28"
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-36"
                 />
                 <input
-                  placeholder="Role (e.g. Lead QA)"
+                  placeholder="Role"
                   value={newActorRole}
                   onChange={(e) => setNewActorRole(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-36"
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-40"
                 />
                 <select
                   value={newActorType}
@@ -639,17 +850,23 @@ export default function ProjectBoardPage() {
                   </select>
                 )}
                 <button
-                  onClick={() => addActor.mutate()}
-                  disabled={addActor.isPending || !newActorName.trim()}
+                  onClick={() => addActor.mutate({
+                    name: newActorName.trim() || (newActorType === 'ai' ? 'AI Agent' : 'Unassigned teammate'),
+                    role: newActorRole.trim() || undefined,
+                    type: newActorType,
+                    model: newActorType === 'ai' ? newActorModel : undefined,
+                    webhook_url: newActorWebhookUrl.trim() || undefined,
+                    agent_api_key: newActorWebhookUrl.trim() && newActorApiKey.trim() ? newActorApiKey.trim() : undefined,
+                  })}
+                  disabled={addActor.isPending}
                   className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
                 >
                   <Plus size={13} /> Add
                 </button>
               </div>
-              {/* Webhook URL — task dispatch target for both AI and non-AI actors */}
-              <div className="space-y-2 mt-1">
+              <div className="space-y-2 mt-2">
                 <input
-                  placeholder="Webhook URL — if set, tasks are dispatched to this agent (optional)"
+                  placeholder="Webhook URL for new actor (optional)"
                   value={newActorWebhookUrl}
                   onChange={(e) => setNewActorWebhookUrl(e.target.value)}
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -662,9 +879,6 @@ export default function ProjectBoardPage() {
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
                     type="password"
                   />
-                )}
-                {newActorWebhookUrl && (
-                  <p className="text-xs text-gray-500">Tasks assigned to this actor will be POSTed to the webhook. The agent calls back <span className="font-mono text-gray-400">/agents/callback</span> with the result.</p>
                 )}
               </div>
               </div>

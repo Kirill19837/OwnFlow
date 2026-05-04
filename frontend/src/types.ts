@@ -99,6 +99,7 @@ export interface Actor {
   project_id: string
   name: string
   type: ActorType
+  user_id?: string
   role?: string
   model?: string
   capabilities: string[]

@@ -203,7 +203,7 @@ def get_project_agent_runtime(project_id: str):
 
     project_resp = (
         db.table("projects")
-        .select("id,company_id")
+        .select("id,company_id,team_id")
         .eq("id", project_id)
         .single()
         .execute()
@@ -213,6 +213,16 @@ def get_project_agent_runtime(project_id: str):
         raise HTTPException(404, "Project not found")
 
     company_id = project.get("company_id")
+    if not company_id and project.get("team_id"):
+        team_resp = (
+            db.table("teams")
+            .select("company_id")
+            .eq("id", project["team_id"])
+            .single()
+            .execute()
+        )
+        company_id = (team_resp.data or {}).get("company_id")
+
     company = None
     if company_id:
         company_resp = (
