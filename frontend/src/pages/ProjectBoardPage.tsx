@@ -105,7 +105,7 @@ export default function ProjectBoardPage() {
         type: newActorType,
         model: newActorType === 'ai' ? newActorModel : undefined,
         webhook_url: newActorWebhookUrl || undefined,
-        agent_api_key: newActorApiKey || undefined,
+        agent_api_key: newActorWebhookUrl && newActorApiKey ? newActorApiKey : undefined,
         capabilities: [],
       }),
     onSuccess: () => {

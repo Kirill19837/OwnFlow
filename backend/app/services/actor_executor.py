@@ -53,7 +53,7 @@ async def _assert_safe_webhook_url(url: str) -> None:
     if not hostname:
         raise ValueError("webhook_url has no resolvable hostname")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         infos = await loop.run_in_executor(None, socket.getaddrinfo, hostname, None)
     except socket.gaierror as exc:
@@ -263,7 +263,7 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         )
         return container.id
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         container_id = await loop.run_in_executor(None, _run_container)
     except docker.errors.ImageNotFound:

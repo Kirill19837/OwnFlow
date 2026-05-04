@@ -95,20 +95,10 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     if not actor_id:
         raise HTTPException(400, "No actor assignment found for this task; cannot save deliverable.")
 
-    # ── Atomically consume the token ──────────────────────────────────────────
-    # UPDATE ... WHERE id=? AND agent_callback_token=? ensures only the first
-    # concurrent request wins. Any duplicate callback finds 0 rows updated.
-    consumed = (
-        db.table("tasks")
-        .update({"status": "done", "agent_callback_token": None})
-        .eq("id", body.task_id)
-        .eq("agent_callback_token", provided_token)
-        .execute()
-    )
-    if not consumed.data:
-        raise HTTPException(409, "Callback token already consumed.")
-
-    # ── Save deliverable ──────────────────────────────────────────────────────
+    # ── Save deliverable FIRST ────────────────────────────────────────────────
+    # Insert before consuming the token so that if this fails the agent can
+    # still retry (the token is still valid and the task stays in its current
+    # status).
     deliverable_row = {
         "id": str(uuid.uuid4()),
         "task_id": body.task_id,
@@ -117,7 +107,26 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         "tool_calls_log": [],
         "created_at": datetime.utcnow().isoformat(),
     }
-    db.table("deliverables").insert(deliverable_row).execute()
+    try:
+        db.table("deliverables").insert(deliverable_row).execute()
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to save deliverable: {exc}") from exc
+
+    # ── Atomically consume the token + mark done ──────────────────────────────
+    # Only reached when the deliverable row exists. UPDATE WHERE token=? ensures
+    # only the first concurrent caller wins; duplicates get 409.
+    consumed = (
+        db.table("tasks")
+        .update({"status": "done", "agent_callback_token": None})
+        .eq("id", body.task_id)
+        .eq("agent_callback_token", provided_token)
+        .execute()
+    )
+    if not consumed.data:
+        # Deliverable was inserted but token was already gone — idempotent: the
+        # first caller already finished successfully, so return 200 rather than
+        # leaving a duplicate deliverable row. Optionally delete the duplicate.
+        raise HTTPException(409, "Callback token already consumed.")
 
     # ── Persist agent logs to ai_logs ─────────────────────────────────────────
     if body.logs:

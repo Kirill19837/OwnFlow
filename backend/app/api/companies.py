@@ -230,8 +230,9 @@ def _mask_company(data: dict) -> dict:
     """
     result = {k: v for k, v in data.items() if k not in _SECRET_COMPANY_FIELDS}
     for field in _SECRET_COMPANY_FIELDS:
-        set_field = field.replace("_api_key", "_key_set")
-        result[set_field] = bool(data.get(field))
+        if field in data:
+            set_field = field.replace("_api_key", "_key_set")
+            result[set_field] = bool(data.get(field))
     return result
 
 
