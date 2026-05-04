@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-04 | `912237a` — feat: improve actor settings UX and runtime key-source resolution
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — made Agents settings clearer with execution-mode explanation (Built-in vs Webhook), per-actor mode badges, enhanced team actor controls, role picker shortcuts, and improved actor editing flow
+- `backend/app/api/projects.py` — updated `GET /projects/{project_id}/agent-runtime` to resolve company key availability via `teams.company_id` fallback when `projects.company_id` is missing
+- `backend/app/api/actors.py` + `frontend/src/types.ts` — aligned actor update payload/types for `type`, `user_id`, `webhook_url`, and `agent_api_key`
+
 ## 2026-05-04 | `db064e0` — feat: project settings tabs, agents runtime panel, and executor-state schema fix
 
 - `frontend/src/pages/ProjectBoardPage.tsx` — split Project Settings into `General`, `Agents`, and `GitHub` tabs; moved actor setup into `Agents`; added per-AI-actor model selector; repo picker now supports search via input+datalist
