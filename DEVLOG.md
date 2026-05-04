@@ -2,6 +2,22 @@
 
 ---
 
+## 2026-05-03 | `229ac42` — feat: webhook agents — SSRF guard, Docker SDK, callback protocol, key masking, sprint dispatch, RLS, docs
+
+Branch: `feature/agents` (branched off `feature/webhook-agents`)
+
+- `actor_executor.py` — SSRF guard on `webhook_url` (DNS + IP range check); Docker SDK (`docker==7.1.0`) replaces CLI subprocess; `stream_task_execution` routes webhook actors through `_dispatch_external_agent`; company-level AI keys resolved at dispatch time
+- `providers/` — `OpenAIProvider`, `AnthropicProvider`, `get_provider()` accept optional `api_key` param
+- `api/companies.py` — AI keys stripped from responses; `openai_key_set`/`anthropic_key_set` boolean flags returned instead
+- `api/tasks.py` — `_strip_task()` removes `agent_callback_token` and `agent_dispatched_at` from read responses
+- `api/projects.py` — sprint runner now dispatches webhook actors (any type with `webhook_url`), not only `type: ai`
+- `supabase/migrations/014_external_agents.sql` + `database_full.sql` — `company_agents` RLS restricted to `service_role`; composite index on `(company_id, created_at)`
+- `frontend/src/types.ts` + `CompanySettingsPage.tsx` — boolean key flags, stale store fix via query invalidation, Rotate/Set key UI
+- `README.md` — Agents section added (built-in Docker, external webhook, company registry); `docs/agent-flow.md` linked
+- `backend/tests/` — SSRF tests, Docker SDK mock tests, callback tests (74 passed)
+
+---
+
 ## 2026-05-03 | `1f2ce25` — fix: mask agent_api_key in update_company_agent response
 
 - `backend/app/api/companies.py` — `update_company_agent()` now masks `agent_api_key` as `"***"` in the response, consistent with create and list endpoints
@@ -881,3 +897,23 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Fix ruff F841: removed unused `link_resp` variable in `send_magic_link` endpoint (`auth.py`)
 - Fix CI: bumped pydantic 2.9.2 → 2.13.3 to satisfy `realtime==2.29.0` constraint (requires `pydantic>=2.11.7`)
 - Memory: commit discipline recorded — never auto-commit; always run checks first, only commit on "tested"
+## 2026-05-03 — 0b637bc
+- style(proposal): matched partner one-pager visual style to main site (Space Mono font, wider layout, bolder spacing, larger type)
+## 2026-05-03 — 6948bc3
+- content(proposal): updated stack to AI-first (Python/FastAPI/LangChain), TutorPro metric (0→paying in 2mo), fixed domains label overlap
+
+## 2026-05-04
+- Project: 21century
+- Summary: Updated partner proposal commission terms to 20% (one-time) and 10% (recurring), with payout wording changed to paid from each collected check.
+- Commit: 53b20d9
+
+## 2026-05-04 — security fixes (trackingapp)
+
+Fixed 5 security vulnerabilities found by static review:
+- [Critical] DLL allowlist added to block arbitrary assembly loading from writable app data dir
+- [High] macOS SecureStorageWrapper now uses Keychain-backed SecureStorage instead of plaintext Preferences
+- [Medium] EncryptionKey redacted from debug logs
+- [Medium] Login password only retained in memory on successful login (removed always-persisting finally block)
+- [Low] Presigned screenshot URL validation restricted to HTTPS only
+
+Commit: 42ad2e9

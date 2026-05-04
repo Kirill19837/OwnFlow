@@ -71,6 +71,10 @@ OwnFlow turns a product prompt into a planned board of sprints and tasks, assign
 - Agent dispatch & callback protocol: [docs/agent-flow.md](docs/agent-flow.md)
 - Detailed release log: [DEVLOG.md](DEVLOG.md)
 
+### Production note
+
+In production compose, backend Docker API calls go through `tecnativa/docker-socket-proxy` (`DOCKER_HOST=tcp://docker-socket-proxy:2375`) instead of mounting `/var/run/docker.sock` directly into backend. This keeps built-in agent dispatch working while reducing exposed Docker API surface.
+
 ## Key API Areas
 
 | Prefix | Description |

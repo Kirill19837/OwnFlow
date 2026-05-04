@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -105,7 +105,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         "actor_id": actor_id,
         "content": body.content,
         "tool_calls_log": [],
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     try:
         db.table("deliverables").insert(deliverable_row).execute()

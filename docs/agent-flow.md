@@ -77,6 +77,8 @@ Dispatch is driven by `webhook_url` presence alone — not by actor type.
 
 When no `webhook_url` is set, OwnFlow spawns [`agents/builtin/`](../agents/builtin/) as an ephemeral Docker container via `docker run`. The container follows the same callback contract as any other agent worker — it has no DB access and communicates only via `POST /agents/callback`.
 
+In production, OwnFlow uses `tecnativa/docker-socket-proxy` between backend and Docker Engine. This avoids mounting the raw Docker socket inside the backend container and limits Docker API exposure to explicitly enabled endpoints.
+
 `_dispatch_docker_agent()` in `actor_executor.py`:
 
 1. Generates a one-time `callback_token`, sets task `status = in_progress`
