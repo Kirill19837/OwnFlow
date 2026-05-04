@@ -1006,3 +1006,6 @@ Commit: 42ad2e9
 ## 2026-05-04 — docs agent callback fix + masked env guard (99f7412)
 - agents/docs/main.py: payload now uses content (not status/result); adds prompt/model
 - AgentsPage + ProjectBoardPage: skip extra_env in PATCH when masked pairs remain
+
+## 2026-05-04 — Merge feature/kind-agents → main (1157a21)
+- Full feature/kind-agents branch merged: kind agents, security hardening, masked env fix, execution map UI
