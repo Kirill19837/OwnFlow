@@ -6,7 +6,7 @@ import { useCompanyStore } from '../store/companyStore'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 import type { Company, Team } from '../types'
-import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle, Bell, Bot } from 'lucide-react'
+import { LogOut, Layers, ChevronDown, Plus, Settings, Building2, Sun, Moon, UserCircle, Bell, Bot, ScrollText } from 'lucide-react'
 import CompleteProfileModal from './CompleteProfileModal'
 import SelectSkillsModal from './SelectSkillsModal'
 import { useThemeStore } from '../store/themeStore'
@@ -155,6 +155,14 @@ export default function AppLayout() {
                 >
                   <Bot size={12} />
                   <span>Agents</span>
+                </button>
+                <button
+                  onClick={() => navigate('/ai-logs')}
+                  className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                  title="AI Logs"
+                >
+                  <ScrollText size={12} />
+                  <span>AI Logs</span>
                 </button>
               </>
             ) : (

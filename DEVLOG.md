@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-05-04 | `ebdf952` — feat(builtin-agent): verbose debug logging throughout execution
+
+- Startup: PAYLOAD length, JSON parse guard, API key presence printed before agent begins
+- `main()`: DEBUG-level logs for payload keys, capabilities, system prompt length, prompt preview, AI elapsed time, response preview, `###FILES###` marker detection, per-file path/size, callback body summary, callback HTTP status, full error body on failure
+- `create_pr()`: `print()`-based tracing for each GitHub API step (default branch, base SHA, branch create status, blob count, tree SHA, commit SHA, PR URL)
+- Distinguishes "no repo" vs "no token" in skipped-PR log message
+- Fixes silent ignore of branch-create HTTP errors
+
 ## 2026-05-04 | `17ada2c` — fix: resolve company_id via team, fix smallint type errors in ai_logs queries
 
 - `projects.py` agent-runtime: removed `company_id` from projects SELECT (column never existed); always resolve via `team_id → teams.company_id`
