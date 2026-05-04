@@ -317,6 +317,162 @@ async def test_dispatch_docker_logs_error_on_api_error():
 
 
 # ---------------------------------------------------------------------------
+# _resolve_builtin_image  +  ROLE_IMAGE_MAP
+# ---------------------------------------------------------------------------
+
+from app.services.actor_executor import ROLE_IMAGE_MAP, _resolve_builtin_image
+
+DEFAULT_IMAGE   = ROLE_IMAGE_MAP["default"]
+FIGMA_IMAGE     = ROLE_IMAGE_MAP["ui/ux designer"]
+DOCS_IMAGE      = ROLE_IMAGE_MAP["business analyst"]
+SERVER_FALLBACK = "ownflow-agent:test"
+
+
+class TestRoleImageMap:
+    def test_default_key_exists(self):
+        assert "default" in ROLE_IMAGE_MAP
+
+    def test_ui_ux_designer_maps_to_figma(self):
+        assert ROLE_IMAGE_MAP["ui/ux designer"] == "ownflow-figma-agent:latest"
+
+    def test_business_analyst_maps_to_docs(self):
+        assert ROLE_IMAGE_MAP["business analyst"] == "ownflow-docs-agent:latest"
+
+    def test_default_maps_to_general_agent(self):
+        assert ROLE_IMAGE_MAP["default"] == "ownflow-agent:latest"
+
+
+class TestResolveBuiltinImage:
+    # explicit docker_image on actor wins everything
+    def test_explicit_docker_image_wins(self):
+        actor = {"role": "ui/ux designer", "docker_image": "custom-image:v2"}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == "custom-image:v2"
+
+    def test_explicit_docker_image_wins_over_default_role(self):
+        actor = {"role": "business analyst", "docker_image": "special:latest"}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == "special:latest"
+
+    # role-based lookup
+    def test_ui_ux_designer_role_resolves_to_figma(self):
+        actor = {"role": "UI/UX Designer", "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == FIGMA_IMAGE
+
+    def test_business_analyst_role_resolves_to_docs(self):
+        actor = {"role": "Business Analyst", "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == DOCS_IMAGE
+
+    def test_role_lookup_is_case_insensitive(self):
+        for role in ("UI/UX DESIGNER", "ui/ux designer", "Ui/Ux Designer"):
+            actor = {"role": role, "docker_image": None}
+            assert _resolve_builtin_image(actor, SERVER_FALLBACK) == FIGMA_IMAGE, role
+
+    def test_role_with_surrounding_whitespace_normalised(self):
+        actor = {"role": "  ui/ux designer  ", "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == FIGMA_IMAGE
+
+    # unknown role falls back to ROLE_IMAGE_MAP["default"]
+    def test_unknown_role_falls_back_to_map_default(self):
+        actor = {"role": "Lead Engineer", "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == DEFAULT_IMAGE
+
+    def test_empty_role_falls_back_to_map_default(self):
+        actor = {"role": "", "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == DEFAULT_IMAGE
+
+    def test_missing_role_key_falls_back_to_map_default(self):
+        actor = {"docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == DEFAULT_IMAGE
+
+    def test_none_role_falls_back_to_map_default(self):
+        actor = {"role": None, "docker_image": None}
+        assert _resolve_builtin_image(actor, SERVER_FALLBACK) == DEFAULT_IMAGE
+
+    # server setting used only when map["default"] is absent (edge-case safety)
+    def test_server_fallback_used_when_default_key_removed(self, monkeypatch):
+        import app.services.actor_executor as mod
+        original = mod.ROLE_IMAGE_MAP.copy()
+        monkeypatch.delitem(mod.ROLE_IMAGE_MAP, "default")
+        actor = {"role": "Unknown", "docker_image": None}
+        result = _resolve_builtin_image(actor, SERVER_FALLBACK)
+        assert result == SERVER_FALLBACK
+        mod.ROLE_IMAGE_MAP.clear()
+        mod.ROLE_IMAGE_MAP.update(original)
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_docker_agent — image resolution integration
+# ---------------------------------------------------------------------------
+
+def _docker_dispatch_db():
+    """Minimal DB mock sufficient for _dispatch_docker_agent."""
+    def table(name):
+        t = MagicMock()
+        t.select.return_value = t
+        t.eq.return_value = t
+        t.single.return_value = t
+        t.update.return_value = t
+        t.insert.return_value = t
+        t.execute.return_value = _resp({} if name == "companies" else None)
+        return t
+    db = MagicMock()
+    db.table.side_effect = table
+    return db
+
+
+async def _run_dispatch(actor: dict) -> str:
+    """Run _dispatch_docker_agent and return the image it passed to docker."""
+    images_used: list[str] = []
+
+    mock_container = MagicMock()
+    mock_container.id = "cid"
+    mock_client = MagicMock()
+
+    def fake_run(image, **_kwargs):
+        images_used.append(image)
+        return mock_container
+
+    mock_client.containers.run.side_effect = fake_run
+
+    with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
+         patch("app.services.actor_executor.get_settings") as ms, \
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_client):
+
+        ms.return_value.backend_url = ""
+        ms.return_value.builtin_agent_image = "ownflow-agent:latest"
+        ms.return_value.openai_api_key = "sk-x"
+        ms.return_value.anthropic_api_key = ""
+
+        from app.services.actor_executor import _dispatch_docker_agent
+        await _dispatch_docker_agent(TASK, actor, PROJECT, _docker_dispatch_db())
+
+    return images_used[0]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_figma_image_for_designer_role():
+    actor = {**ACTOR_DOCKER, "role": "UI/UX Designer", "docker_image": None}
+    assert await _run_dispatch(actor) == "ownflow-figma-agent:latest"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_docs_image_for_ba_role():
+    actor = {**ACTOR_DOCKER, "role": "Business Analyst", "docker_image": None}
+    assert await _run_dispatch(actor) == "ownflow-docs-agent:latest"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_default_image_for_unknown_role():
+    actor = {**ACTOR_DOCKER, "role": "QA Engineer", "docker_image": None}
+    assert await _run_dispatch(actor) == "ownflow-agent:latest"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_explicit_docker_image_override():
+    actor = {**ACTOR_DOCKER, "role": "UI/UX Designer", "docker_image": "my-custom-agent:v3"}
+    assert await _run_dispatch(actor) == "my-custom-agent:v3"
+
+
+# ---------------------------------------------------------------------------
 # _dispatch_external_agent
 # ---------------------------------------------------------------------------
 

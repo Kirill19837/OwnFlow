@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-05-04 | `4f3d1a8` — feat: multiple builtin agent types with role-based image routing
+
+- Migration 017: `actors.docker_image`, `actors.extra_env`, `company_agents.docker_image/extra_env/agent_type`; `webhook_url` nullable
+- `ROLE_IMAGE_MAP` in `actor_executor.py`: `ui/ux designer` → figma agent, `business analyst` → docs agent, `default` → general agent; per-actor `docker_image` override always wins
+- New `agents/figma/` — design-focused agent with Figma API context enrichment (reads `FIGMA_TOKEN` from `extra_env`)
+- New `agents/docs/` — BA/technical writing agent (BRDs, specs, ADRs, runbooks)
+- Backend: `CompanyAgentCreate/Update` accept `agent_type`, `docker_image`, `extra_env`; values masked in all API responses; injected into Docker env at dispatch; actors PATCH resolves `company_agent_id` server-side
+- Frontend: `AgentsPage` reworked with Webhook/Builtin toggle + `ExtraEnvEditor`; `ProjectBoardPage` selector sends `company_agent_id`; per-actor env editor inline; `ExtraEnvEditor` extracted to shared component + `lib/envUtils.ts`
+- 15 new tests for `ROLE_IMAGE_MAP`, `_resolve_builtin_image`, and dispatch integration (93 total, all passing)
+
 ## 2026-05-04 | `3924ca5` — feat: AI Logs page with paginated, filterable log viewer
 
 - `GET /projects/dashboard/ai-logs` — paginated ai_logs scoped to team/owner, level/phase filters, resolves project_name + task_title
@@ -986,3 +996,13 @@ Fixed 5 security vulnerabilities found by static review:
 - [Low] Presigned screenshot URL validation restricted to HTTPS only
 
 Commit: 42ad2e9
+
+## 2026-05-04 — security hardening + masked env fix (040cbc3)
+- Tenant-scoped company_agent_id lookups in add_actor (projects.py) and update_actor (actors.py)
+- update_company_agent enforces webhook_url/docker_image invariants on update; auto-clears stale dispatch field on type change
+- envUtils: isMasked sentinel on EnvPair prevents masked secrets being overwritten on save
+- ExtraEnvEditor: clears isMasked on user input, shows '(unchanged)' placeholder
+
+## 2026-05-04 — docs agent callback fix + masked env guard (99f7412)
+- agents/docs/main.py: payload now uses content (not status/result); adds prompt/model
+- AgentsPage + ProjectBoardPage: skip extra_env in PATCH when masked pairs remain

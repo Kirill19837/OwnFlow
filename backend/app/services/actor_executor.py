@@ -15,6 +15,24 @@ from app.config import get_settings
 import uuid
 from datetime import datetime, timezone
 
+# Role → Docker image mapping for built-in agent types.
+# Resolution order: actor.docker_image (explicit) → role-based → "default" entry
+ROLE_IMAGE_MAP: dict[str, str] = {
+    "default": "ownflow-agent:latest",
+    "ui/ux designer": "ownflow-figma-agent:latest",
+    "business analyst": "ownflow-docs-agent:latest",
+}
+
+def _resolve_builtin_image(actor: dict, default_image: str) -> str:
+    """Return the Docker image to use for a built-in actor dispatch."""
+    # Explicit per-actor override wins
+    if actor.get("docker_image"):
+        return actor["docker_image"]
+    # Role-based lookup; fall back to ROLE_IMAGE_MAP["default"], then server setting
+    role = (actor.get("role") or "").strip().lower()
+    return ROLE_IMAGE_MAP.get(role, ROLE_IMAGE_MAP.get("default", default_image))
+
+
 def _resolve_company_id(project: dict, db) -> str | None:
     """Resolve company_id for a project via its team (projects has no company_id column)."""
     team_id = project.get("team_id")
@@ -278,7 +296,8 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
     openai_key = company.get("openai_api_key") or settings.openai_api_key
     anthropic_key = company.get("anthropic_api_key") or settings.anthropic_api_key
 
-    image = settings.builtin_agent_image
+    # Per-actor override → role-based default → server default
+    image = _resolve_builtin_image(actor, settings.builtin_agent_image)
 
     payload_json = json.dumps(payload)
 
@@ -307,6 +326,12 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         env["OPENAI_API_KEY"] = openai_key
     if anthropic_key:
         env["ANTHROPIC_API_KEY"] = anthropic_key
+    # Inject per-actor extra env vars (e.g. FIGMA_TOKEN set at company level)
+    extra_env = actor.get("extra_env") or {}
+    if isinstance(extra_env, dict):
+        for k, v in extra_env.items():
+            if k and isinstance(v, str):
+                env[str(k)] = v
 
     def _run_container() -> str:
         client = docker.from_env()
