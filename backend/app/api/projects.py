@@ -262,6 +262,60 @@ def get_project_agent_runtime(project_id: str):
     }
 
 
+@router.get("/{project_id}/tasks/{task_id}/activity")
+def get_task_activity(project_id: str, task_id: str):
+    """Return recent logs and AI messages for a running task."""
+    db = get_supabase()
+
+    task_resp = (
+        db.table("tasks")
+        .select("id,title,status,priority,agent_dispatched_at,created_at")
+        .eq("id", task_id)
+        .eq("project_id", project_id)
+        .single()
+        .execute()
+    )
+    task = task_resp.data
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    dispatched_at = task.get("agent_dispatched_at") or task.get("created_at")
+
+    logs_q = (
+        db.table("ai_logs")
+        .select("id,phase,message,level,created_at")
+        .eq("project_id", project_id)
+        .order("created_at", desc=False)
+        .limit(40)
+    )
+    if dispatched_at:
+        logs_q = logs_q.gte("created_at", dispatched_at)
+    logs = logs_q.execute().data or []
+
+    messages_resp = (
+        db.table("ai_messages")
+        .select("id,phase,model,response,created_at")
+        .eq("task_id", task_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    messages = messages_resp.data or []
+
+    return {
+        "task": {
+            "id": task.get("id"),
+            "title": task.get("title"),
+            "status": task.get("status"),
+            "priority": task.get("priority"),
+            "agent_dispatched_at": dispatched_at,
+        },
+        "logs": logs,
+        "latest_response": messages[0]["response"][:800] if messages else None,
+        "model": messages[0].get("model") if messages else None,
+    }
+
+
 @router.get("")
 def list_projects(owner_id: str = "", team_id: str = ""):
     db = get_supabase()
