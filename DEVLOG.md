@@ -1002,3 +1002,7 @@ Commit: 42ad2e9
 - update_company_agent enforces webhook_url/docker_image invariants on update; auto-clears stale dispatch field on type change
 - envUtils: isMasked sentinel on EnvPair prevents masked secrets being overwritten on save
 - ExtraEnvEditor: clears isMasked on user input, shows '(unchanged)' placeholder
+
+## 2026-05-04 — docs agent callback fix + masked env guard (99f7412)
+- agents/docs/main.py: payload now uses content (not status/result); adds prompt/model
+- AgentsPage + ProjectBoardPage: skip extra_env in PATCH when masked pairs remain
