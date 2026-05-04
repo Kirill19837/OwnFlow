@@ -61,7 +61,7 @@ export default function InvitePage() {
       .then((r) => setInvite(r.data.invite ?? null))
       .catch(() => setInvite(null))
       .finally(() => setStep('invite-card'))
-  }, [session])
+  }, [session, teamIdParam])
 
   const handleAccept = () => {
     if (!session || !invite) return

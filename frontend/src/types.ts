@@ -7,8 +7,8 @@ export interface Company {
   my_role?: 'owner' | 'admin' | 'member'
   default_team_id?: string
   phone?: string | null
-  openai_api_key?: string | null
-  anthropic_api_key?: string | null
+  openai_key_set?: boolean
+  anthropic_key_set?: boolean
 }
 
 export interface CompanyAgent {

@@ -165,11 +165,6 @@ async def test_execute_task_raises_when_task_not_found():
 
 @pytest.mark.asyncio
 async def test_dispatch_docker_sets_task_in_progress():
-    db = _db_mock()
-    update_mock = MagicMock()
-    update_mock.eq.return_value = update_mock
-    update_mock.execute.return_value = _resp(None)
-
     captured_update = {}
 
     def table(name):
@@ -193,13 +188,14 @@ async def test_dispatch_docker_sets_task_in_progress():
     real_db = MagicMock()
     real_db.table.side_effect = table
 
-    proc_mock = AsyncMock()
-    proc_mock.returncode = 0
-    proc_mock.communicate = AsyncMock(return_value=(b"container-id\n", b""))
+    mock_container = MagicMock()
+    mock_container.id = "abc123"
+    mock_docker_client = MagicMock()
+    mock_docker_client.containers.run.return_value = mock_container
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc_mock):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -213,22 +209,13 @@ async def test_dispatch_docker_sets_task_in_progress():
     assert "agent_callback_token" in captured_update
     assert len(captured_update["agent_callback_token"]) == 64
     assert result["via"] == "docker"
+    assert result["container_id"] == "abc123"
 
 
 @pytest.mark.asyncio
 async def test_dispatch_docker_payload_contains_required_fields():
-    """Verify the PAYLOAD env var passed to docker contains all contract fields."""
-    proc_mock = AsyncMock()
-    proc_mock.returncode = 0
-    proc_mock.communicate = AsyncMock(return_value=(b"cid\n", b""))
-
-    captured_cmd: list[str] = []
-
-    async def fake_exec(*args, **kwargs):
-        captured_cmd.extend(args)
-        return proc_mock
-
-    db = _db_mock()
+    """Verify the PAYLOAD env dict passed to docker contains all contract fields."""
+    captured_env: dict = {}
 
     def table(name):
         t = MagicMock()
@@ -242,9 +229,19 @@ async def test_dispatch_docker_payload_contains_required_fields():
     real_db = MagicMock()
     real_db.table.side_effect = table
 
+    mock_container = MagicMock()
+    mock_container.id = "cid123"
+    mock_docker_client = MagicMock()
+
+    def fake_run(image, **kwargs):
+        captured_env.update(kwargs.get("environment", {}))
+        return mock_container
+
+    mock_docker_client.containers.run.side_effect = fake_run
+
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value={"owner": "acme", "repo": "app", "token": "ghp_test"}), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.asyncio.create_subprocess_exec", side_effect=fake_exec):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -254,15 +251,8 @@ async def test_dispatch_docker_payload_contains_required_fields():
         from app.services.actor_executor import _dispatch_docker_agent
         await _dispatch_docker_agent(TASK, ACTOR_DOCKER, PROJECT, real_db)
 
-    # Find PAYLOAD value in the docker command
-    payload_str = None
-    for i, arg in enumerate(captured_cmd):
-        if arg.startswith("PAYLOAD="):
-            payload_str = arg[len("PAYLOAD="):]
-            break
-
-    assert payload_str is not None, "PAYLOAD env var not found in docker command"
-    payload = json.loads(payload_str)
+    assert "PAYLOAD" in captured_env, "PAYLOAD key not found in container environment"
+    payload = json.loads(captured_env["PAYLOAD"])
 
     assert payload["task_id"] == TASK_ID
     assert "callback_url" in payload
@@ -274,10 +264,9 @@ async def test_dispatch_docker_payload_contains_required_fields():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_docker_logs_error_on_nonzero_exit():
-    proc_mock = AsyncMock()
-    proc_mock.returncode = 1
-    proc_mock.communicate = AsyncMock(return_value=(b"", b"image not found"))
+async def test_dispatch_docker_logs_error_on_api_error():
+    """docker.errors.APIError is caught, logged, and returns dispatched=False."""
+    import docker as _docker
 
     logged = {}
 
@@ -302,9 +291,17 @@ async def test_dispatch_docker_logs_error_on_nonzero_exit():
     real_db = MagicMock()
     real_db.table.side_effect = table
 
+    mock_docker_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.reason = "Internal Server Error"
+    mock_docker_client.containers.run.side_effect = _docker.errors.APIError(
+        "server error", response=mock_response
+    )
+
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc_mock):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
 
         mock_settings.return_value.backend_url = ""
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -314,10 +311,9 @@ async def test_dispatch_docker_logs_error_on_nonzero_exit():
         from app.services.actor_executor import _dispatch_docker_agent
         result = await _dispatch_docker_agent(TASK, ACTOR_DOCKER, PROJECT, real_db)
 
-    assert logged.get("level") == "error"
-    assert "image not found" in logged.get("message", "")
-    # Still returns dispatched dict — caller doesn't hard-fail
+    assert result["dispatched"] is False
     assert result["task_id"] == TASK_ID
+    assert logged.get("level") == "error"
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +344,7 @@ async def test_dispatch_external_posts_to_webhook_url():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
+         patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
          patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
@@ -395,6 +392,7 @@ async def test_dispatch_external_logs_on_http_failure():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
+         patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
          patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
 
         mock_settings.return_value.backend_url = ""
@@ -402,8 +400,8 @@ async def test_dispatch_external_logs_on_http_failure():
         from app.services.actor_executor import _dispatch_external_agent
         result = await _dispatch_external_agent(TASK, ACTOR_WEBHOOK, PROJECT, real_db)
 
-    # Should not raise — logs and returns dispatched
-    assert result["dispatched"] is True
+    # Should not raise — logs the error and returns dispatched=False
+    assert result["dispatched"] is False
     assert logged.get("level") == "error"
     assert "connection refused" in logged.get("message", "")
 
@@ -431,6 +429,7 @@ async def test_dispatch_external_no_api_key_header_when_not_set():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
+         patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
          patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
 
         mock_settings.return_value.backend_url = ""
@@ -471,6 +470,7 @@ async def test_dispatch_external_uses_company_level_callback_url():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
+         patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
          patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
 
         mock_settings.return_value.backend_url = "https://custom.example.com/api"
@@ -479,3 +479,100 @@ async def test_dispatch_external_uses_company_level_callback_url():
         await _dispatch_external_agent(TASK, ACTOR_WEBHOOK, PROJECT, real_db)
 
     assert captured_payload["callback_url"] == "https://custom.example.com/api/agents/callback"
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_assert_safe_webhook_url_accepts_public_https():
+    import ipaddress, socket
+    from app.services.actor_executor import _assert_safe_webhook_url
+
+    public_ip = "93.184.216.34"  # example.com
+    fake_infos = [(None, None, None, None, (public_ip, 0))]
+    with patch("app.services.actor_executor.socket.getaddrinfo", return_value=fake_infos):
+        # Should not raise
+        await _assert_safe_webhook_url("https://agent.example.com/run")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("private_ip", [
+    "127.0.0.1",       # loopback
+    "::1",             # IPv6 loopback
+    "10.0.0.1",        # RFC-1918
+    "172.16.0.1",      # RFC-1918
+    "192.168.1.1",     # RFC-1918
+    "169.254.0.1",     # link-local
+    "0.0.0.0",         # unspecified
+])
+async def test_assert_safe_webhook_url_rejects_private_ips(private_ip):
+    from app.services.actor_executor import _assert_safe_webhook_url
+
+    fake_infos = [(None, None, None, None, (private_ip, 0))]
+    with patch("app.services.actor_executor.socket.getaddrinfo", return_value=fake_infos):
+        with pytest.raises(ValueError, match="non-routable"):
+            await _assert_safe_webhook_url("https://internal.local/run")
+
+
+@pytest.mark.asyncio
+async def test_assert_safe_webhook_url_rejects_non_http_scheme():
+    from app.services.actor_executor import _assert_safe_webhook_url
+
+    with pytest.raises(ValueError, match="scheme must be http or https"):
+        await _assert_safe_webhook_url("ftp://agent.example.com/run")
+
+
+@pytest.mark.asyncio
+async def test_assert_safe_webhook_url_rejects_unresolvable_host():
+    import socket
+    from app.services.actor_executor import _assert_safe_webhook_url
+
+    with patch("app.services.actor_executor.socket.getaddrinfo",
+               side_effect=socket.gaierror("Name or service not known")):
+        with pytest.raises(ValueError, match="could not be resolved"):
+            await _assert_safe_webhook_url("https://does-not-exist.invalid/run")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_external_blocked_by_ssrf_guard():
+    """SSRF guard: dispatch returns dispatched=False and logs error without making HTTP call."""
+    logged = {}
+
+    def table(name):
+        t = MagicMock()
+        t.select.return_value = t
+        t.eq.return_value = t
+        t.single.return_value = t
+        t.update.return_value = t
+        if name == "ai_logs":
+            def capture(data):
+                logged.update(data)
+                m = MagicMock()
+                m.execute.return_value = _resp(None)
+                return m
+            t.insert.side_effect = capture
+        else:
+            t.execute.return_value = _resp(None)
+        return t
+
+    real_db = MagicMock()
+    real_db.table.side_effect = table
+
+    ssrf_actor = {**ACTOR_WEBHOOK, "webhook_url": "https://internal.corp/run"}
+
+    with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
+         patch("app.services.actor_executor.get_settings") as mock_settings, \
+         patch("app.services.actor_executor._assert_safe_webhook_url",
+               new_callable=AsyncMock,
+               side_effect=ValueError("resolves to a non-routable address (10.0.0.1)")):
+
+        mock_settings.return_value.backend_url = ""
+        from app.services.actor_executor import _dispatch_external_agent
+        result = await _dispatch_external_agent(TASK, ssrf_actor, PROJECT, real_db)
+
+    assert result["dispatched"] is False
+    assert "error" in result
+    assert logged.get("level") == "error"
+    assert "Blocked" in logged.get("message", "")

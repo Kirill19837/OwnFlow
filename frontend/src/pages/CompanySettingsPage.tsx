@@ -60,6 +60,7 @@ export default function CompanySettingsPage() {
     onSuccess: () => {
       setEditingOpenAI(false)
       setNewOpenAIKey('')
+      qc.invalidateQueries({ queryKey: ['company', userId] })
       toast.success('OpenAI key saved')
     },
     onError: () => toast.error('Failed to save key'),
@@ -71,6 +72,7 @@ export default function CompanySettingsPage() {
     onSuccess: () => {
       setEditingAnthropic(false)
       setNewAnthropicKey('')
+      qc.invalidateQueries({ queryKey: ['company', userId] })
       toast.success('Anthropic key saved')
     },
     onError: () => toast.error('Failed to save key'),
@@ -248,15 +250,15 @@ export default function CompanySettingsPage() {
             ) : (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-white font-mono">
-                  {company.openai_api_key
-                    ? '••••••••••••' + company.openai_api_key.slice(-4)
+                  {company.openai_key_set
+                    ? <span className="text-green-400">●&nbsp;Set</span>
                     : <span className="text-gray-500 italic font-sans">Not set</span>}
                 </span>
                 <button
                   onClick={() => setEditingOpenAI(true)}
                   className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
                 >
-                  <Pencil size={13} /> {company.openai_api_key ? 'Rotate' : 'Set key'}
+                  <Pencil size={13} /> {company.openai_key_set ? 'Rotate' : 'Set key'}
                 </button>
               </div>
             )}
@@ -291,15 +293,15 @@ export default function CompanySettingsPage() {
             ) : (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-white font-mono">
-                  {company.anthropic_api_key
-                    ? '••••••••••••' + company.anthropic_api_key.slice(-4)
+                  {company.anthropic_key_set
+                    ? <span className="text-green-400">●&nbsp;Set</span>
                     : <span className="text-gray-500 italic font-sans">Not set</span>}
                 </span>
                 <button
                   onClick={() => setEditingAnthropic(true)}
                   className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
                 >
-                  <Pencil size={13} /> {company.anthropic_api_key ? 'Rotate' : 'Set key'}
+                  <Pencil size={13} /> {company.anthropic_key_set ? 'Rotate' : 'Set key'}
                 </button>
               </div>
             )}

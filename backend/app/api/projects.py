@@ -14,6 +14,8 @@ from app.assistants import (
     build_project_board_messages,
     generate_project_creation_suggestion,
 )
+from app.api.actors import _mask_actor
+from app.api.tasks import _strip_task
 import uuid
 import json
 
@@ -175,8 +177,20 @@ def get_project(project_id: str):
     return {
         **project.data,
         "sprints": sprints.data or [],
-        "tasks": tasks,
-        "actors": actors.data or [],
+        "tasks": [
+            {
+                **_strip_task(t),
+                "assignments": [
+                    {
+                        **a,
+                        "actors": _mask_actor(a["actors"]) if isinstance(a.get("actors"), dict) else a.get("actors"),
+                    } if isinstance(a, dict) else a
+                    for a in (t.get("assignments") or [])
+                ] if isinstance(t.get("assignments"), list) else t.get("assignments"),
+            }
+            for t in tasks
+        ],
+        "actors": [_mask_actor(a) for a in (actors.data or [])],
     }
 
 
@@ -213,7 +227,7 @@ def add_actor(project_id: str, body: ActorCreate):
     if body.agent_api_key:
         row["agent_api_key"] = body.agent_api_key
     db.table("actors").insert(row).execute()
-    return row
+    return _mask_actor(row)
 
 
 # Default AI actor set used by auto-fill (role → default model)
@@ -270,7 +284,7 @@ def auto_fill_actors(project_id: str, body: dict):
         })
         name_idx += 1
     db.table("actors").insert(rows).execute()
-    return {"created": len(rows), "actors": rows}
+    return {"created": len(rows), "actors": [_mask_actor(r) for r in rows]}
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -517,7 +531,7 @@ async def run_ready_tasks(project_id: str, background_tasks: BackgroundTasks):
             assignments = [assignments]
         for asgn in assignments:
             actor = asgn.get("actors") or {}
-            if actor.get("type") == "ai":
+            if actor.get("type") == "ai" or actor.get("webhook_url"):
                 actor_id = asgn["actor_id"]
                 db.table("tasks").update({"status": "in_progress"}).eq("id", task["id"]).execute()
                 background_tasks.add_task(execute_task, task["id"], actor_id)

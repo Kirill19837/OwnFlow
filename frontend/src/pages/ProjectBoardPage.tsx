@@ -551,7 +551,7 @@ export default function ProjectBoardPage() {
                   <Plus size={13} /> Add
                 </button>
               </div>
-              {/* Webhook config — available for any actor type */}
+              {/* Webhook URL — task dispatch target for both AI and non-AI actors */}
               <div className="space-y-2 mt-1">
                 <input
                   placeholder="Webhook URL — if set, tasks are dispatched to this agent (optional)"

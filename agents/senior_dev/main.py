@@ -10,7 +10,7 @@ A standalone webhook agent that:
 Environment variables (see .env.example):
   ANTHROPIC_API_KEY   — Claude API key (required)
   AGENT_API_KEY       — Optional secret OwnFlow sends as X-Api-Key header
-  MODEL               — Anthropic model to use (default: claude-opus-4-5)
+  MODEL               — Anthropic model to use (default: claude-haiku-4-5)
 """
 from __future__ import annotations
 
@@ -181,10 +181,13 @@ async def _process(body: RunPayload) -> None:
             deliverable += f"\n\n**GitHub PR:** {pr_url}"
 
         # ── 5. Callback to OwnFlow ─────────────────────────────────────────────
+        # If this agent already created a PR, send pr_url and omit files so the
+        # OwnFlow callback handler does not open a second PR for the same task.
         callback_body = {
             "task_id": body.task_id,
             "content": deliverable,
-            "files": files if files else None,
+            "files": files if (files and not pr_url) else None,
+            "pr_url": pr_url,
         }
         log(f"Calling back to OwnFlow at {body.callback_url}")
         async with httpx.AsyncClient(timeout=30.0) as client:

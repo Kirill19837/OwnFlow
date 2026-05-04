@@ -5,10 +5,12 @@ A standalone webhook agent that integrates with OwnFlow to process coding tasks 
 ## What it does
 
 1. Receives a task payload from OwnFlow (`POST /run`)
-2. Calls Claude (claude-opus-4-5 by default) with the full task + project context
+2. Calls Claude (claude-haiku-4-5 by default) with the full task + project context
 3. Parses generated files from the `###FILES###` block in the response
 4. Creates a GitHub branch, commits the files, and opens a PR — automatically, using the project's connected GitHub token
-5. POSTs the deliverable + agent logs back to OwnFlow via the callback URL
+5. POSTs the deliverable back to OwnFlow via the callback URL:
+   - If a PR was created: `files` is omitted, `pr_url` is set — OwnFlow skips its own PR creation
+   - If no PR was created (no GitHub connection, or PR failed): `files` is included so OwnFlow can attempt it
 
 ## Setup
 
@@ -48,6 +50,24 @@ Once registered, assign this agent as an actor on any project. OwnFlow dispatche
   "callback_token": "hex64",
   "task": { "title": "...", "description": "...", "type": "code", "priority": "high" },
   "project": { "name": "...", "brief": "..." },
-  "github": { "repo": "owner/repo", "token": "ghp_..." }
+  "github": { "repo": "owner/repo", "token": "ghp_..." },
+  "actor": { "name": "Senior Developer", "role": "Lead Developer", "capabilities": [] }
 }
 ```
+
+## Callback contract
+
+This agent POSTs to `callback_url` with `Authorization: Bearer <callback_token>`:
+
+```json
+{
+  "task_id": "uuid",
+  "content": "Markdown deliverable",
+  "files": null,
+  "pr_url": "https://github.com/owner/repo/pull/42"
+}
+```
+
+- `files` is `null` when a PR was successfully created (to prevent duplicate PRs)
+- `files` contains the parsed file list when no PR was made, so OwnFlow can attempt it
+- `pr_url` is `null` when no PR was created

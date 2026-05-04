@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-03 | `1f2ce25` — fix: mask agent_api_key in update_company_agent response
+
+- `backend/app/api/companies.py` — `update_company_agent()` now masks `agent_api_key` as `"***"` in the response, consistent with create and list endpoints
+
+---
+
 ## 2026-05-03 | `435ceba` — fix: security hardening — webhook_url validation, XSS guard, atomic callback token, PR-only-with-files, remove redundant type casts
 
 - `backend/app/api/companies.py` — `field_validator` rejects `webhook_url` values that don't start with `https://` or `http://` on both create and update

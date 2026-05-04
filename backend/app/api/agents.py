@@ -1,8 +1,21 @@
 """External agent callback endpoint.
 
-External agents POST their deliverable here after processing a task.
-The callback_token (Bearer token) is validated against tasks.agent_callback_token
-to ensure only the agent that received the dispatch can submit the result.
+External agents (and the built-in Docker runner) POST their deliverable here
+after processing a task.
+
+Authentication
+--------------
+Bearer <callback_token> in the Authorization header.  The token is stored in
+tasks.agent_callback_token at dispatch time and consumed atomically on the
+first successful callback (prevents duplicate deliverables from concurrent
+requests with the same token).
+
+PR authority
+------------
+Agents are the primary PR authority.  If the agent already opened a GitHub PR,
+it sends ``pr_url`` in the callback body and omits ``files``.  The handler
+only calls ``create_pr_for_task`` when ``files`` is present AND ``pr_url`` is
+not set (i.e. the agent had no GitHub connection or its PR failed).
 """
 from __future__ import annotations
 
@@ -29,6 +42,7 @@ class AgentCallbackBody(BaseModel):
     task_id: str
     content: str
     files: Optional[List[FileEntry]] = None
+    pr_url: Optional[str] = None            # PR already created by the agent — skips handler-side PR creation
     logs: Optional[List[str]] = None        # structured log lines from the agent
     prompt: Optional[str] = None            # user prompt sent to the model (for ai_messages)
     model: Optional[str] = None             # model used (for ai_messages)
@@ -69,6 +83,18 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     if not stored_token or not secrets.compare_digest(provided_token, stored_token):
         raise HTTPException(403, "Invalid callback token.")
 
+    # ── Resolve actor_id before any state change ──────────────────────────────
+    # deliverables.actor_id is NOT NULL; fail early (before consuming the token)
+    # so the task is not left done-but-deliverable-less if the assignment is missing.
+    actor_id = None
+    assignments = task.get("assignments")
+    if isinstance(assignments, list) and assignments:
+        actor_id = assignments[0].get("actor_id")
+    elif isinstance(assignments, dict):
+        actor_id = assignments.get("actor_id")
+    if not actor_id:
+        raise HTTPException(400, "No actor assignment found for this task; cannot save deliverable.")
+
     # ── Atomically consume the token ──────────────────────────────────────────
     # UPDATE ... WHERE id=? AND agent_callback_token=? ensures only the first
     # concurrent request wins. Any duplicate callback finds 0 rows updated.
@@ -83,14 +109,6 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         raise HTTPException(409, "Callback token already consumed.")
 
     # ── Save deliverable ──────────────────────────────────────────────────────
-    actor_id = None
-    assignments = task.get("assignments")
-    if assignments:
-        if isinstance(assignments, list) and assignments:
-            actor_id = assignments[0].get("actor_id")
-        elif isinstance(assignments, dict):
-            actor_id = assignments.get("actor_id")
-
     deliverable_row = {
         "id": str(uuid.uuid4()),
         "task_id": body.task_id,
@@ -133,12 +151,16 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         except Exception:
             pass
 
-    # ── GitHub PR (if files provided and repo connected) ──────────────────────
-    if body.files:
-        # Reconstruct deliverable content with ###FILES### block for create_pr_for_task
-        files_json = [{"path": f.path, "content": f.content} for f in body.files]
+    # ── GitHub PR (fallback: only when the agent did not already open one) ─────
+    # Agents are the primary PR authority. If body.pr_url is set, the agent
+    # already created the PR; creating another one here would produce a duplicate.
+    if body.files and not body.pr_url:
         import json
-        content_with_files = body.content + "\n\n###FILES###\n" + json.dumps(files_json, indent=2)
+        files_json = [{"path": f.path, "content": f.content} for f in body.files]
+        # Strip any existing ###FILES### block the agent may have included in its
+        # content, then append a clean one so create_pr_for_task sees exactly one.
+        narrative = body.content.split("###FILES###")[0].rstrip()
+        content_with_files = narrative + "\n\n###FILES###\n" + json.dumps(files_json, indent=2)
         try:
             await create_pr_for_task(body.task_id, task.get("title", ""), content_with_files)
         except Exception:

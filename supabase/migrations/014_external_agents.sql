@@ -36,5 +36,17 @@ create table if not exists company_agents (
 );
 
 alter table company_agents enable row level security;
+
+-- Only the backend service-role may read or write company_agents.
+-- PostgREST connects as the 'service_role' Postgres role when using the
+-- service-role JWT, so current_user = 'service_role' is the right guard.
+-- Client-side (anon / authenticated) requests cannot reach this table.
 create policy "service_role_all_company_agents"
-  on company_agents for all using (true);
+  on company_agents for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- Index supporting the standard list query: WHERE company_id = ? ORDER BY created_at
+create index if not exists idx_company_agents_company_created
+  on company_agents (company_id, created_at);

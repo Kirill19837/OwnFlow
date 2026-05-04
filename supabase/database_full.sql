@@ -481,4 +481,5 @@ create table if not exists company_agents (
 );
 
 alter table company_agents enable row level security;
-create policy "service_role_all_company_agents" on company_agents for all using (true);
+create policy "service_role_all_company_agents" on company_agents for all to service_role using (true) with check (true);
+create index if not exists idx_company_agents_company_created on company_agents (company_id, created_at);

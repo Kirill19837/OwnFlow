@@ -1,16 +1,24 @@
 """
 OwnFlow — Built-in Agent
 ========================
-Spawned by OwnFlow's Docker runner for every task that has no webhook_url.
+Spawned by OwnFlow's Docker runner for every task whose actor has no webhook_url.
 
-Reads the full dispatch payload from the PAYLOAD env var, calls the configured
-AI provider, optionally creates a GitHub PR, then POSTs the result back to
-OwnFlow via the callback URL and exits.
+Flow
+----
+1. Parse the JSON dispatch payload from the PAYLOAD env var.
+2. Call the configured AI provider (OpenAI or Anthropic based on model prefix).
+3. Parse any ###FILES### block from the AI response.
+4. If files were produced and a GitHub token is present, create a branch,
+   commit the files, and open a PR.
+5. POST the deliverable back to OwnFlow via callback_url:
+   - If a PR was created: ``files`` is omitted, ``pr_url`` is set.
+   - If no PR was created: ``files`` is included so the OwnFlow callback
+     handler can attempt PR creation server-side.
 
 Environment variables:
   PAYLOAD             — JSON dispatch payload from OwnFlow (required)
-  OPENAI_API_KEY      — needed when actor.model is a GPT model
-  ANTHROPIC_API_KEY   — needed when actor.model is a Claude model
+  OPENAI_API_KEY      — required when actor.model starts with "gpt"
+  ANTHROPIC_API_KEY   — required when actor.model starts with "claude"
 """
 from __future__ import annotations
 
@@ -163,6 +171,11 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
         ref_resp.raise_for_status()
         base_sha = ref_resp.json()["object"]["sha"]
 
+        # Resolve the tree SHA from the commit (base_sha is a commit SHA, not a tree SHA)
+        commit_resp_base = await client.get(f"{api}/git/commits/{base_sha}", headers=headers)
+        commit_resp_base.raise_for_status()
+        base_tree_sha = commit_resp_base.json()["tree"]["sha"]
+
         # Create branch
         await client.post(f"{api}/git/refs", headers=headers,
                           json={"ref": f"refs/heads/{branch}", "sha": base_sha})
@@ -181,7 +194,7 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
             })
 
         tree_resp = await client.post(f"{api}/git/trees", headers=headers,
-                                      json={"base_tree": base_sha, "tree": tree_items})
+                                      json={"base_tree": base_tree_sha, "tree": tree_items})
         tree_resp.raise_for_status()
         tree_sha = tree_resp.json()["sha"]
 
@@ -264,7 +277,9 @@ async def main() -> None:
     callback_body = {
         "task_id": task_id,
         "content": content,
-        "files": files if files else None,
+        # If we already created a PR, don't send files back — the callback
+        # handler would otherwise create a second PR for the same task.
+        "files": files if (files and not pr_url) else None,
         "logs": logs,
         "prompt": prompt,
         "model": MODEL,

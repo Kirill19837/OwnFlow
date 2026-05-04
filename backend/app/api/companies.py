@@ -140,7 +140,7 @@ def my_company(user_id: str):
     company = db.table("companies").select("*").eq("id", m["company_id"]).single().execute()
     if not company.data:
         return None
-    return {**company.data, "my_role": ROLE_NAMES.get(m["role"], m["role"])}
+    return {**_mask_company(company.data), "my_role": ROLE_NAMES.get(m["role"], m["role"])}
 
 
 @router.get("/{company_id}/teams")
@@ -218,6 +218,23 @@ class CompanyUpdate(BaseModel):
     anthropic_api_key: Optional[str] = None
 
 
+_SECRET_COMPANY_FIELDS = {"openai_api_key", "anthropic_api_key"}
+
+
+def _mask_company(data: dict) -> dict:
+    """Replace sensitive API key fields with presence booleans.
+
+    The raw key values are never sent to the client — only whether a key is
+    set (True) or not (False/None).  The frontend stores these as
+    openai_key_set / anthropic_key_set.
+    """
+    result = {k: v for k, v in data.items() if k not in _SECRET_COMPANY_FIELDS}
+    for field in _SECRET_COMPANY_FIELDS:
+        set_field = field.replace("_api_key", "_key_set")
+        result[set_field] = bool(data.get(field))
+    return result
+
+
 def _require_company_owner(db, company_id: str, user_id: str) -> None:
     row = (
         db.table("company_members")
@@ -242,7 +259,7 @@ def update_company(company_id: str, body: CompanyUpdate, user_id: str):
     if not update:
         raise HTTPException(400, "No fields to update")
     db.table("companies").update(update).eq("id", company_id).execute()
-    return {"company_id": company_id, **update}
+    return {"company_id": company_id, **_mask_company(update)}
 
 
 @router.delete("/{company_id}", status_code=204)
@@ -345,12 +362,23 @@ def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str
 
 @router.patch("/{company_id}/agents/{agent_id}")
 def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdate, user_id: str):
-    """Update an agent. Only company owner."""
+    """Update an agent. Only company owner.
+
+    Omitted fields are left unchanged.
+    Send null explicitly to clear agent_api_key, description, or role.
+    name and webhook_url cannot be cleared (400 if sent as null).
+    """
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
-    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset=True: only fields the client actually sent are included,
+    # so omitting a field leaves it unchanged, while sending null clears it.
+    update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(400, "No fields to update")
+    if "name" in update and not update["name"]:
+        raise HTTPException(400, "name cannot be empty or null")
+    if "webhook_url" in update and update["webhook_url"] is None:
+        raise HTTPException(400, "webhook_url cannot be cleared")
     db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
     response = {"agent_id": agent_id, **update}
     if "agent_api_key" in response:
