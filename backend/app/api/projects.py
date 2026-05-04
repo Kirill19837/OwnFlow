@@ -8,6 +8,7 @@ from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, gen
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
 from app.providers.registry import get_provider
+from app.config import get_settings
 from app.auth_deps import current_user_id
 from app.assistants import (
     ProjectAssistBody,
@@ -194,6 +195,63 @@ def get_project(project_id: str):
     }
 
 
+@router.get("/{project_id}/agent-runtime")
+def get_project_agent_runtime(project_id: str):
+    """Return non-secret runtime status for built-in agents used by this project."""
+    db = get_supabase()
+    settings = get_settings()
+
+    project_resp = (
+        db.table("projects")
+        .select("id,company_id")
+        .eq("id", project_id)
+        .single()
+        .execute()
+    )
+    project = project_resp.data
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    company_id = project.get("company_id")
+    company = None
+    if company_id:
+        company_resp = (
+            db.table("companies")
+            .select("openai_api_key,anthropic_api_key")
+            .eq("id", company_id)
+            .single()
+            .execute()
+        )
+        company = company_resp.data or {}
+
+    has_company_openai = bool(company and company.get("openai_api_key"))
+    has_company_anthropic = bool(company and company.get("anthropic_api_key"))
+    has_server_openai = bool(settings.openai_api_key)
+    has_server_anthropic = bool(settings.anthropic_api_key)
+
+    def _source(has_company_key: bool, has_server_key: bool) -> str:
+        if has_company_key:
+            return "company"
+        if has_server_key:
+            return "server"
+        return "none"
+
+    return {
+        "builtin_agent_image": settings.builtin_agent_image,
+        "image_source": "server_env",
+        "openai_key": {
+            "source": _source(has_company_openai, has_server_openai),
+            "company_available": has_company_openai,
+            "server_available": has_server_openai,
+        },
+        "anthropic_key": {
+            "source": _source(has_company_anthropic, has_server_anthropic),
+            "company_available": has_company_anthropic,
+            "server_available": has_server_anthropic,
+        },
+    }
+
+
 @router.get("")
 def list_projects(owner_id: str = "", team_id: str = ""):
     db = get_supabase()
@@ -246,10 +304,10 @@ def dashboard_executor_state(owner_id: str = "", team_id: str = ""):
 
     task_resp = (
         db.table("tasks")
-        .select("id,title,project_id,status,priority,updated_at")
+        .select("id,title,project_id,status,priority,agent_dispatched_at,created_at")
         .in_("project_id", project_ids)
         .eq("status", "in_progress")
-        .order("updated_at", desc=True)
+        .order("agent_dispatched_at", desc=True)
         .execute()
     )
     tasks = task_resp.data or []
@@ -285,7 +343,7 @@ def dashboard_executor_state(owner_id: str = "", team_id: str = ""):
             "project_name": project_map.get(t.get("project_id"), "Unknown project"),
             "status": t.get("status"),
             "priority": t.get("priority"),
-            "updated_at": t.get("updated_at"),
+            "updated_at": t.get("agent_dispatched_at") or t.get("created_at"),
             "actor_name": actor.get("name"),
             "actor_type": actor.get("type"),
         })

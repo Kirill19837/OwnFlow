@@ -27,6 +27,21 @@ const COLUMNS = [
   { id: 'rework', label: 'Rework' },
 ] as const
 
+type AgentRuntimeStatus = {
+  builtin_agent_image: string
+  image_source: 'server_env' | string
+  openai_key: {
+    source: 'company' | 'server' | 'none' | string
+    company_available: boolean
+    server_available: boolean
+  }
+  anthropic_key: {
+    source: 'company' | 'server' | 'none' | string
+    company_available: boolean
+    server_available: boolean
+  }
+}
+
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -57,6 +72,7 @@ export default function ProjectBoardPage() {
   const [newActorWebhookUrl, setNewActorWebhookUrl] = useState('')
   const [newActorApiKey, setNewActorApiKey] = useState('')
   const [repoInput, setRepoInput] = useState('')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'github'>('general')
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -124,6 +140,12 @@ export default function ProjectBoardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
+  const updateActor = useMutation({
+    mutationFn: ({ actorId, patch }: { actorId: string; patch: Record<string, unknown> }) =>
+      api.patch(`/actors/${actorId}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
   const autoFillActors = useMutation({
     mutationFn: () =>
       api.post(`/projects/${projectId}/actors/auto-fill`, {
@@ -171,6 +193,12 @@ export default function ProjectBoardPage() {
       return api.get<{ repos: { full_name: string; private: boolean }[] }>(`/github/repos?${param}`).then(r => r.data.repos)
     },
     enabled: !!projectId && githubTokenAvailable,
+  })
+
+  const { data: agentRuntimeStatus } = useQuery({
+    queryKey: ['agent-runtime', projectId],
+    queryFn: () => api.get<AgentRuntimeStatus>(`/projects/${projectId}/agent-runtime`).then((r) => r.data),
+    enabled: !!projectId && showSettings && settingsTab === 'agents',
   })
 
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -424,58 +452,112 @@ export default function ProjectBoardPage() {
               </button>
             </div>
 
-            {/* Name */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Project name</label>
-              <input
-                value={settingsName}
-                onChange={(e) => setSettingsName(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
+            <div className="flex items-center gap-1 rounded-lg bg-gray-950 border border-gray-800 p-1 w-fit">
+              {[
+                { id: 'general', label: 'General' },
+                { id: 'agents', label: 'Agents' },
+                { id: 'github', label: 'GitHub' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSettingsTab(tab.id as 'general' | 'agents' | 'github')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    settingsTab === tab.id
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            {/* Description */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Project description / prompt</label>
-              <textarea
-                rows={4}
-                value={settingsPrompt}
-                onChange={(e) => setSettingsPrompt(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-              />
-            </div>
+            {settingsTab === 'general' && (
+              <>
+                {/* Name */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">Project name</label>
+                  <input
+                    value={settingsName}
+                    onChange={(e) => setSettingsName(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
 
-            {/* Sprint length */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">Sprint length (days) — applies to future sprints</label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {[1, 2, 3, 5, 7, 10, 14].map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setSettingsSprintDays(d)}
-                    className={`w-9 h-8 rounded-lg text-sm font-medium transition-colors ${
-                      settingsSprintDays === d
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-                <span className="text-xs text-gray-500 ml-1">{settingsSprintDays * 8}h capacity</span>
-              </div>
-            </div>
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">Project description / prompt</label>
+                  <textarea
+                    rows={4}
+                    value={settingsPrompt}
+                    onChange={(e) => setSettingsPrompt(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                  />
+                </div>
 
-            <button
-              onClick={() => saveSettings.mutate()}
-              disabled={saveSettings.isPending}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-            >
-              {saveSettings.isPending ? 'Saving…' : 'Save changes'}
-            </button>
+                {/* Sprint length */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-2">Sprint length (days) — applies to future sprints</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {[1, 2, 3, 5, 7, 10, 14].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setSettingsSprintDays(d)}
+                        className={`w-9 h-8 rounded-lg text-sm font-medium transition-colors ${
+                          settingsSprintDays === d
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                        }`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                    <span className="text-xs text-gray-500 ml-1">{settingsSprintDays * 8}h capacity</span>
+                  </div>
+                </div>
 
-            {/* Divider */}
-            <div className="border-t border-gray-700 pt-4">
+                <button
+                  onClick={() => saveSettings.mutate()}
+                  disabled={saveSettings.isPending}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                >
+                  {saveSettings.isPending ? 'Saving…' : 'Save changes'}
+                </button>
+              </>
+            )}
+
+            {settingsTab === 'agents' && (
+              <div className="border-t border-gray-700 pt-4">
+                <div className="mb-3 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-1">
+                  <p className="text-xs text-gray-300">
+                    <span className="text-purple-300 font-medium">Built-in agents</span> run inside OwnFlow and use each actor's selected model.
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    If a Webhook URL is provided, tasks for that actor are dispatched to your external agent endpoint instead.
+                  </p>
+                </div>
+                <div className="mb-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-2">
+                  <p className="text-xs text-gray-300 font-medium">Built-in agent runtime</p>
+                  <p className="text-xs text-gray-500">These values are read-only here and come from server/runtime configuration.</p>
+                  <div className="grid gap-2 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-400">Docker image</span>
+                      <span className="font-mono text-gray-200 break-all text-right">{agentRuntimeStatus?.builtin_agent_image || 'ownflow-agent:latest'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-400">Image source</span>
+                      <span className="text-gray-200">{agentRuntimeStatus?.image_source === 'server_env' ? 'Server env (BUILTIN_AGENT_IMAGE)' : 'Server config'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-400">OpenAI key source</span>
+                      <span className="text-gray-200 capitalize">{agentRuntimeStatus?.openai_key?.source || 'none'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-400">Anthropic key source</span>
+                      <span className="text-gray-200 capitalize">{agentRuntimeStatus?.anthropic_key?.source || 'none'}</span>
+                    </div>
+                  </div>
+                </div>
               <div className="flex items-center justify-between mb-3">
                 <label className="block text-xs font-medium text-gray-400">Team actors</label>
                 <button
@@ -492,13 +574,26 @@ export default function ProjectBoardPage() {
               {/* Existing actors */}
               <div className="space-y-1.5 mb-3">
                 {(project.actors ?? []).map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 text-sm">
+                  <div key={a.id} className="flex items-center gap-2 text-sm flex-wrap">
                     {a.type === 'ai'
                       ? <Bot size={13} className="text-purple-400 shrink-0" />
                       : <User size={13} className="text-blue-400 shrink-0" />}
                     <span className="text-white flex-1">{a.name}</span>
                     {a.webhook_url && <LinkIcon size={10} className="text-green-400 shrink-0" />}
-                    {(a.role || a.model) && <span className="text-gray-500 text-xs">{a.role ?? a.model}</span>}
+                    {a.role && <span className="text-gray-500 text-xs">{a.role}</span>}
+                    {a.type === 'ai' && (
+                      <select
+                        value={a.model || 'gpt-4o'}
+                        onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
+                        disabled={updateActor.isPending}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        title="Language model"
+                      >
+                        {AI_MODELS.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
+                    )}
                     <button
                       onClick={() => removeActor.mutate(a.id)}
                       disabled={removeActor.isPending}
@@ -572,8 +667,10 @@ export default function ProjectBoardPage() {
                   <p className="text-xs text-gray-500">Tasks assigned to this actor will be POSTed to the webhook. The agent calls back <span className="font-mono text-gray-400">/agents/callback</span> with the result.</p>
                 )}
               </div>
-            </div>
+              </div>
+            )}
             {/* GitHub integration */}
+            {settingsTab === 'github' && (
             <div className="border-t border-gray-700 pt-4 space-y-3">
               <div className="flex items-center gap-2">
                 <GitBranch size={13} className="text-gray-400" />
@@ -603,26 +700,21 @@ export default function ProjectBoardPage() {
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Repository for this project</label>
                     <div className="flex gap-2 items-center flex-wrap">
-                      {githubRepos && githubRepos.length > 0 ? (
-                        <select
-                          value={repoInput || githubStatus?.repo || ''}
-                          onChange={(e) => setRepoInput(e.target.value)}
-                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="">— select a repo —</option>
+                      <input
+                        placeholder={githubRepos && githubRepos.length > 0 ? 'Search repository…' : 'owner/repo-name'}
+                        value={repoInput || githubStatus?.repo || ''}
+                        onChange={(e) => setRepoInput(e.target.value)}
+                        list={githubRepos && githubRepos.length > 0 ? 'github-repo-options' : undefined}
+                        className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      {githubRepos && githubRepos.length > 0 && (
+                        <datalist id="github-repo-options">
                           {githubRepos.map((r) => (
                             <option key={r.full_name} value={r.full_name}>
-                              {r.private ? '🔒 ' : ''}{r.full_name}
+                              {r.private ? 'private' : 'public'}
                             </option>
                           ))}
-                        </select>
-                      ) : (
-                        <input
-                          placeholder="owner/repo-name"
-                          value={repoInput || githubStatus?.repo || ''}
-                          onChange={(e) => setRepoInput(e.target.value)}
-                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        />
+                        </datalist>
                       )}
                       <button
                         onClick={() => { const r = (repoInput || githubStatus?.repo || '').trim(); if (r) setRepo.mutate(r) }}
@@ -664,6 +756,7 @@ export default function ProjectBoardPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 
