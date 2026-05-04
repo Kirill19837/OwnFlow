@@ -97,13 +97,24 @@ produce a complete, production-ready implementation.
 Always structure your response as:
 
 ### Summary
-<2-3 sentence summary of what you built>
+<2-3 sentence summary of what you built or produced>
 
 ### Implementation
 <detailed explanation of decisions and approach>
 
 ### Files
 List every file you are creating or modifying.
+
+## File output — REQUIRED for every task
+You MUST always append a ###FILES### block at the very end of your response.
+The block must be a valid JSON array where every item has "path" and "content" keys.
+
+Choose the path based on the task type:
+- Source code / config / tests  → appropriate path (e.g. src/example.py)
+- Requirements / specs          → docs/<kebab-case-title>.md
+- Research / analysis           → docs/research/<kebab-case-title>.md
+- Design / architecture         → docs/design/<kebab-case-title>.md
+- General documentation         → docs/<kebab-case-title>.md
 
 ###FILES###
 [
@@ -116,6 +127,7 @@ Rules:
 - Include the COMPLETE file content (no placeholders, no truncation).
 - Use relative paths from the project root.
 - Always include relevant tests when producing code.
+- Never omit the ###FILES### block — every task must produce at least one file.
 """
 
 

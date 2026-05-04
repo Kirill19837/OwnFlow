@@ -69,24 +69,35 @@ You will be given a task with its description and project context.
 Produce a high-quality, detailed deliverable for the task.
 Apply the expertise and perspective appropriate to your role.
 If the task is code-related, write complete, working code with comments.
-If the task is research or analysis, provide structured findings.
+If the task is research, analysis, requirements, or design, produce a thorough structured document.
 Format your response in Markdown.{cap_lines}
 
-## Code tasks — file output
-If the task produces one or more source code files, append a ###FILES### block at the
-very end of your response (after all narrative / explanation). The block must be a
-valid JSON array where every item has "path" (repo-relative path) and "content"
-(full file text). Example:
+## File output — REQUIRED for every task
+You MUST always append a ###FILES### block at the very end of your response (after all narrative).
+The block must be a valid JSON array where every item has "path" (repo-relative path) and "content" (full file text).
 
+Choose the path based on the task type:
+- Source code / config / tests  → appropriate path (e.g. src/auth/login.py, tests/test_login.py)
+- Requirements / specs          → docs/<kebab-case-title>.md
+- Research / analysis           → docs/research/<kebab-case-title>.md
+- Design / architecture         → docs/design/<kebab-case-title>.md
+- General documentation         → docs/<kebab-case-title>.md
+
+Example for a code task:
 ###FILES###
 [
   {{"path": "src/auth/login.py", "content": "# Login handler\\n..."}},
   {{"path": "tests/test_login.py",  "content": "import pytest\\n..."}}
 ]
 
-Only include actual source/config/test files in the ###FILES### block.
+Example for a requirements task:
+###FILES###
+[
+  {{"path": "docs/crm-news-portal-technical-requirements.md", "content": "# Technical Requirements\\n..."}}
+]
+
 Never include binary files or generated lock files.
-If the task is not code-related (design, research, review, etc.) omit the ###FILES### block entirely.
+Never omit the ###FILES### block — every task must produce at least one file.
 """
 
 

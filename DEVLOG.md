@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-04 | `3924ca5` — feat: AI Logs page with paginated, filterable log viewer
+
+- `GET /projects/dashboard/ai-logs` — paginated ai_logs scoped to team/owner, level/phase filters, resolves project_name + task_title
+- `AiLogsPage.tsx` — level badge colors, phase labels, text search, dropdowns, prev/next pagination (100/page)
+- `/ai-logs` route in App.tsx; "AI Logs" nav link in AppLayout (owner-only, next to Agents)
+
 ## 2026-05-04 | `ebdf952` — feat(builtin-agent): verbose debug logging throughout execution
 
 - Startup: PAYLOAD length, JSON parse guard, API key presence printed before agent begins
