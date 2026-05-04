@@ -262,7 +262,7 @@ async def main() -> None:
             await client.post(
                 callback_url,
                 headers={"Authorization": f"Bearer {callback_token}"},
-                json={"task_id": task_id, "status": "error", "result": str(exc), "logs": logs},
+                json={"task_id": task_id, "content": f"Agent error: {exc}", "logs": logs},
             )
         return
 
@@ -290,10 +290,11 @@ async def main() -> None:
 
     payload_out: dict = {
         "task_id": task_id,
-        "status": "done",
-        "result": deliverable,
+        "content": deliverable,
         "files": files,
         "logs": logs,
+        "prompt": prompt,
+        "model": MODEL,
     }
     if pr_url:
         payload_out["pr_url"] = pr_url

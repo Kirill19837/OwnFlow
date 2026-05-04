@@ -909,8 +909,14 @@ export default function ProjectBoardPage() {
                                   />
                                   <button
                                     onClick={() => {
-                                      const env = envPairsToObj(actorEnvEdits[a.id] ?? [])
-                                      updateActor.mutate({ actorId: a.id, patch: { extra_env: env ?? null } })
+                                      const pairs = actorEnvEdits[a.id] ?? []
+                                      const hasMasked = pairs.some((p) => p.isMasked)
+                                      // Only replace extra_env when every key has been explicitly entered.
+                                      // Skipping masked pairs here would drop their server-side secrets.
+                                      const patch = hasMasked
+                                        ? {}
+                                        : { extra_env: envPairsToObj(pairs) ?? null }
+                                      updateActor.mutate({ actorId: a.id, patch })
                                       setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
                                     }}
                                     disabled={updateActor.isPending}

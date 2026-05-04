@@ -89,8 +89,14 @@ export default function AgentsPage() {
       if (editType === 'builtin' && editDockerImage.trim()) update.docker_image = editDockerImage.trim()
       if (editApiKey.trim() && editApiKey !== '***') update.agent_api_key = editApiKey.trim()
       if (editDesc.trim()) update.description = editDesc.trim()
-      const env = envPairsToObj(editEnvPairs)
-      if (env) update.extra_env = env
+      // Only send extra_env when every pair has been explicitly (re-)entered.
+      // If any isMasked pairs remain the server would replace the whole column with
+      // only the visible keys, silently dropping the still-masked secrets.
+      const hasMaskedEnv = editEnvPairs.some((p) => p.isMasked)
+      if (!hasMaskedEnv) {
+        const env = envPairsToObj(editEnvPairs)
+        if (env !== undefined) update.extra_env = env
+      }
       return api.patch(`/companies/${company!.id}/agents/${editId}`, update, {
         params: { user_id: userId },
       })
