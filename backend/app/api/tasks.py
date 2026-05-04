@@ -7,6 +7,12 @@ from app.db import get_supabase
 from app.services.assignment_engine import manual_assign
 from app.services.actor_executor import execute_task, stream_task_execution
 from app.providers.registry import get_provider
+from app.assistants import (
+    build_task_assistant_messages,
+    has_mark_ready_action,
+    resolve_task_assistant_model_and_name,
+    strip_duplicate_task_details,
+)
 import json
 
 router = APIRouter()
@@ -242,10 +248,6 @@ async def prompt_task_stream(task_id: str, body: dict):
         .execute()
     )
     actors = actors_resp.data or []
-    actors_lines = "\n".join(
-        f'- id:{a["id"]} | {a["name"]} | {a.get("role","") or a.get("type","")} | {a.get("model","") or ""}'
-        for a in actors
-    ) or "none"
 
     # Use assigned actor's model if available
     assignment_resp = (
@@ -254,103 +256,31 @@ async def prompt_task_stream(task_id: str, body: dict):
     model = "gpt-4o"
     assigned_actor_id = None
     assigned_actor_name = "Unassigned"
+    actor_row = None
     if assignment_resp.data:
         assigned_actor_id = assignment_resp.data["actor_id"]
         actor_resp = (
             db.table("actors").select("name,model").eq("id", assigned_actor_id).single().execute()
         )
         if actor_resp.data:
-            assigned_actor_name = actor_resp.data.get("name", "Actor")
-            if actor_resp.data.get("model"):
-                model = actor_resp.data["model"]
+            actor_row = actor_resp.data
+    model, assigned_actor_name = resolve_task_assistant_model_and_name(
+        assignment_row=assignment_resp.data,
+        actor_row=actor_row,
+    )
 
     history = body.get("history") or []
 
-    # Format existing task_details for context
     task_details = task.get("task_details") or {}
-    details_lines = (
-        "\n".join(f"  {k}: {v}" for k, v in task_details.items())
-        if task_details else "  (none captured yet)"
+    messages = build_task_assistant_messages(
+        task=task,
+        project=project,
+        actors=actors,
+        history=history,
+        assigned_actor_name=assigned_actor_name,
+        task_details=task_details,
+        user_prompt=user_prompt,
     )
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"You are {assigned_actor_name}, an AI agent working on a software project.\n"
-                f"Project: {project.get('name', '')}\n"
-                f"Project brief: {project.get('prompt', '')}\n\n"
-                f"Current task:\n"
-                f"  Title: {task['title']}\n"
-                f"  Description: {task.get('description') or '(empty)'}\n"
-                f"  Status: {task['status']}  |  Type: {task['type']}  |  Priority: {task['priority']}\n\n"
-                f"Decisions & details already captured:\n{details_lines}\n\n"
-                f"Team actors (for assignment):\n{actors_lines}\n\n"
-                "────────────────────────────────────\n"
-                "REFINEMENT PROTOCOL\n"
-                "When the user asks you to refine, clarify, or improve this task "
-                "(phrases like 'refine', 'clarify', 'improve description', 'what do you need', "
-                "'ask me questions', 'fill in details', etc.), follow this exact process:\n\n"
-                "STEP 1 — Rewrite title and description.\n"
-                "  Emit one update_description action. Include a concise `title` (≤ 10 words, plain text, no "
-                "  markdown symbols) AND a full `content` description in markdown with: goal, acceptance "
-                "  criteria, and any technical notes you can infer. The title should clearly name what "
-                "  this task does.\n\n"
-                "STEP 2 — Capture known structured decisions.\n"
-                "  Emit one update_details action for every fact you can already infer from the "
-                "  description, project context, or prior conversation. "
-                "  Typical keys: tech_stack, database, auth_method, api_style, framework, "
-                "  deployment_target, testing_approach, performance_requirements.\n"
-                "  IMPORTANT: never emit a key that was already captured (shown above).\n\n"
-                "STEP 3 — Ask all remaining open questions.\n"
-                "  After the JSON blocks, list every question still unanswered as a numbered list. "
-                "  Be specific — ask one thing per question. Do not ask about things already "
-                "  captured in 'Decisions & details already captured'.\n\n"
-                "STEP 4 — When the user answers a question.\n"
-                "  Immediately emit update_details for the answered fact(s), then check if any "
-                "  questions remain. If none remain, also emit mark_ready.\n\n"
-                "mark_ready means: YOU (the AI) are confident the task has enough decisions to be\n"
-                "implemented. It does NOT mean the user has approved execution — that is a separate\n"
-                "human decision. Emit mark_ready only when you have all the information you need.\n"
-                "Do NOT emit mark_ready until ALL questions are answered.\n"
-                "Do NOT repeat questions already answered in the captured details.\n"
-                "────────────────────────────────────\n\n"
-                "CONSOLIDATION PROTOCOL\n"
-                "When the user says things like 'consolidate', 'take all decisions', 'collect decisions',\n"
-                "'save everything we discussed', 'update decisions', 'consolidate from chat', 'save decisions':\n"
-                "  1. Scan the ENTIRE conversation history for every decision, fact, or technical choice mentioned.\n"
-                "  2. Emit ONE update_details block with ALL new facts not already in 'Decisions & details already captured'.\n"
-                "  3. Do NOT emit update_description — NEVER touch title or description during consolidation.\n"
-                "  4. After saving, assess: do you now have everything needed to implement this task?\n"
-                "     If YES → also emit mark_ready. If NO → list what is still missing.\n"
-                "────────────────────────────────────\n\n"
-                "STRUCTURED ACTIONS (respond with ONLY a fenced JSON block — no prose before/after):\n\n"
-                "```json\n"
-                '{"intent":"update_description","title":"<concise task name>","content":"<full markdown description>"}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"update_details","details":{"<key>":"<value>",...}}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"mark_ready","summary":"<one-sentence confirmation all questions answered>"}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"assign_actor","actor_id":"<id>","actor_name":"..."}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"update_status","status":"todo|in_progress|review|done|rework"}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"execute_task","confirm":true}\n'
-                "```\n\n"
-                "When the refinement protocol produces multiple actions (steps 1+2), emit them as "
-                "separate fenced JSON blocks in sequence, then ask questions in plain text after.\n"
-                "For all other questions, answer normally using Markdown."
-            ),
-        },
-        *history,
-        {"role": "user", "content": user_prompt},
-    ]
 
     # Persist user message
     try:
@@ -364,25 +294,6 @@ async def prompt_task_stream(task_id: str, body: dict):
 
     provider = get_provider(model)
 
-    import re as _re
-
-    def _strip_duplicate_details(text: str, existing: dict) -> str:
-        """Remove keys already in existing from every update_details JSON block."""
-        if not existing:
-            return text
-        def _clean(m):
-            try:
-                obj = json.loads(m.group(1))
-                if obj.get("intent") == "update_details" and isinstance(obj.get("details"), dict):
-                    obj["details"] = {k: v for k, v in obj["details"].items() if k not in existing}
-                    if not obj["details"]:
-                        return ""   # remove the entire block
-                    return f"```json\n{json.dumps(obj)}\n```"
-            except Exception:
-                pass
-            return m.group(0)
-        return _re.sub(r"```json\s*({.*?})\s*```", _clean, text, flags=_re.DOTALL)
-
     async def event_stream():
         full_response = []
         async for chunk in provider.stream(messages):
@@ -390,18 +301,11 @@ async def prompt_task_stream(task_id: str, body: dict):
             yield f"data: {json.dumps({'content': chunk})}\n\n"
         yield "data: [DONE]\n\n"
         # Persist assistant reply — strip duplicate detail keys before saving
-        assistant_content = _strip_duplicate_details("".join(full_response), task_details)
+        assistant_content = strip_duplicate_task_details("".join(full_response), task_details)
         # If the AI emitted mark_ready, set ai_ready on the task
         try:
-            import re as _re2
-            for m in _re2.finditer(r"```json\s*({.*?})\s*```", assistant_content, flags=_re2.DOTALL):
-                try:
-                    obj = json.loads(m.group(1))
-                    if obj.get("intent") == "mark_ready":
-                        db.table("tasks").update({"ai_ready": True}).eq("id", task_id).execute()
-                        break
-                except Exception:
-                    pass
+            if has_mark_ready_action(assistant_content):
+                db.table("tasks").update({"ai_ready": True}).eq("id", task_id).execute()
         except Exception:
             pass
         try:

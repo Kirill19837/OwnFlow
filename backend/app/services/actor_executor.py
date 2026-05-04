@@ -12,6 +12,22 @@ Produce a high-quality, detailed deliverable for the task.
 If the task is code-related, write complete, working code with comments.
 If the task is research or analysis, provide structured findings.
 Format your response in Markdown.
+
+## Code tasks — file output
+If the task produces one or more source code files, append a ###FILES### block at the
+very end of your response (after all narrative / explanation). The block must be a
+valid JSON array where every item has "path" (repo-relative path) and "content"
+(full file text). Example:
+
+###FILES###
+[
+  {"path": "src/auth/login.py", "content": "# Login handler\\n..."},
+  {"path": "tests/test_login.py",  "content": "import pytest\\n..."}
+]
+
+Only include actual source/config/test files in the ###FILES### block.
+Never include binary files or generated lock files.
+If the task is not code-related (design, research, review, etc.) omit the ###FILES### block entirely.
 """
 
 

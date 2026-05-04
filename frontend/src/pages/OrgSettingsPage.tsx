@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTeamStore } from '../store/teamStore'
 import { useAuthStore } from '../store/authStore'
 import api from '../lib/api'
 import type { Team, TeamPendingInvite, Skill } from '../types'
-import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil } from 'lucide-react'
+import { ChevronLeft, Settings, Trash2, UserPlus, Check, RotateCcw, Pencil, GitBranch, Unlink, Loader2 } from 'lucide-react'
 
 // Stable role UUIDs — match backend ROLE_IDS; use these for permission checks
 const ROLE_IDS = {
@@ -30,6 +30,7 @@ export default function OrgSettingsPage() {
   const { session } = useAuthStore()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
+  const [selectedExistingUserId, setSelectedExistingUserId] = useState('')
   const [inviteMessage, setInviteMessage] = useState('')
   const [resendingEmail, setResendingEmail] = useState<string | null>(null)
   const [localPendingInvites, setLocalPendingInvites] = useState<{ email: string; role: string }[]>([])
@@ -38,10 +39,38 @@ export default function OrgSettingsPage() {
   const [newName, setNewName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+  const { data: githubTeamStatus, refetch: refetchGithubStatus } = useQuery({
+    queryKey: ['github-team-status', teamId],
+    queryFn: () => api.get<{ connected: boolean; github_user?: string }>(`/github/team-status?team_id=${teamId}`).then(r => r.data),
+    enabled: !!teamId,
+  })
+
+  const disconnectTeamGithub = useMutation({
+    mutationFn: () => api.delete(`/github/team-disconnect?team_id=${teamId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['github-team-status', teamId] }),
+  })
+
   const { data: org, isLoading } = useQuery({
     queryKey: ['team', teamId],
     queryFn: () => api.get<Team>(`/teams/${teamId}`).then((r) => r.data),
     enabled: !!teamId,
+  })
+
+  const { data: companyTeams = [] } = useQuery({
+    queryKey: ['company-teams', org?.company_id],
+    queryFn: () => api.get<Team[]>(`/companies/${org!.company_id}/teams`).then((r) => r.data),
+    enabled: !!org?.company_id,
+  })
+
+  const companyTeamDetails = useQueries({
+    queries: companyTeams.map((team) => ({
+      queryKey: ['team', team.id],
+      queryFn: () => api.get<Team>(`/teams/${team.id}`).then((r) => r.data),
+      enabled: !!team.id,
+      staleTime: 2 * 60 * 1000,
+    })),
   })
 
   const updateModel = useMutation({
@@ -107,6 +136,28 @@ export default function OrgSettingsPage() {
     },
   })
 
+  const inviteExistingMember = useMutation({
+    mutationFn: (email: string) =>
+      api.post(`/teams/${teamId}/invites`, {
+        email,
+        role: inviteRole,
+        invited_by_user_id: session!.user.id,
+      }),
+    onSuccess: (res, email) => {
+      const sentEmail = email.trim().toLowerCase()
+      const payload = res?.data || {}
+      if (payload.status === 'invite_queued') {
+        setInviteMessage(`Invite saved — email couldn't be sent right now (rate limit). It will be sent later.`)
+      } else {
+        const who = payload.invited_by_email ? ` by ${payload.invited_by_email}` : ''
+        setInviteMessage(`Invite sent${who}.`)
+      }
+      setLocalPendingInvites((prev) => [...prev.filter((i) => i.email !== sentEmail), { email: sentEmail, role: inviteRole }])
+      setSelectedExistingUserId('')
+      qc.invalidateQueries({ queryKey: ['team', teamId] })
+    },
+  })
+
   const removeMember = useMutation({
     mutationFn: (userId: string) => api.delete(`/teams/${teamId}/members/${userId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
@@ -139,7 +190,55 @@ export default function OrgSettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team', teamId] }),
   })
 
+  // Handle ?github_connected=1 redirect from OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('github_connected') === '1') {
+      refetchGithubStatus()
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const members = org?.members ?? []
+  const existingMemberCandidates = (() => {
+    if (!org?.company_id) return []
+    const currentMemberIds = new Set((org.members ?? []).map((m) => m.user_id))
+    const pendingEmails = new Set((org.pending_invites ?? []).map((i) => i.email.toLowerCase()))
+    const localPendingEmails = new Set(localPendingInvites.map((i) => i.email.toLowerCase()))
+    const candidatesById = new Map<string, { user_id: string; email: string; full_name?: string; teams: Set<string> }>()
+
+    companyTeamDetails.forEach((q, idx) => {
+      const team = companyTeams[idx]
+      const teamName = team?.name || 'Other team'
+      const teamMembers = q.data?.members ?? []
+      teamMembers.forEach((m) => {
+        const email = (m.email || '').trim().toLowerCase()
+        if (!m.user_id || !email) return
+        if (currentMemberIds.has(m.user_id)) return
+        if (pendingEmails.has(email) || localPendingEmails.has(email)) return
+
+        const existing = candidatesById.get(m.user_id)
+        if (existing) {
+          existing.teams.add(teamName)
+          if (!existing.full_name && m.full_name) existing.full_name = m.full_name
+          return
+        }
+        candidatesById.set(m.user_id, {
+          user_id: m.user_id,
+          email,
+          full_name: m.full_name,
+          teams: new Set([teamName]),
+        })
+      })
+    })
+
+    return Array.from(candidatesById.values())
+      .map((c) => ({ ...c, teamNames: Array.from(c.teams).sort() }))
+      .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email))
+  })()
+
+  const selectedExistingCandidate = existingMemberCandidates.find((c) => c.user_id === selectedExistingUserId)
   const memberSkillQueries = useQueries({
     queries: members.map((m) => ({
       queryKey: ['user-skills', m.user_id],
@@ -347,6 +446,38 @@ export default function OrgSettingsPage() {
           {/* Invite by email — admins and owners only */}
           {canInvite && (
           <div className="border-t border-gray-800 pt-4">
+            <p className="text-sm text-gray-400 mb-2">Invite existing member from other teams</p>
+            <div className="flex gap-2 mb-3">
+              <select
+                value={selectedExistingUserId}
+                onChange={(e) => setSelectedExistingUserId(e.target.value)}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none"
+              >
+                <option value="">Select company member from another team…</option>
+                {existingMemberCandidates.map((candidate) => {
+                  const label = candidate.full_name
+                    ? `${candidate.full_name} (${candidate.email})`
+                    : candidate.email
+                  const fromTeams = candidate.teamNames.join(', ')
+                  return (
+                    <option key={candidate.user_id} value={candidate.user_id}>
+                      {`${label} • ${fromTeams}`}
+                    </option>
+                  )
+                })}
+              </select>
+              <button
+                onClick={() => {
+                  if (selectedExistingCandidate?.email) inviteExistingMember.mutate(selectedExistingCandidate.email)
+                }}
+                disabled={!selectedExistingCandidate?.email || inviteExistingMember.isPending || !session?.user.id}
+                className="flex items-center gap-1 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+              >
+                <UserPlus size={14} />
+                Invite member
+              </button>
+            </div>
+
             <p className="text-sm text-gray-400 mb-2">Invite member by email</p>
             <div className="flex gap-2">
               <input
@@ -378,10 +509,51 @@ export default function OrgSettingsPage() {
           )}
         </section>
 
+        {/* GitHub integration — team-level */}
+        {canInvite && (
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <GitBranch size={16} className="text-gray-400" />
+            <h2 className="font-semibold text-white">GitHub Integration</h2>
+            {githubTeamStatus?.connected && (
+              <span className="text-xs text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full ml-1">Connected</span>
+            )}
+          </div>
+          <p className="text-gray-500 text-sm mb-4">
+            Connect GitHub once for this team. All projects can then pick a repo and AI agents will automatically open pull requests.
+          </p>
+          {githubTeamStatus?.connected ? (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-400">
+                Signed in as <span className="text-white font-mono">@{githubTeamStatus.github_user}</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                Each project can now select its own repo from your GitHub account without re-authenticating.
+              </p>
+              <button
+                onClick={() => disconnectTeamGithub.mutate()}
+                disabled={disconnectTeamGithub.isPending}
+                className="flex items-center gap-1.5 px-3 py-2 bg-red-900/40 border border-red-800/50 hover:bg-red-800/50 text-red-400 text-sm rounded-lg transition-colors"
+              >
+                {disconnectTeamGithub.isPending ? <Loader2 size={13} className="animate-spin" /> : <Unlink size={13} />}
+                Disconnect GitHub
+              </button>
+            </div>
+          ) : (
+            <a
+              href={`${apiBase}/github/oauth/start?team_id=${teamId}`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-sm rounded-lg transition-colors font-medium"
+            >
+              <GitBranch size={14} />
+              Connect with GitHub
+            </a>
+          )}
+        </section>
+        )}
+
         {/* Danger zone — owners only */}
         {canDelete && (
-        <section className="bg-gray-900 border border-red-900/50 rounded-xl p-5">
-          <h2 className="font-semibold text-red-400 mb-1">Danger zone</h2>
+        <section className="bg-gray-900 border border-red-900/50 rounded-xl p-5">          <h2 className="font-semibold text-red-400 mb-1">Danger zone</h2>
           <p className="text-gray-500 text-sm mb-4">Permanently delete this team and all its projects. This cannot be undone.</p>
           {!confirmDelete ? (
             <button

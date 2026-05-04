@@ -11,10 +11,12 @@ create extension if not exists "pgcrypto";
 
 -- ─── Drop existing tables (dependency order: children first) ─────────────────
 
-drop table if exists user_signups        cascade;
 drop table if exists user_skills         cascade;
+drop table if exists user_signups        cascade;
 drop table if exists skills              cascade;
 drop table if exists task_interactions   cascade;
+drop table if exists team_github_tokens   cascade;
+drop table if exists github_oauth_states cascade;
 drop table if exists github_connections  cascade;
 drop table if exists ai_messages         cascade;
 drop table if exists ai_logs             cascade;
@@ -25,6 +27,9 @@ drop table if exists sprints             cascade;
 drop table if exists project_members     cascade;
 drop table if exists projects            cascade;
 drop table if exists actors              cascade;
+drop table if exists notifications       cascade;
+drop table if exists notification_types  cascade;
+drop table if exists team_api_logs       cascade;
 drop table if exists team_invites        cascade;
 drop table if exists team_members        cascade;
 drop table if exists teams               cascade;
@@ -88,6 +93,66 @@ create table team_members (
   primary key (team_id, user_id)
 );
 
+-- ─── Per-user notifications ────────────────────────────────────────────────
+
+create table notification_types (
+  id          uuid primary key,
+  key         text not null unique,
+  label       text not null,
+  description text
+);
+
+insert into notification_types (id, key, label, description) values
+  ('00000000-0000-0000-0002-000000000001', 'team_invite',        'Team invite',        'You have been invited to join a team'),
+  ('00000000-0000-0000-0002-000000000002', 'team_accepted',      'Invite accepted',    'A user accepted your team invite'),
+  ('00000000-0000-0000-0002-000000000003', 'team_declined',      'Invite declined',    'A user declined your team invite'),
+  ('00000000-0000-0000-0002-000000000004', 'team_removed',       'Removed from team',  'You were removed from a team'),
+  ('00000000-0000-0000-0002-000000000005', 'role_changed',       'Role changed',       'Your role in a team was changed'),
+  ('00000000-0000-0000-0002-000000000006', 'general',            'General',            'General system notification'),
+  ('00000000-0000-0000-0002-000000000007', 'create_team',        'Create team',        'A new team was created'),
+  ('00000000-0000-0000-0002-000000000008', 'update_team',        'Update team',        'Team settings were updated'),
+  ('00000000-0000-0000-0002-000000000009', 'add_member',         'Add member',         'A member was added directly'),
+  ('00000000-0000-0000-0002-000000000010', 'invite_member',      'Invite member',      'A member was invited by email'),
+  ('00000000-0000-0000-0002-000000000011', 'accept_invites',     'Accept invites',     'Pending invites were accepted'),
+  ('00000000-0000-0000-0002-000000000012', 'decline_invite',     'Decline invite',     'An invite was declined'),
+  ('00000000-0000-0000-0002-000000000013', 'delete_team',        'Delete team',        'A team was deleted'),
+  ('00000000-0000-0000-0002-000000000014', 'change_member_role', 'Change member role', 'A member''s role was changed'),
+  ('00000000-0000-0000-0002-000000000015', 'leave_team',         'Leave team',         'A member left the team'),
+  ('00000000-0000-0000-0002-000000000016', 'remove_member',      'Remove member',      'A member was removed from the team'),
+  ('00000000-0000-0000-0002-000000000017', 'revoke_invite',      'Revoke invite',      'An invite was revoked');
+
+create table notifications (
+  id         uuid        primary key default gen_random_uuid(),
+  user_id    uuid        not null,
+  type_id    uuid        not null references notification_types (id),
+  title      text        not null,
+  body       text        not null default '',
+  payload    jsonb       not null default '{}',
+  read       boolean     not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index notifications_user_id_idx on notifications (user_id);
+create index notifications_unread_idx  on notifications (user_id) where read = false;
+create index notifications_created_idx on notifications (created_at desc);
+
+-- ─── Team API logs ──────────────────────────────────────────────────────────
+
+create table team_api_logs (
+  id         uuid        primary key default gen_random_uuid(),
+  team_id    uuid,
+  user_id    text,
+  action_id  uuid        not null references notification_types (id),
+  level      text        not null default 'info' check (level in ('info', 'warn', 'error')),
+  detail     jsonb       not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create index team_api_logs_team_id_idx   on team_api_logs (team_id);
+create index team_api_logs_user_id_idx   on team_api_logs (user_id);
+create index team_api_logs_action_id_idx on team_api_logs (action_id);
+create index team_api_logs_created_idx   on team_api_logs (created_at desc);
+
 create table team_invites (
   id                 uuid        primary key default gen_random_uuid(),
   team_id            uuid        not null references teams(id) on delete cascade,
@@ -102,8 +167,10 @@ create table team_invites (
   accepted_at        timestamptz
 );
 
-create unique index team_invites_team_email_status_uniq on team_invites (team_id, email, status);
-create        index team_invites_email_status_idx       on team_invites (email, status);
+-- Only one *pending* invite per (team_id, email) — accepted/declined/revoked rows
+-- are kept for audit purposes and are not subject to the uniqueness constraint.
+create unique index team_invites_pending_uniq      on team_invites (team_id, email) where status = 'pending';
+create        index team_invites_email_status_idx  on team_invites (email, status);
 
 -- ─── User signups ─────────────────────────────────────────────────────────────
 --
@@ -167,6 +234,7 @@ create table actors (
   model        text,
   capabilities text[]      default '{}',
   avatar_url   text,
+  user_id      uuid        references auth.users(id) on delete set null,
   created_at   timestamptz not null default now()
 );
 
@@ -195,7 +263,10 @@ create table tasks (
   status          text        not null default 'todo',
   estimated_hours float       not null default 4,
   depends_on      uuid[]      default '{}',
+  actor_role      text,
   github_pr_url   text,
+  github_pr_state text,
+  github_pr_number int,
   ai_ready        boolean     not null default false,
   is_ready        boolean     not null default false,
   task_details    jsonb,
@@ -263,12 +334,29 @@ create table ai_messages (
 -- ─── GitHub integration ───────────────────────────────────────────────────────
 
 create table github_connections (
-  id           uuid        primary key default gen_random_uuid(),
-  project_id   uuid        references projects(id) on delete cascade unique,
-  github_token text        not null,
-  repo_owner   text        default '',
-  repo_name    text        default '',
-  created_at   timestamptz default now()
+  id                uuid        primary key default gen_random_uuid(),
+  project_id        uuid        references projects(id) on delete cascade unique,
+  github_token      text        not null default '',
+  repo_owner        text        default '',
+  repo_name         text        default '',
+  github_user_login text,
+  webhook_secret    text,
+  created_at        timestamptz default now()
+);
+
+create table team_github_tokens (
+  id                uuid        primary key default gen_random_uuid(),
+  team_id           uuid        not null unique references teams(id) on delete cascade,
+  github_token      text        not null,
+  github_user_login text,
+  created_at        timestamptz not null default now()
+);
+
+create table github_oauth_states (
+  state       text        primary key,
+  project_id  uuid        references projects(id) on delete cascade,
+  team_id     uuid        references teams(id) on delete cascade,
+  created_at  timestamptz not null default now()
 );
 
 -- ─── Realtime ────────────────────────────────────────────────────────────────
@@ -277,7 +365,8 @@ do $$ begin alter publication supabase_realtime add table tasks;        exceptio
 do $$ begin alter publication supabase_realtime add table assignments;  exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table deliverables; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table projects;     exception when duplicate_object then null; end $$;
-do $$ begin alter publication supabase_realtime add table ai_logs;      exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table ai_logs;         exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table notifications;  exception when duplicate_object then null; end $$;
 
 -- ─── Row-level security ───────────────────────────────────────────────────────
 
@@ -286,6 +375,9 @@ alter table companies          enable row level security;
 alter table company_members    enable row level security;
 alter table teams              enable row level security;
 alter table team_members       enable row level security;
+alter table notifications      enable row level security;
+alter table notification_types enable row level security;
+alter table team_api_logs      enable row level security;
 alter table team_invites       enable row level security;
 alter table user_signups       enable row level security;
 alter table projects           enable row level security;
@@ -298,13 +390,21 @@ alter table assignments        enable row level security;
 alter table deliverables       enable row level security;
 alter table ai_logs            enable row level security;
 alter table ai_messages        enable row level security;
-alter table github_connections enable row level security;
+alter table github_connections   enable row level security;
+alter table team_github_tokens   enable row level security;
+alter table github_oauth_states  enable row level security;
 
 create policy "service_role_all_roles"             on roles              for all using (true);
 create policy "service_role_all_companies"         on companies          for all using (true);
 create policy "service_role_all_company_members"   on company_members    for all using (true);
 create policy "service_role_all_teams"             on teams              for all using (true);
 create policy "service_role_all_team_members"      on team_members       for all using (true);
+create policy "user_can_read_own_notifications"    on notifications      for select using (auth.uid() = user_id);
+create policy "user_can_update_own_notifications"  on notifications      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "service_role_all_notifications"     on notifications      for all using (true);
+create policy "anyone_can_read_notification_types" on notification_types for select using (true);
+create policy "service_role_all_notification_types" on notification_types for all using (true);
+create policy "service_role_all_team_api_logs"     on team_api_logs      for all using (true);
 create policy "service_role_all_team_invites"      on team_invites       for all using (true);
 create policy "service_role_all_user_signups"      on user_signups       for all using (true);
 create policy "service_role_all_projects"          on projects           for all using (true);
@@ -318,10 +418,12 @@ create policy "service_role_all_deliverables"      on deliverables       for all
 create policy "service_role_all_ai_logs"           on ai_logs            for all using (true);
 create policy "service_role_all_ai_messages"       on ai_messages        for all using (true);
 create policy "service_role_all_github"            on github_connections for all using (true);
+create policy "service_role_all_team_github_tokens" on team_github_tokens for all using (true);
+create policy "service_role_all_github_oauth"      on github_oauth_states for all using (true);
 
 -- ─── Skills catalogue ────────────────────────────────────────────────────────
 
-create table if not exists skills (
+create table skills (
   id          uuid        primary key default gen_random_uuid(),
   name        text        not null unique,
   category    text        not null,
@@ -347,10 +449,9 @@ insert into skills (name, category, description, actor_type) values
   ('AI Project Manager', 'Management',  'Plans sprints, assigns tasks to actors, tracks progress, and surfaces blockers.',                'both'),
   ('Scrum Master',       'Management',  'Facilitates stand-ups, retrospectives, and sprint ceremonies; removes impediments.',             'human'),
   ('Beta User',          'Feedback',    'Stress-tests the product as a real user and reports friction points and bugs.',                  'human'),
-  ('Stakeholder',        'Feedback',    'Approves major decisions, aligns product direction, and reviews key deliverables.',              'human')
-on conflict (name) do nothing;
+  ('Stakeholder',        'Feedback',    'Approves major decisions, aligns product direction, and reviews key deliverables.',              'human');
 
-create table if not exists user_skills (
+create table user_skills (
   user_id    uuid        not null,
   skill_id   uuid        not null references skills(id) on delete cascade,
   created_at timestamptz not null default now(),

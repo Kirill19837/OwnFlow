@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from app.models import ProjectCreate, ActorCreate
 from app.db import get_supabase
@@ -8,10 +8,27 @@ from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, gen
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
 from app.providers.registry import get_provider
+from app.auth_deps import current_user_id
+from app.assistants import (
+    ProjectAssistBody,
+    build_project_board_messages,
+    generate_project_creation_suggestion,
+)
 import uuid
 import json
 
 router = APIRouter()
+
+
+@router.post("/assist")
+async def assist_project_creation(body: ProjectAssistBody, _caller_id: str = Depends(current_user_id)):
+    """Generate a better project name/prompt draft before project creation."""
+    try:
+        return await generate_project_creation_suggestion(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"AI assistant failed: {exc}")
 
 
 @router.post("", status_code=201)
@@ -91,7 +108,11 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
             yield _log(f"🔍 Analyzing project: {project['name']!r}")
             yield _log(f"⚙️  Calling {ai_model} to generate roadmap + Sprint 1 breakdown…")
 
-            sprint1_tasks, roadmap = await plan_sprint_one(project["prompt"], model=ai_model, project_id=project_id)
+            # Load actors so the AI can assign actor_role per task
+            actors_resp = db.table("actors").select("name,role,type").eq("project_id", project_id).execute()
+            project_actors = actors_resp.data or []
+
+            sprint1_tasks, roadmap = await plan_sprint_one(project["prompt"], model=ai_model, project_id=project_id, actors=project_actors)
             yield _log(f"🗺️  Roadmap: {len(roadmap)} sprints planned")
             yield _log(f"📋 Sprint 1: {len(sprint1_tasks)} tasks generated")
 
@@ -185,8 +206,67 @@ def add_actor(project_id: str, body: ActorCreate):
         "capabilities": body.capabilities,
         "avatar_url": body.avatar_url,
     }
+    if body.user_id:
+        row["user_id"] = body.user_id
     db.table("actors").insert(row).execute()
     return row
+
+
+# Default AI actor set used by auto-fill (role → default model)
+_AUTO_FILL_ACTORS = [
+    ("AI Project Manager",  "ai"),
+    ("Architect",           "ai"),
+    ("Lead Developer",      "ai"),
+    ("Frontend Developer",  "ai"),
+    ("Backend Developer",   "ai"),
+    ("QA Automation Lead",  "ai"),
+]
+
+_AI_NAMES = [
+    "Aria", "Nova", "Orion", "Sage", "Atlas", "Echo", "Lyra", "Zara",
+    "Cleo", "Finn", "Mira", "Denis", "Skye", "Theo", "Wren", "Zion",
+]
+
+
+@router.post("/{project_id}/actors/auto-fill", status_code=200)
+def auto_fill_actors(project_id: str, body: dict):
+    """Replace all AI actors with the standard default set. Human actors are preserved."""
+    db = get_supabase()
+    ai_model = body.get("ai_model") or "gpt-4o"
+
+    # Fetch project to verify it exists
+    proj = db.table("projects").select("id").eq("id", project_id).single().execute()
+    if not proj.data:
+        raise HTTPException(404, "Project not found")
+
+    # Delete existing AI actors only
+    db.table("actors").delete().eq("project_id", project_id).eq("type", "ai").execute()
+
+    # Collect roles already covered by human actors so we don't add AI duplicates
+    humans_resp = db.table("actors").select("role").eq("project_id", project_id).eq("type", "human").execute()
+    human_roles = {(r.get("role") or "").strip().lower() for r in (humans_resp.data or [])}
+
+    # Insert standard AI actor set, skipping roles already covered by a human
+    import random
+    name_pool = _AI_NAMES.copy()
+    random.shuffle(name_pool)
+    rows = []
+    name_idx = 0
+    for role, atype in _AUTO_FILL_ACTORS:
+        if role.strip().lower() in human_roles:
+            continue  # human already covers this role
+        rows.append({
+            "id": str(uuid.uuid4()),
+            "project_id": project_id,
+            "name": name_pool[name_idx % len(name_pool)],
+            "type": atype,
+            "role": role,
+            "model": ai_model,
+            "capabilities": [],
+        })
+        name_idx += 1
+    db.table("actors").insert(rows).execute()
+    return {"created": len(rows), "actors": rows}
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -265,7 +345,8 @@ async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
         raise HTTPException(400, f"All {max_sprint} planned sprints already exist. Roadmap is complete.")
 
     # Generate tasks for next sprint
-    tasks = await generate_next_sprint(project_id, next_sprint_num, model=ai_model)
+    next_actors_resp = db.table("actors").select("name,role,type").eq("project_id", project_id).execute()
+    tasks = await generate_next_sprint(project_id, next_sprint_num, model=ai_model, actors=next_actors_resp.data or [])
     if not tasks:
         raise HTTPException(500, "AI returned no tasks for the next sprint")
 
@@ -382,46 +463,14 @@ async def prompt_project_stream(project_id: str, body: dict):
     sprint_ids = [s["id"] for s in sprints_resp.data or []]
     tasks_resp = db.table("tasks").select("id,title,status,type,priority,estimated_hours").in_("sprint_id", sprint_ids).execute() if sprint_ids else type("R", (), {"data": []})()
 
-    sprint_summary = ", ".join(
-        f"Sprint {s['sprint_number']}" for s in (sprints_resp.data or [])
-    )
-    tasks_list = tasks_resp.data or []
-    task_lines = "\n".join(
-        f'- id:{t["id"]} | {t["title"]} | {t["status"]} | {t.get("type","")} | {t.get("priority","")}'
-        for t in tasks_list
-    ) or "no tasks yet"
-
     history = body.get("history") or []
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"You are an AI project assistant.\n"
-                f"Project: {project['name']}\n"
-                f"Brief: {project.get('prompt', '')}\n"
-                f"Sprints: {sprint_summary or 'none yet'}\n\n"
-                f"Current tasks:\n{task_lines}\n\n"
-                "Answer helpfully and concisely.\n\n"
-                "IMPORTANT — structured output rule:\n"
-                "When the user asks to CREATE, ADD, DELETE, MODIFY, UPDATE, REGENERATE, or ADD DETAILS to tasks, "
-                "respond ONLY with a single fenced JSON block — no prose before or after it.\n\n"
-                "Shapes:\n"
-                "```json\n"
-                '{"intent":"create_tasks","tasks":[{"title":"...","description":"...","type":"feature|bug|chore|spike","priority":"low|medium|high","estimated_hours":2}]}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"modify_tasks","tasks":[{"id":"<existing task id>","title":"...","description":"...","type":"...","priority":"...","estimated_hours":2}]}\n'
-                "```\n"
-                "```json\n"
-                '{"intent":"delete_tasks","tasks":[{"id":"<existing task id>","title":"..."}]}\n'
-                "```\n"
-                "For 'regenerate', use delete_tasks for old ones and create_tasks for new ones — pick whichever fits.\n"
-                "For all other questions, answer normally using Markdown."
-            ),
-        },
-        *history,
-        {"role": "user", "content": user_prompt},
-    ]
+    messages = build_project_board_messages(
+        project=project,
+        sprints=sprints_resp.data or [],
+        tasks=tasks_resp.data or [],
+        history=history,
+        user_prompt=user_prompt,
+    )
 
     model = "gpt-4o"
     provider = get_provider(model)

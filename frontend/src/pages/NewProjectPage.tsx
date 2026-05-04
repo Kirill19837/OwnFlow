@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
-import type { Skill } from '../types'
+import type { Skill, TeamMember } from '../types'
 import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 
 const AI_MODELS = [
@@ -18,7 +18,7 @@ const AI_MODELS = [
 /** Pool of names randomly assigned to AI actors */
 const AI_NAMES = [
   'Aria', 'Nova', 'Orion', 'Sage', 'Atlas', 'Echo', 'Lyra', 'Zara',
-  'Cleo', 'Finn', 'Mira', 'Remy', 'Skye', 'Theo', 'Wren', 'Zion',
+  'Cleo', 'Finn', 'Mira', 'Denis', 'Skye', 'Theo', 'Wren', 'Zion',
   'Axel', 'Cara', 'Dex', 'Iris', 'Juno', 'Kael', 'Lena', 'Max',
 ]
 
@@ -40,18 +40,17 @@ const AUTO_FILL_NAMES = [
 
 interface ActorDraft {
   role: string        // skill name, e.g. "Lead Developer"
-  name: string        // personal name, e.g. "Aria" (AI) or "" (human)
+  name: string        // display name (auto-filled from member or AI name)
   type: 'human' | 'ai'
   model: string
   characteristics: string
+  user_id?: string    // links human actor to a real team member
 }
 
-interface ActorDraft {
-  role: string        // template role name, e.g. "Lead Developer"
-  name: string        // personal name, e.g. "Aria" (AI) or "" (human)
-  type: 'human' | 'ai'
-  model: string
-  characteristics: string
+const orderActors = (items: ActorDraft[]) => {
+  const humans = items.filter((a) => a.type === 'human')
+  const ai = items.filter((a) => a.type === 'ai')
+  return [...humans, ...ai]
 }
 
 export default function NewProjectPage() {
@@ -64,6 +63,30 @@ export default function NewProjectPage() {
   const [sprintDays, setSprintDays] = useState(3)
   const defaultActorModel = activeTeam?.default_ai_model ?? 'gpt-4o'
 
+  // Fetch team members to use as human actor options
+  const { data: teamData, isLoading: teamMembersLoading } = useQuery({
+    queryKey: ['team', activeTeam?.id],
+    queryFn: () => api.get<{ members?: TeamMember[] }>(`/teams/${activeTeam!.id}`).then((r) => r.data),
+    enabled: !!activeTeam?.id && !!session?.access_token,
+  })
+  const teamMembers: TeamMember[] = useMemo(() => teamData?.members ?? [], [teamData?.members])
+
+  // Fetch each member's declared skills so they can be shown in the picker.
+  const memberSkillQueries = useQueries({
+    queries: teamMembers.map((m) => ({
+      queryKey: ['skills', 'user', m.user_id],
+      queryFn: () => api.get<Skill[]>(`/skills/user/${m.user_id}`).then((r) => r.data),
+      enabled: !!session?.access_token,
+      staleTime: 5 * 60 * 1000,
+    })),
+  })
+  const memberSkillsByUserId: Record<string, Skill[]> = {}
+  const memberSkillsLoadingByUserId: Record<string, boolean> = {}
+  teamMembers.forEach((m, i) => {
+    memberSkillsByUserId[m.user_id] = memberSkillQueries[i]?.data ?? []
+    memberSkillsLoadingByUserId[m.user_id] = !!memberSkillQueries[i]?.isLoading
+  })
+
   // Fetch skills from DB
   const { data: skills = [] } = useQuery<Skill[]>({
     queryKey: ['skills'],
@@ -74,23 +97,29 @@ export default function NewProjectPage() {
 
   const seededRef = useRef(false)
   const [actors, setActors] = useState<ActorDraft[]>([])
-  // Seed default actors once skills load (runs at most once)
+  // Seed default actors once per page load.
   useEffect(() => {
-    if (seededRef.current || skills.length === 0) return
+    if (seededRef.current || !session?.user.id) return
     seededRef.current = true
     _usedNames = []
     const pm = skills.find((s) => s.name === 'AI Project Manager')
-    const po = skills.find((s) => s.name === 'Product Owner')
-    setActors([
+    // Creator is always the first human actor, linked to their user account
+    const myMember = teamMembers.find((m) => m.user_id === session?.user.id)
+    const myName = myMember?.full_name || session?.user.user_metadata?.full_name || session?.user.email || 'You'
+    setActors(orderActors([
       { role: pm?.name ?? 'AI Project Manager', name: pickAIName(), type: 'ai',    model: defaultActorModel, characteristics: pm?.description ?? '' },
-      { role: po?.name ?? 'Product Owner',       name: '',           type: 'human', model: '',               characteristics: po?.description ?? '' },
-    ])
-  }, [skills, defaultActorModel])
+      { role: 'Project Lead', name: myName, type: 'human', model: '', characteristics: '', user_id: session?.user.id },
+    ]))
+  }, [skills, defaultActorModel, session?.user.id, session?.user.email, session?.user.user_metadata?.full_name, teamMembers])
+  // seededRef.current guard ensures this only runs once; full deps listed for exhaustive-deps rule
 
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [planning, setPlanningState] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
+  const [assistantRequest, setAssistantRequest] = useState('')
+  const [assistantSuggestion, setAssistantSuggestion] = useState<{ name: string; prompt: string; notes?: string; questions?: string[] } | null>(null)
+  const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([])
   const esRef = useRef<EventSource | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
@@ -119,6 +148,7 @@ export default function NewProjectPage() {
             model: a.type === 'ai' ? a.model : undefined,
             characteristics: a.characteristics || undefined,
             capabilities: [],
+            user_id: a.user_id ?? null,
           })
         )
       )
@@ -153,37 +183,66 @@ export default function NewProjectPage() {
     },
   })
 
+  const assistProject = useMutation({
+    mutationFn: async (overrideRequest?: string) => {
+      const { data } = await api.post<{ name: string; prompt: string; notes?: string; questions?: string[] }>('/projects/assist', {
+        name,
+        prompt,
+        request: overrideRequest ?? assistantRequest,
+        ai_model: aiModel,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      setAssistantSuggestion(data)
+      setClarifyAnswers([])
+    },
+  })
+
   const autoFill = () => {
     _usedNames = []
-    setActors(
-      AUTO_FILL_NAMES.flatMap((roleName) => {
+    const preservedHumans = actors.filter((a) => a.type === 'human')
+    // Roles already covered by a human — don't add an AI duplicate for these
+    const humanRoles = new Set(preservedHumans.map((a) => a.role.trim().toLowerCase()))
+    const autoAiActors = AUTO_FILL_NAMES.flatMap((roleName) => {
         const skill = skills.find((s) => s.name === roleName)
         if (!skill) return []
         const type: 'human' | 'ai' = skill.actor_type === 'human' ? 'human' : 'ai'
+        if (type === 'human') return []
+        // Skip if a human already covers this role
+        if (humanRoles.has(roleName.trim().toLowerCase())) return []
         return [{
           role: roleName,
-          name: type === 'ai' ? pickAIName() : '',
-          type,
-          model: type === 'ai' ? defaultActorModel : '',
+          name: pickAIName(),
+          type: 'ai' as const,
+          model: defaultActorModel,
           characteristics: skill.description ?? '',
+          user_id: undefined,
         }]
       })
-    )
+    setActors(orderActors([...preservedHumans, ...autoAiActors]))
     setShowRolePicker(false)
   }
 
   const addFromTemplate = (skill: Skill, typeOverride?: 'human' | 'ai') => {
     const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
     setActors((prev) => [
-      ...prev,
-      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '' },
+      ...orderActors(prev),
+      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '', user_id: undefined },
     ])
+  }
+
+  const addHumanTeammate = () => {
+    setActors((prev) => orderActors([
+      ...prev,
+      { role: '', name: '', type: 'human', model: '', characteristics: '', user_id: undefined },
+    ]))
   }
 
   const removeActor = (i: number) => setActors((prev) => prev.filter((_, idx) => idx !== i))
 
   const updateActor = (i: number, patch: Partial<ActorDraft>) =>
-    setActors((prev) => prev.map((a, idx) => (idx === i ? { ...a, ...patch } : a)))
+    setActors((prev) => orderActors(prev.map((a, idx) => (idx === i ? { ...a, ...patch } : a))))
 
   return (
     <div className="max-w-2xl mx-auto w-full px-6 py-10">
@@ -227,11 +286,116 @@ export default function NewProjectPage() {
           />
         </div>
 
+        {/* AI assistant */}
+        <div className="bg-gray-900/70 border border-purple-900/60 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-purple-300">AI Assistant</p>
+            <span className="text-[11px] text-gray-500">Use it to draft or improve your project brief</span>
+          </div>
+          <textarea
+            rows={2}
+            value={assistantRequest}
+            onChange={(e) => setAssistantRequest(e.target.value)}
+            placeholder="Example: Help me turn this into a detailed project brief with scope and acceptance criteria"
+            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => assistProject.mutate(undefined)}
+              disabled={assistProject.isPending || (!assistantRequest.trim() && !prompt.trim())}
+              className="text-xs px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white transition-colors"
+            >
+              {assistProject.isPending ? 'Thinking…' : 'Ask AI assistant'}
+            </button>
+            {assistProject.isError && (
+              <span className="text-xs text-red-400">{(assistProject.error as Error)?.message}</span>
+            )}
+          </div>
+          {assistantSuggestion && (
+            <div className="mt-2 bg-gray-950 border border-gray-700 rounded-lg p-3 space-y-2">
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide">Suggested project name</p>
+                <p className="text-sm text-white">{assistantSuggestion.name}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide">Suggested brief</p>
+                <p className="text-xs text-gray-300 whitespace-pre-wrap">{assistantSuggestion.prompt}</p>
+              </div>
+              {assistantSuggestion.notes && (
+                <p className="text-xs text-purple-300">{assistantSuggestion.notes}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setName(assistantSuggestion.name)
+                    setPrompt(assistantSuggestion.prompt)
+                    setAssistantSuggestion(null)
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                >
+                  Apply suggestion
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssistantSuggestion(null)}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+              {(assistantSuggestion.questions?.length ?? 0) > 0 && (
+                <div className="mt-3 border-t border-gray-700 pt-3 space-y-2">
+                  <p className="text-xs font-medium text-yellow-400">A few clarifying questions — answer to get a better brief:</p>
+                  {assistantSuggestion.questions!.map((q, qi) => (
+                    <div key={qi} className="space-y-0.5">
+                      <p className="text-xs text-gray-300">{qi + 1}. {q}</p>
+                      <input
+                        type="text"
+                        value={clarifyAnswers[qi] ?? ''}
+                        onChange={(e) => {
+                          const updated = [...clarifyAnswers]
+                          updated[qi] = e.target.value
+                          setClarifyAnswers(updated)
+                        }}
+                        placeholder="Your answer…"
+                        className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={assistProject.isPending}
+                    onClick={() => {
+                      const qa = assistantSuggestion.questions!
+                        .map((q, qi) => `Q: ${q}\nA: ${clarifyAnswers[qi] || '(not answered)'}`)
+                        .join('\n')
+                      const combined = assistantRequest ? `${assistantRequest}\n\n${qa}` : qa
+                      assistProject.mutate(combined)
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-yellow-700 hover:bg-yellow-600 disabled:opacity-50 text-white transition-colors"
+                  >
+                    {assistProject.isPending ? 'Regenerating…' : 'Regenerate with answers'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Actors */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-medium text-gray-300">Team (actors)</label>
             <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={addHumanTeammate}
+                className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-blue-900/40 text-blue-300 hover:bg-blue-900/70 transition-colors"
+              >
+                <User size={11} /> Add teammate
+              </button>
               <button
                 type="button"
                 onClick={autoFill}
@@ -331,13 +495,24 @@ export default function NewProjectPage() {
                   ) : (
                     <User size={15} className="text-blue-400 shrink-0" />
                   )}
-                  <span className="text-xs text-gray-500 shrink-0">{actor.role}</span>
+                  <input
+                    list={`role-list-${i}`}
+                    value={actor.role}
+                    onChange={(e) => updateActor(i, { role: e.target.value })}
+                    placeholder="Role…"
+                    className={`text-xs bg-transparent focus:outline-none min-w-0 flex-1 ${
+                      !actor.role.trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-400 focus:text-gray-200'
+                    }`}
+                  />
+                  <datalist id={`role-list-${i}`}>
+                    {skills.map((s) => <option key={s.id} value={s.name} />)}
+                  </datalist>
                   <div className="flex-1" />
                   {/* AI / Human toggle */}
                   <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
                     <button
                       type="button"
-                      onClick={() => updateActor(i, { type: 'ai', model: defaultActorModel, name: actor.name || pickAIName() })}
+                      onClick={() => updateActor(i, { type: 'ai', model: defaultActorModel, name: actor.name || pickAIName(), user_id: undefined })}
                       className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
                         actor.type === 'ai' ? 'bg-purple-900 text-purple-300' : 'text-gray-500 hover:text-gray-300'
                       }`}
@@ -346,7 +521,7 @@ export default function NewProjectPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => updateActor(i, { type: 'human', model: '' })}
+                      onClick={() => updateActor(i, { type: 'human', model: '', name: '', user_id: undefined })}
                       className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
                         actor.type === 'human' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'
                       }`}
@@ -376,13 +551,74 @@ export default function NewProjectPage() {
                   </button>
                 </div>
                 {/* Name row */}
-                <input
-                  type="text"
-                  value={actor.name}
-                  onChange={(e) => updateActor(i, { name: e.target.value })}
-                  placeholder={actor.type === 'human' ? 'Your name (optional)' : 'AI agent name'}
-                  className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
-                />
+                {actor.type === 'ai' ? (
+                  <input
+                    type="text"
+                    value={actor.name}
+                    onChange={(e) => updateActor(i, { name: e.target.value })}
+                    placeholder="AI agent name"
+                    className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
+                  />
+                ) : (
+                  <div className="pl-6 border-t border-gray-800 pt-1.5">
+                    <select
+                      value={actor.user_id ?? ''}
+                      disabled={teamMembersLoading}
+                      onChange={(e) => {
+                        const uid = e.target.value
+                        if (!uid) {
+                          updateActor(i, { user_id: undefined, name: '' })
+                        } else {
+                          const m = teamMembers.find((m) => m.user_id === uid)
+                          updateActor(i, { user_id: uid, name: m?.full_name || m?.email || uid })
+                        }
+                      }}
+                      className="w-full bg-transparent text-white text-sm font-medium focus:outline-none focus:text-purple-300 appearance-none"
+                    >
+                      <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
+                      {actor.user_id && !teamMembers.some((m) => m.user_id === actor.user_id) && (
+                        <option value={actor.user_id} className="bg-gray-900 text-gray-300">
+                          {actor.name || 'Current user'}
+                        </option>
+                      )}
+                      {teamMembersLoading && (
+                        <option value="" disabled className="bg-gray-900 text-gray-500">Loading team members…</option>
+                      )}
+                      {!teamMembersLoading && teamMembers.length === 0 && (
+                        <option value="" disabled className="bg-gray-900 text-gray-500">No team members found</option>
+                      )}
+                      {teamMembers.map((m) => {
+                        const label = m.full_name || m.email || m.user_id
+                        const memberSkills = memberSkillsByUserId[m.user_id] ?? []
+                        const memberSkillPreview = memberSkills.map((s) => s.name).slice(0, 3).join(', ')
+                        const alreadyUsed = actors.some((a, idx) => idx !== i && a.user_id === m.user_id)
+                        return (
+                          <option key={m.user_id} value={m.user_id} disabled={alreadyUsed} className="bg-gray-900">
+                            {label}
+                            {memberSkillPreview ? ` · ${memberSkillPreview}` : ''}
+                            {memberSkills.length > 3 ? ` +${memberSkills.length - 3}` : ''}
+                            {alreadyUsed ? ' (added)' : ''}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    {actor.user_id && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {memberSkillsLoadingByUserId[actor.user_id] ? (
+                          <span className="text-[11px] text-gray-500">Loading skills…</span>
+                        ) : (memberSkillsByUserId[actor.user_id] ?? []).length > 0 ? (
+                          (memberSkillsByUserId[actor.user_id] ?? []).map((skill) => (
+                            <span key={skill.id} className="text-[11px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-800/40">
+                              {skill.name}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-gray-500">No skills specified</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* Characteristics row */}
                 <input
                   type="text"
@@ -444,9 +680,13 @@ export default function NewProjectPage() {
           <p className="text-red-400 text-sm">{(createProject.error as Error)?.message}</p>
         )}
 
+        {actors.some((a) => !a.role.trim()) && (
+          <p className="text-sm text-red-400">Please set a role for every actor before creating the project.</p>
+        )}
+
         <button
           onClick={() => createProject.mutate()}
-          disabled={createProject.isPending || planning || !name || !prompt}
+          disabled={createProject.isPending || planning || !name || !prompt || actors.some((a) => !a.role.trim())}
           className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors"
         >
           {createProject.isPending ? 'Creating project…' : '✨ Create Project & Generate Plan'}

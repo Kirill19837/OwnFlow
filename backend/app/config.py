@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     # Sentry (optional – error monitoring)
     sentry_dsn: str = ""
 
+    # GitHub OAuth App (optional – enables OAuth connect flow)
+    github_client_id: str = ""
+    github_client_secret: str = ""
+
+    # Backend public URL — used for webhook registration
+    # Override with your ngrok/cloudflare tunnel URL for local dev
+    backend_url: str = ""
+
     @property
     def postmark_enabled(self) -> bool:
         return bool(self.postmark_token and self.postmark_from)

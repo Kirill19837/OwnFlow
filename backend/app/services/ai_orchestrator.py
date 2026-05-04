@@ -8,7 +8,7 @@ from app.providers.registry import get_provider
 from app.db import get_supabase
 
 SPRINT_ONE_SYSTEM = """You are an expert technical project manager.
-Given a product idea, produce a high-level project roadmap and a detailed Sprint 1 task breakdown as valid JSON.
+Given a product idea and the list of actors (team members) on the project, produce a high-level project roadmap and a detailed Sprint 1 task breakdown as valid JSON.
 
 Return a JSON object with:
 - "roadmap": array of sprint theme objects, each with:
@@ -22,13 +22,15 @@ Return a JSON object with:
   - "priority": one of [low, medium, high, critical]
   - "estimated_hours": number (realistic effort in hours)
   - "depends_on": array of 0-based indices of tasks this task depends on (within sprint1_tasks only)
+  - "actor_role": string — the role name of the actor best suited for this task (must exactly match one of the actor roles provided; if unsure, use the closest match)
 
+When assigning actor_role, prefer human actors over AI actors for the same role when both exist.
 The roadmap should cover the full project in 3-6 sprints. Sprint 1 tasks must fit within 24 hours of total effort and focus on the foundation/setup goals from the roadmap.
 Order sprint1_tasks so dependencies always appear before dependents.
 """
 
 NEXT_SPRINT_SYSTEM = """You are an expert technical project manager continuing a project plan.
-Given the project description, roadmap, and summary of completed work, generate detailed tasks for the next sprint.
+Given the project description, roadmap, list of actors, and summary of completed work, generate detailed tasks for the next sprint.
 
 Return a JSON object with:
 - "tasks": array of task objects, each with:
@@ -38,7 +40,9 @@ Return a JSON object with:
   - "priority": one of [low, medium, high, critical]
   - "estimated_hours": number (realistic effort in hours)
   - "depends_on": array of 0-based indices of tasks this task depends on
+  - "actor_role": string — the role name of the actor best suited for this task (must exactly match one of the actor roles provided; if unsure, use the closest match)
 
+When assigning actor_role, prefer human actors over AI actors for the same role when both exist.
 Tasks must align with the sprint's theme and goal from the roadmap.
 Total estimated hours should not exceed 24 hours.
 Order tasks so dependencies always appear before dependents.
@@ -64,12 +68,19 @@ async def plan_sprint_one(
     prompt: str,
     model: str = "gpt-4o",
     project_id: Optional[str] = None,
+    actors: Optional[list] = None,
 ) -> tuple[List[TaskDraft], List[SprintTheme]]:
     """Generate the full roadmap + Sprint 1 tasks. Persists roadmap to projects table."""
     provider = get_provider(model)
+    actors_text = ""
+    if actors:
+        actors_text = "\n\nProject actors:\n" + "\n".join(
+            f"- {a.get('name', '?')} | role: {a.get('role') or 'unspecified'} | type: {a.get('type', 'ai')}"
+            for a in actors
+        )
     messages = [
         {"role": "system", "content": SPRINT_ONE_SYSTEM},
-        {"role": "user", "content": f"Plan this project:\n\n{prompt}"},
+        {"role": "user", "content": f"Plan this project:\n\n{prompt}{actors_text}"},
     ]
     raw = await provider.complete(messages, response_format={"type": "json_object"})
 
@@ -100,6 +111,7 @@ async def generate_next_sprint(
     project_id: str,
     sprint_number: int,
     model: str = "gpt-4o",
+    actors: Optional[list] = None,
 ) -> List[TaskDraft]:
     """Generate tasks for the next sprint using stored roadmap + completed sprint context."""
     db = get_supabase()
@@ -145,6 +157,12 @@ async def generate_next_sprint(
         )
 
     provider = get_provider(model)
+    actors_text = ""
+    if actors:
+        actors_text = "\n\nProject actors:\n" + "\n".join(
+            f"- {a.get('name', '?')} | role: {a.get('role') or 'unspecified'} | type: {a.get('type', 'ai')}"
+            for a in actors
+        )
     messages = [
         {"role": "system", "content": NEXT_SPRINT_SYSTEM},
         {
@@ -154,6 +172,7 @@ async def generate_next_sprint(
                 f"{roadmap_text}"
                 f"{theme_text}"
                 f"{completed_summary}"
+                f"{actors_text}"
                 f"\n\nGenerate tasks for Sprint {sprint_number}."
             ),
         },

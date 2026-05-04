@@ -189,8 +189,10 @@ export default function NewCompanyPage() {
         </div>
 
         <div className="w-full max-w-md">
-          <h2 className="text-2xl font-bold text-white mb-1">Set up your workspace</h2>
+          <h2 className="text-2xl font-bold text-white mb-1">Set up your company</h2>
           <p className="text-gray-400 text-sm mb-8">
+            This creates your company and your first team.
+            <br />
             You're getting <span className="text-white font-medium">free access</span> while we're in early access.
             In return we ask for a phone number so we can reach you for a quick feedback call — usually 15 min, always optional.
           </p>
@@ -199,7 +201,7 @@ export default function NewCompanyPage() {
             {/* Company name */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                Company name <span className="text-red-400">*</span>
+                Company and first team name <span className="text-red-400">*</span>
               </label>
               <div className="relative">
                 <Building2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
@@ -211,6 +213,9 @@ export default function NewCompanyPage() {
                   className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent placeholder-gray-600"
                 />
               </div>
+              <p className="text-xs text-gray-600 mt-1.5">
+                We will create your first team with this same name. You can rename it later.
+              </p>
             </div>
 
             {/* Phone */}
@@ -236,7 +241,7 @@ export default function NewCompanyPage() {
             {/* AI model */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Default AI model</label>
-              <p className="text-xs text-gray-500 mb-2">Powers task breakdown and AI actors across all your projects. Can be changed later.</p>
+              <p className="text-xs text-gray-500 mb-2">Used by your first team for task breakdown and AI actors. Can be changed later.</p>
               <div className="grid grid-cols-1 gap-1.5">
                 {AI_MODELS.map((m) => (
                   <button
@@ -272,10 +277,10 @@ export default function NewCompanyPage() {
               className="w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl text-sm transition-colors mt-2"
             >
               {create.isPending ? (
-                'Creating workspace…'
+                'Creating company and team…'
               ) : (
                 <>
-                  Create workspace
+                  Create company and first team
                   <ChevronRight size={16} />
                 </>
               )}

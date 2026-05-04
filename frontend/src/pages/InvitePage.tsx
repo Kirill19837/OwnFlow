@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Layers, Users, X, Check, Lock, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 
 interface PendingInvite {
@@ -25,6 +26,11 @@ type Step = 'loading' | 'invite-card' | 'profile' | 'accepting' | 'declining'
 export default function InvitePage() {
   const { session, needsPassword, needsName, setNeedsPassword, setNeedsName, setNeedsSkills, setLinkType } = useAuthStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
+  const teamIdParam = searchParams.get('team_id')
+  // If team_id is in the URL the user is already logged in (came from notification bell)
+  const isEstablishedUser = !needsPassword && !needsName
   const fetchedRef = useRef(false)
 
   const [step, setStep] = useState<Step>('loading')
@@ -47,10 +53,11 @@ export default function InvitePage() {
     if (!session || fetchedRef.current) return
     fetchedRef.current = true
 
+    const params: Record<string, string> = { email: session.user.email! }
+    if (teamIdParam) params.team_id = teamIdParam
+
     api
-      .get<{ invite: PendingInvite | null }>('/teams/pending-invite', {
-        params: { email: session.user.email },
-      })
+      .get<{ invite: PendingInvite | null }>('/teams/pending-invite', { params })
       .then((r) => setInvite(r.data.invite ?? null))
       .catch(() => setInvite(null))
       .finally(() => setStep('invite-card'))
@@ -76,6 +83,16 @@ export default function InvitePage() {
         user_id: session.user.id,
         email: session.user.email,
       })
+      // Mark the invite notification as read
+      await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', session.user.id)
+        .eq('read', false)
+        .filter('payload->>action', 'eq', 'accept_or_decline')
+        .filter('payload->>team_id', 'eq', invite.team_id)
+      // Invalidate teams cache so the new team appears immediately on navigation
+      await queryClient.invalidateQueries({ queryKey: ['teams'] })
     } finally {
       navigate('/', { replace: true })
     }
@@ -106,6 +123,7 @@ export default function InvitePage() {
 
   const handleDecline = async () => {
     if (!invite) {
+      if (isEstablishedUser) { navigate('/', { replace: true }); return }
       await supabase.auth.signOut()
       navigate('/login', { replace: true })
       return
@@ -114,10 +132,14 @@ export default function InvitePage() {
     try {
       await api.post(`/teams/invites/${invite.id}/decline`)
     } catch {
-      // Non-blocking — sign out regardless
+      // Non-blocking
     }
-    await supabase.auth.signOut()
-    navigate('/login', { replace: true })
+    if (isEstablishedUser) {
+      navigate('/', { replace: true })
+    } else {
+      await supabase.auth.signOut()
+      navigate('/login', { replace: true })
+    }
   }
 
   // ── Spinner ───────────────────────────────────────────────────────────────
@@ -138,7 +160,7 @@ export default function InvitePage() {
         <div className="flex flex-col items-center gap-5">
           <Layers size={36} className="text-purple-400 animate-pulse" />
           <p className="text-white font-semibold">
-            {step === 'accepting' ? 'Joining the team…' : 'Signing you out…'}
+            {step === 'accepting' ? 'Joining the team…' : 'Declining invite…'}
           </p>
         </div>
       </div>

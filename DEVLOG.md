@@ -2,6 +2,155 @@
 
 ---
 
+## 2026-05-03 | `49d1703` — fix: redirect browser to GitHub OAuth URL instead of returning JSON
+
+- `backend/app/api/github.py` — `GET /github/oauth/start` now returns a 302 redirect to the GitHub authorization page instead of `{"url": "..."}` JSON
+
+---
+
+## 2026-05-03 | `3084a45` — feat: GitHub OAuth App, team-level tokens, webhooks, real code commits, PR state badges
+
+- `supabase/migrations/012_github_oauth_webhooks.sql` — `github_oauth_states` table for CSRF state; `github_connections` gains `github_user_login`, `webhook_secret`; `tasks` gains `github_pr_state`, `github_pr_number`
+- `supabase/migrations/013_team_github_tokens.sql` — new `team_github_tokens` table (one per team); `github_oauth_states` extended with `team_id`; `github_connections.github_token` made nullable
+- `supabase/database_full.sql` — synced with all migrations
+- `backend/app/config.py` — added `github_client_id`, `github_client_secret`, `backend_url` settings
+- `backend/app/services/github_service.py` — OAuth code exchange, user/repo listing, webhook registration + HMAC validation, real code file extraction (`###FILES###` block), team token fallback for `get_connection_for_project`
+- `backend/app/api/github.py` — team + project OAuth flows; `GET /github/oauth/start`, `GET /github/oauth/callback`; team-status/disconnect endpoints; webhook receiver; `_backend_base()` helper uses `BACKEND_URL` env var
+- `backend/app/services/actor_executor.py` — system prompt instructs AI to emit `###FILES###` JSON block for code tasks
+- `.github/workflows/deploy.yml` — passes `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `BACKEND_URL=https://ownflow.21century.tech/api` to container
+- `docker-compose.prod.yml` — added `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `BACKEND_URL` env vars
+- `frontend/src/types.ts` — `Task` interface gains `github_pr_state` and `github_pr_number`
+- `frontend/src/pages/ProjectBoardPage.tsx` — team-aware GitHub UI; OAuth connect link; repo dropdown; `showSettings` initialized from URL param
+- `frontend/src/pages/OrgSettingsPage.tsx` — GitHub Integration section; team connect/disconnect; `useEffect` ordered after query declaration
+- `frontend/src/components/TaskCard.tsx` — PR icon colors by state (green/purple/gray)
+- `frontend/src/components/TaskDrawer.tsx` — PR state badge (Open/Merged/Closed pill)
+
+---
+
+## 2026-04-30 | `bfdc70c` — feat: role-based actor assignment, editable actor roles, AI clarifying questions, auto-fill respects human roles
+
+- `supabase/migrations/011_tasks_actor_role.sql` + `database_full.sql` — new `actor_role text` column on `tasks`
+- `backend/app/models.py` — `TaskDraft` gains optional `actor_role` field
+- `backend/app/services/sprint_planner.py` — persists `actor_role` when writing task rows
+- `backend/app/services/ai_orchestrator.py` — `plan_sprint_one` + `generate_next_sprint` accept `actors` list; AI prompt instructs model to output `actor_role` per task matching an actor's role, preferring humans
+- `backend/app/services/assignment_engine.py` — new role-based priority: human role match → AI role match → type-based fallback → any actor
+- `backend/app/api/projects.py` — passes project actors into both planning calls; new `POST /projects/{id}/actors/auto-fill` endpoint (replaces AI actors, skips roles covered by humans)
+- `backend/app/assistants/project_creation.py` — AI assistant now returns `questions: []` with 2-4 clarifying questions when brief is vague
+- `frontend/src/pages/NewProjectPage.tsx` — editable role input with datalist autocomplete on every actor card; role validation blocks submit; `autoFill` skips AI roles already covered by a human actor; clarifying questions UI with per-question answer inputs and "Regenerate with answers" button
+- `frontend/src/pages/ProjectBoardPage.tsx` — "⚡ Auto-fill AI actors" button in Settings panel; `autoFillActors` mutation
+
+---
+
+## 2026-04-30 | `004db3f` — fix: invalidate teams cache after invite accept so new team appears immediately
+
+- `frontend/src/pages/InvitePage.tsx` — `doAccept` now calls `queryClient.invalidateQueries({ queryKey: ['teams'] })` before navigating to `/`, so the sidebar team list refreshes immediately without a manual page reload
+
+---
+
+## 2026-04-30 | `7b0af28` — fix: invite audit log — partial pending index, restore UPDATE on accept/decline/revoke, notify both parties on join
+
+- `supabase/database_full.sql` + `supabase/migrations/010_team_invites_audit_index.sql` — replaced `UNIQUE (team_id, email, status)` with partial index `UNIQUE (team_id, email) WHERE status = 'pending'`; accepted/declined/revoked rows are now kept as an audit trail
+- `backend/app/api/teams.py` — restored `UPDATE status='accepted'` (with `accepted_user_id` + `accepted_at`), `UPDATE status='declined'`, and `UPDATE status='revoked'` now that the constraint allows multiple terminal-status rows
+- `backend/app/api/teams.py` — `invite_member_by_email` changed from `upsert` to delete-pending-then-insert so re-inviting after decline/revoke always produces a fresh row with correct `invite_id`
+- `backend/app/api/teams.py` — `_do_accept_invites` notifications now use `type_key="team_accepted"` and send two notifications: one to the joining user ("You've joined {team}") and one to the inviter ("{email} joined {team}")
+- `backend/tests/test_invite_flow.py` — updated `test_invite_stores_role_as_uuid` to expect `insert` call instead of `upsert`
+
+---
+
+## 2026-04-29 | `1ce444a` — fix: mark invite notification read on accept
+
+- `frontend/src/pages/InvitePage.tsx` — `doAccept` now marks the matching invite notification as read (filters by `user_id`, `action=accept_or_decline`, `team_id`) before navigating to `/`
+
+---
+
+## 2026-04-29 | `1e6d7dc` — feat: navigate to InvitePage from notification bell
+
+- `frontend/src/components/AppLayout.tsx` — removed duplicate accept/decline logic; invite notifications now navigate to `/invite?team_id=<id>` on click
+- `frontend/src/pages/InvitePage.tsx` — reads `team_id` query param to pre-filter invite; decline for established users (already logged in) navigates to `/` instead of signing them out; spinner text updated
+- `backend/app/api/teams.py` — `GET /teams/pending-invite` now accepts optional `team_id` query param to filter to a specific invite
+- `supabase/database_full.sql` — consolidated schema cleanup (no `IF NOT EXISTS`, `skills`/`user_skills` in drop list)
+
+---
+
+## 2026-04-29 | `9e3ee4c` — fix: notifications not appearing for invited users
+
+- `supabase/migrations/009_notifications.sql` + `supabase/database_full.sql` — added `notifications` to `supabase_realtime` publication (root cause: Realtime events were never delivered without this). **Must run `alter publication supabase_realtime add table notifications;` on production.**
+- `backend/app/api/teams.py` — `_create_notification` now logs a warning on failure instead of silently swallowing errors
+- `frontend/src/hooks/useNotifications.ts` — added `window focus` listener to re-fetch notifications when the tab regains focus (catches notifications created while on the invite page)
+
+---
+
+## 2026-04-29 | `9a6201b` — fix: in-app notification on invite accept
+
+- `backend/app/api/teams.py` — `_do_accept_invites` now creates a `"You've joined {team}"` notification for every accepted invite; also fetches `name` + `invited_by_email` from the relevant tables so the notification body is meaningful. Covers both new users (signup via link) and existing users (who previously got no notification on accept).
+
+---
+
+## 2026-04-29 | `55f0823` — fix: delete revoked invites to avoid unique constraint violation
+
+- `backend/app/api/teams.py` — `revoke_invite` now DELETEs the invite row instead of updating `status` to `"revoked"`, fixing a `23505` unique constraint error on `(team_id, email, status)` when re-inviting the same user after a previous revoke
+
+---
+
+## 2026-04-29 | `116ac75` — feat: real-time notifications system with notification_types lookup table and invite 400 fix
+
+- `supabase/migrations/009_notifications.sql` — new `notification_types` lookup table (UUID PK, unique `key`, label, description) seeded with 6 types; `notifications` table with FK to `notification_types.key`; per-user RLS (select/update own rows; service role full access)
+- `supabase/database_full.sql` — added both tables to drops, create, RLS enable, and policies sections
+- `backend/app/api/teams.py` — `_create_notification()` fire-and-forget helper; `invite_member_by_email` now pre-checks confirmed-user status before calling Supabase invite API (prevents 400 for existing users); creates in-app notification for confirmed existing users on invite
+- `frontend/src/types.ts` — added `NotificationTypeKey` union type, `NotificationType` and `Notification` interfaces
+- `frontend/src/hooks/useNotifications.ts` — new hook: initial fetch + Supabase Realtime INSERT/UPDATE subscription; `markRead`, `markAllRead`, `unreadCount`
+- `frontend/src/components/AppLayout.tsx` — notification bell with live unread badge in header; dropdown with notification list, purple dot for unread, "Mark all read" button
+
+---
+
+## 2026-04-29 | `995f317` — fix: improve light-mode contrast for filled action buttons
+
+- `frontend/src/index.css` — added targeted light-mode overrides so filled purple/red action buttons keep white text instead of inheriting global dark text remapping
+- `frontend/src/index.css` — preserved white text on hover for common filled CTA variants to keep button readability consistent in light theme
+
+---
+
+## 2026-04-29 | `0dcd0d4` — feat: invite existing company members and refine setup copy
+
+- `frontend/src/pages/OrgSettingsPage.tsx` — added an "Invite existing member from other teams" flow that lists company users from other teams and sends a team invite with one click
+- `frontend/src/pages/OrgSettingsPage.tsx` — reuses existing invite endpoint and filters out users already in the team or already pending invite
+- `frontend/src/pages/NewCompanyPage.tsx` — updated onboarding copy to clearly state this step creates both the company and the first team, plus clearer CTA/loading text
+
+---
+
+## 2026-04-29 | `58950af` — feat: add project-creation assistant and extract board/task assistants
+
+- `frontend/src/pages/NewProjectPage.tsx` — added visible AI Assistant panel on project creation: request input, generated suggestion preview, and one-click apply to project name + prompt
+- `backend/app/api/projects.py` — added authenticated `POST /projects/assist` endpoint for project-brief/name drafting and refactored kanban assistant prompt route to use assistant module
+- `backend/app/assistants/project_creation.py` — centralized project-creation assistant prompt + response shaping
+- `backend/app/assistants/project_board.py` — extracted board/kanban assistant message builder used by `/projects/{id}/prompt/stream`
+- `backend/app/assistants/task_assistant.py` — extracted task assistant message builder and response helpers (duplicate detail stripping + `mark_ready` detection)
+- `backend/app/assistants/__init__.py` and `backend/app/api/tasks.py` — exported/wired new assistant helpers so API routes delegate to the assistants package
+
+---
+
+## 2026-04-29 | `7b50ef1` — feat: show team member skills in human actor picker
+
+- `frontend/src/pages/NewProjectPage.tsx` — human actor member dropdown now shows each member's skills preview (first skills + overflow count)
+- `frontend/src/pages/NewProjectPage.tsx` — after selecting a human team member, their full declared skills are shown as chips under the selector
+- `frontend/src/pages/NewProjectPage.tsx` — added loading and empty states for selected member skills and per-member skills queries
+
+---
+
+## 2026-04-29 | `baf1662` — feat: link human actors to team members via user_id; member picker in project creation
+
+- `supabase/migrations/007_actor_user_id.sql` — new migration: adds `user_id uuid references auth.users(id) on delete set null` to `actors` table
+- `supabase/database_full.sql` — added `user_id` column to `create table actors`
+- `backend/app/models.py` — `ActorCreate` and `Actor` models now include optional `user_id` and `characteristics` fields
+- `backend/app/api/projects.py` — `add_actor` endpoint passes `user_id` to Supabase insert when provided
+- `frontend/src/pages/NewProjectPage.tsx` — human actors now linked to real team members: creator auto-seeded as first human actor with their `user_id`; additional human actors use a `<select>` dropdown of org team members; AI actors retain free-text name input; `teamMembers` stabilised with `useMemo`
+
+---
+
+## 2026-04-28 | `43d40fa` — feat: make pitch deck mobile-friendly; improve nav button visibility
+
+- `pitch/index.html` — added `@media (max-width: 700px)`: slides scroll vertically, all multi-column grids collapse to 1 col, steps/pricing/two-col stack vertically, typography shrinks with clamp, nav buttons 44px tap targets, dots move to horizontal row above nav, counter hidden on small screens
+
 ## 2026-04-28 | `be42da5` — docs: update README, auth-flow, pitch deck (remove eMerge refs, new pricing, visible nav buttons)
 
 - `README.md` — full rewrite: presentation link, Skills section, Company Settings section, updated API table, accurate changelog
