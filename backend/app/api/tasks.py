@@ -17,6 +17,28 @@ import json
 
 router = APIRouter()
 
+_TASK_SECRET_FIELDS = {"agent_callback_token", "agent_dispatched_at"}
+
+_ACTOR_SECRET_FIELDS = {"agent_api_key"}
+
+def _mask_actor(actor: dict) -> dict:
+    """Remove secret fields from an actor before returning to the client."""
+    return {k: v for k, v in actor.items() if k not in _ACTOR_SECRET_FIELDS}
+
+def _strip_task(task: dict) -> dict:
+    """Remove internal dispatch-secret fields before returning a task to the client."""
+    stripped = {k: v for k, v in task.items() if k not in _TASK_SECRET_FIELDS}
+    # Mask nested actor objects inside assignments
+    if isinstance(stripped.get("assignments"), list):
+        stripped["assignments"] = [
+            {
+                **a,
+                "actors": _mask_actor(a["actors"]) if isinstance(a.get("actors"), dict) else a.get("actors"),
+            }
+            for a in stripped["assignments"]
+        ]
+    return stripped
+
 
 @router.get("/{task_id}")
 def get_task(task_id: str):
@@ -30,7 +52,7 @@ def get_task(task_id: str):
     )
     if not resp.data:
         raise HTTPException(404, "Task not found")
-    return resp.data
+    return _strip_task(resp.data)
 
 
 @router.patch("/{task_id}/assign")

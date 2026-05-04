@@ -57,12 +57,14 @@ insert into roles (id, name, description) values
 -- ─── Companies ───────────────────────────────────────────────────────────────
 
 create table companies (
-  id         uuid        primary key default gen_random_uuid(),
-  name       text        not null,
-  slug       text        not null unique,
-  owner_id   uuid        not null,
-  phone      text,
-  created_at timestamptz not null default now()
+  id                  uuid        primary key default gen_random_uuid(),
+  name                text        not null,
+  slug                text        not null unique,
+  owner_id            uuid        not null,
+  phone               text,
+  openai_api_key      text,
+  anthropic_api_key   text,
+  created_at          timestamptz not null default now()
 );
 
 create table company_members (
@@ -235,6 +237,8 @@ create table actors (
   capabilities text[]      default '{}',
   avatar_url   text,
   user_id      uuid        references auth.users(id) on delete set null,
+  webhook_url  text,
+  agent_api_key text,
   created_at   timestamptz not null default now()
 );
 
@@ -267,6 +271,8 @@ create table tasks (
   github_pr_url   text,
   github_pr_state text,
   github_pr_number int,
+  agent_callback_token text,
+  agent_dispatched_at  timestamptz,
   ai_ready        boolean     not null default false,
   is_ready        boolean     not null default false,
   task_details    jsonb,
@@ -462,3 +468,18 @@ alter table skills      enable row level security;
 alter table user_skills enable row level security;
 create policy "service_role_all_skills"       on skills      for all using (true);
 create policy "service_role_all_user_skills"  on user_skills for all using (true);
+
+create table if not exists company_agents (
+  id             uuid        primary key default gen_random_uuid(),
+  company_id     uuid        not null references companies(id) on delete cascade,
+  name           text        not null,
+  role           text,
+  webhook_url    text        not null,
+  agent_api_key  text,
+  description    text,
+  created_at     timestamptz not null default now()
+);
+
+alter table company_agents enable row level security;
+create policy "service_role_all_company_agents" on company_agents for all to service_role using (true) with check (true);
+create index if not exists idx_company_agents_company_created on company_agents (company_id, created_at);

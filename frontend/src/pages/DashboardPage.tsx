@@ -9,6 +9,31 @@ import type { Project } from '../types'
 import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, RefreshCw } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
+interface ExecutorRunningTask {
+  task_id: string
+  task_title: string
+  project_id: string
+  project_name: string
+  status: string
+  priority: string
+  updated_at?: string
+  actor_name?: string
+  actor_type?: string
+}
+
+interface ExecutorState {
+  running_count: number
+  projects_with_running: number
+  running: ExecutorRunningTask[]
+  recent_failures: {
+    project_id: string
+    project_name: string
+    phase: string
+    message: string
+    created_at?: string
+  }[]
+}
+
 const STATUS_ICON = {
   planning: <Clock size={14} className="text-yellow-400" />,
   active: <CheckCircle size={14} className="text-green-400" />,
@@ -41,6 +66,18 @@ export default function DashboardPage() {
       return api.get<Project[]>('/projects', { params }).then((r) => r.data)
     },
     enabled: !!session,
+  })
+
+  const { data: executorState, isFetching: executorRefreshing } = useQuery({
+    queryKey: ['executor-state', activeTeam?.id, session?.user.id],
+    queryFn: () => {
+      const params = activeTeam
+        ? { team_id: activeTeam.id }
+        : { owner_id: session!.user.id }
+      return api.get<ExecutorState>('/projects/dashboard/executor-state', { params }).then((r) => r.data)
+    },
+    enabled: !!session,
+    refetchInterval: 8000,
   })
 
   useEffect(() => {
@@ -125,6 +162,84 @@ export default function DashboardPage() {
           </Link>
         </div>
       )}
+
+      <div className="mb-5 rounded-xl border border-gray-800 bg-gray-900/70 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Executor Monitor</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Auto-refresh every 8s</p>
+          </div>
+          {executorRefreshing && <span className="text-[11px] text-gray-500">Refreshing…</span>}
+        </div>
+
+        <div className="flex items-center gap-4 text-xs mb-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-yellow-700/50 bg-yellow-900/20 px-2.5 py-1 text-yellow-300">
+            Running: {executorState?.running_count ?? 0}
+          </span>
+          <span className="text-gray-400">
+            Projects active now: <span className="text-white">{executorState?.projects_with_running ?? 0}</span>
+          </span>
+        </div>
+
+        {(executorState?.running?.length ?? 0) === 0 ? (
+          <p className="text-sm text-gray-500">No executor jobs are currently running.</p>
+        ) : (
+          <div className="space-y-2">
+            {(executorState?.running ?? []).slice(0, 8).map((item) => (
+              <Link
+                key={item.task_id}
+                to={`/projects/${item.project_id}?task=${item.task_id}`}
+                className="block rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 hover:border-purple-600 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-white font-medium leading-tight">{item.task_title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {item.project_name} • {item.actor_name || 'Unassigned'}
+                    </p>
+                  </div>
+                  <span className="text-[11px] capitalize rounded-full border border-yellow-700/50 bg-yellow-900/20 px-2 py-0.5 text-yellow-300">
+                    {item.status}
+                  </span>
+                </div>
+                {item.updated_at && (
+                  <p className="text-[11px] text-gray-600 mt-1">
+                    Updated {formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}
+                  </p>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4 pt-4 border-t border-gray-800">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-red-300 mb-2">Recent Failures</h3>
+          {(executorState?.recent_failures?.length ?? 0) === 0 ? (
+            <p className="text-sm text-gray-500">No recent executor failures.</p>
+          ) : (
+            <div className="space-y-2">
+              {(executorState?.recent_failures ?? []).map((failure, idx) => (
+                <Link
+                  key={`${failure.project_id}-${failure.created_at ?? idx}`}
+                  to={`/projects/${failure.project_id}`}
+                  className="block rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 hover:border-red-700 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm text-red-100 leading-tight">{failure.message}</p>
+                    <span className="text-[10px] uppercase rounded-full border border-red-800/70 px-2 py-0.5 text-red-300 shrink-0">
+                      {failure.phase}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-red-200/80 mt-1">
+                    {failure.project_name}
+                    {failure.created_at ? ` • ${formatDistanceToNow(new Date(failure.created_at), { addSuffix: true })}` : ''}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((p) => (

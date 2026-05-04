@@ -14,6 +14,8 @@ from app.assistants import (
     build_project_board_messages,
     generate_project_creation_suggestion,
 )
+from app.api.actors import _mask_actor
+from app.api.tasks import _strip_task
 import uuid
 import json
 
@@ -175,8 +177,20 @@ def get_project(project_id: str):
     return {
         **project.data,
         "sprints": sprints.data or [],
-        "tasks": tasks,
-        "actors": actors.data or [],
+        "tasks": [
+            {
+                **_strip_task(t),
+                "assignments": [
+                    {
+                        **a,
+                        "actors": _mask_actor(a["actors"]) if isinstance(a.get("actors"), dict) else a.get("actors"),
+                    } if isinstance(a, dict) else a
+                    for a in (t.get("assignments") or [])
+                ] if isinstance(t.get("assignments"), list) else t.get("assignments"),
+            }
+            for t in tasks
+        ],
+        "actors": [_mask_actor(a) for a in (actors.data or [])],
     }
 
 
@@ -191,6 +205,121 @@ def list_projects(owner_id: str = "", team_id: str = ""):
     else:
         return []
     return q.execute().data or []
+
+
+@router.get("/dashboard/executor-state")
+def dashboard_executor_state(owner_id: str = "", team_id: str = ""):
+    """Return currently running task-executor state for dashboard monitoring."""
+    db = get_supabase()
+
+    projects_q = db.table("projects").select("id,name")
+    if team_id:
+        projects_q = projects_q.eq("team_id", team_id)
+    elif owner_id:
+        projects_q = projects_q.eq("owner_id", owner_id)
+    else:
+        return {
+            "running_count": 0,
+            "projects_with_running": 0,
+            "running": [],
+            "recent_failures": [],
+        }
+
+    projects = projects_q.execute().data or []
+    if not projects:
+        return {
+            "running_count": 0,
+            "projects_with_running": 0,
+            "running": [],
+            "recent_failures": [],
+        }
+
+    project_map = {p["id"]: p.get("name") or "Untitled project" for p in projects if p.get("id")}
+    project_ids = list(project_map.keys())
+    if not project_ids:
+        return {
+            "running_count": 0,
+            "projects_with_running": 0,
+            "running": [],
+            "recent_failures": [],
+        }
+
+    task_resp = (
+        db.table("tasks")
+        .select("id,title,project_id,status,priority,updated_at")
+        .in_("project_id", project_ids)
+        .eq("status", "in_progress")
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    tasks = task_resp.data or []
+    task_ids = [t["id"] for t in tasks if t.get("id")]
+    assignment_actor: dict[str, dict] = {}
+    if task_ids:
+        assignments = (
+            db.table("assignments")
+            .select("task_id, actors(name,type)")
+            .in_("task_id", task_ids)
+            .execute()
+            .data
+            or []
+        )
+        for a in assignments:
+            task_id = a.get("task_id")
+            if not task_id or task_id in assignment_actor:
+                continue
+            actor = a.get("actors")
+            if isinstance(actor, dict):
+                assignment_actor[task_id] = {
+                    "name": actor.get("name") or "Unassigned",
+                    "type": actor.get("type") or "unknown",
+                }
+
+    running = []
+    for t in tasks:
+        actor = assignment_actor.get(t["id"], {"name": "Unassigned", "type": "unknown"})
+        running.append({
+            "task_id": t["id"],
+            "task_title": t.get("title") or "Untitled task",
+            "project_id": t.get("project_id"),
+            "project_name": project_map.get(t.get("project_id"), "Unknown project"),
+            "status": t.get("status"),
+            "priority": t.get("priority"),
+            "updated_at": t.get("updated_at"),
+            "actor_name": actor.get("name"),
+            "actor_type": actor.get("type"),
+        })
+
+    error_logs = (
+        db.table("ai_logs")
+        .select("project_id,phase,message,created_at")
+        .in_("project_id", project_ids)
+        .eq("level", "error")
+        .in_("phase", ["docker_dispatch", "external_dispatch", "agent_execution"])
+        .order("created_at", desc=True)
+        .limit(12)
+        .execute()
+        .data
+        or []
+    )
+
+    recent_failures = [
+        {
+            "project_id": row.get("project_id"),
+            "project_name": project_map.get(row.get("project_id"), "Unknown project"),
+            "phase": row.get("phase"),
+            "message": row.get("message") or "Executor error",
+            "created_at": row.get("created_at"),
+        }
+        for row in error_logs
+    ]
+
+    return {
+        "running_count": len(running),
+        "projects_with_running": len({r["project_id"] for r in running if r.get("project_id")}),
+        "running": running,
+        "recent_failures": recent_failures,
+    }
 
 
 @router.post("/{project_id}/actors", status_code=201)
@@ -208,8 +337,12 @@ def add_actor(project_id: str, body: ActorCreate):
     }
     if body.user_id:
         row["user_id"] = body.user_id
+    if body.webhook_url:
+        row["webhook_url"] = body.webhook_url
+    if body.agent_api_key:
+        row["agent_api_key"] = body.agent_api_key
     db.table("actors").insert(row).execute()
-    return row
+    return _mask_actor(row)
 
 
 # Default AI actor set used by auto-fill (role → default model)
@@ -266,7 +399,7 @@ def auto_fill_actors(project_id: str, body: dict):
         })
         name_idx += 1
     db.table("actors").insert(rows).execute()
-    return {"created": len(rows), "actors": rows}
+    return {"created": len(rows), "actors": [_mask_actor(r) for r in rows]}
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -513,7 +646,7 @@ async def run_ready_tasks(project_id: str, background_tasks: BackgroundTasks):
             assignments = [assignments]
         for asgn in assignments:
             actor = asgn.get("actors") or {}
-            if actor.get("type") == "ai":
+            if actor.get("type") == "ai" or actor.get("webhook_url"):
                 actor_id = asgn["actor_id"]
                 db.table("tasks").update({"status": "in_progress"}).eq("id", task["id"]).execute()
                 background_tasks.add_task(execute_task, task["id"], actor_id)

@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.db import get_supabase
 
@@ -140,7 +140,7 @@ def my_company(user_id: str):
     company = db.table("companies").select("*").eq("id", m["company_id"]).single().execute()
     if not company.data:
         return None
-    return {**company.data, "my_role": ROLE_NAMES.get(m["role"], m["role"])}
+    return {**_mask_company(company.data), "my_role": ROLE_NAMES.get(m["role"], m["role"])}
 
 
 @router.get("/{company_id}/teams")
@@ -214,6 +214,26 @@ def create_team(company_id: str, body: TeamCreate):
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+
+_SECRET_COMPANY_FIELDS = {"openai_api_key", "anthropic_api_key"}
+
+
+def _mask_company(data: dict) -> dict:
+    """Replace sensitive API key fields with presence booleans.
+
+    The raw key values are never sent to the client — only whether a key is
+    set (True) or not (False/None).  The frontend stores these as
+    openai_key_set / anthropic_key_set.
+    """
+    result = {k: v for k, v in data.items() if k not in _SECRET_COMPANY_FIELDS}
+    for field in _SECRET_COMPANY_FIELDS:
+        if field in data:
+            set_field = field.replace("_api_key", "_key_set")
+            result[set_field] = bool(data.get(field))
+    return result
 
 
 def _require_company_owner(db, company_id: str, user_id: str) -> None:
@@ -240,7 +260,7 @@ def update_company(company_id: str, body: CompanyUpdate, user_id: str):
     if not update:
         raise HTTPException(400, "No fields to update")
     db.table("companies").update(update).eq("id", company_id).execute()
-    return {"company_id": company_id, **update}
+    return {"company_id": company_id, **_mask_company(update)}
 
 
 @router.delete("/{company_id}", status_code=204)
@@ -262,4 +282,115 @@ def delete_company(company_id: str, user_id: str):
 
     db.table("company_members").delete().eq("company_id", company_id).execute()
     db.table("companies").delete().eq("id", company_id).execute()
+
+
+# ── Company Agents ────────────────────────────────────────────────────────────
+
+def _validate_webhook_url(v: str) -> str:
+    if not v.startswith(("https://", "http://")):
+        raise ValueError("webhook_url must start with https:// or http://")
+    return v
+
+
+class CompanyAgentCreate(BaseModel):
+    name: str
+    role: Optional[str] = None
+    webhook_url: str
+    agent_api_key: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str) -> str:
+        return _validate_webhook_url(v)
+
+
+class CompanyAgentUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    webhook_url: Optional[str] = None
+    agent_api_key: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_webhook_url(v)
+        return v
+
+
+@router.get("/{company_id}/agents")
+def list_company_agents(company_id: str, user_id: str):
+    """List all reusable agents registered for the company."""
+    db = get_supabase()
+    # Any member can read agents
+    member = (
+        db.table("company_members")
+        .select("role")
+        .eq("company_id", company_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not member.data:
+        raise HTTPException(403, "Not a member of this company")
+    resp = db.table("company_agents").select("*").eq("company_id", company_id).order("created_at").execute()
+    # Never return agent_api_key in list — mask it
+    agents = []
+    for a in (resp.data or []):
+        agents.append({**a, "agent_api_key": "***" if a.get("agent_api_key") else None})
+    return agents
+
+
+@router.post("/{company_id}/agents", status_code=201)
+def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str):
+    """Register a new agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    row = {
+        "id": str(uuid.uuid4()),
+        "company_id": company_id,
+        "name": body.name,
+        "role": body.role,
+        "webhook_url": body.webhook_url,
+        "agent_api_key": body.agent_api_key,
+        "description": body.description,
+    }
+    db.table("company_agents").insert(row).execute()
+    return {**row, "agent_api_key": "***" if row.get("agent_api_key") else None}
+
+
+@router.patch("/{company_id}/agents/{agent_id}")
+def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdate, user_id: str):
+    """Update an agent. Only company owner.
+
+    Omitted fields are left unchanged.
+    Send null explicitly to clear agent_api_key, description, or role.
+    name and webhook_url cannot be cleared (400 if sent as null).
+    """
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    # exclude_unset=True: only fields the client actually sent are included,
+    # so omitting a field leaves it unchanged, while sending null clears it.
+    update = body.model_dump(exclude_unset=True)
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    if "name" in update and not update["name"]:
+        raise HTTPException(400, "name cannot be empty or null")
+    if "webhook_url" in update and update["webhook_url"] is None:
+        raise HTTPException(400, "webhook_url cannot be cleared")
+    db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
+    response = {"agent_id": agent_id, **update}
+    if "agent_api_key" in response:
+        response["agent_api_key"] = "***"
+    return response
+
+
+@router.delete("/{company_id}/agents/{agent_id}", status_code=204)
+def delete_company_agent(company_id: str, agent_id: str, user_id: str):
+    """Delete an agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    db.table("company_agents").delete().eq("id", agent_id).eq("company_id", company_id).execute()
 

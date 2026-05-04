@@ -2,6 +2,81 @@
 
 ---
 
+## 2026-05-04 | `66ebb8e` — feat: executor dashboard monitor, proxy docs, and UTC callback timestamp fix
+
+- `frontend/src/pages/DashboardPage.tsx` — added Executor Monitor panel with auto-refresh, running task list, and recent executor failures feed
+- `backend/app/api/projects.py` — added `GET /projects/dashboard/executor-state` aggregate endpoint returning running executor jobs and recent executor error logs (`docker_dispatch`, `external_dispatch`, `agent_execution`)
+- `docker-compose.prod.yml` — documented why `docker-socket-proxy` is used and why backend routes Docker SDK via `DOCKER_HOST=tcp://docker-socket-proxy:2375`
+- `docs/agent-flow.md` + `README.md` — documented production docker-socket-proxy security rationale
+- `backend/app/api/agents.py` — replaced deprecated `datetime.utcnow()` with timezone-aware `datetime.now(UTC)` for deliverable timestamps
+
+---
+
+## 2026-05-03 | `229ac42` — feat: webhook agents — SSRF guard, Docker SDK, callback protocol, key masking, sprint dispatch, RLS, docs
+
+Branch: `feature/agents` (branched off `feature/webhook-agents`)
+
+- `actor_executor.py` — SSRF guard on `webhook_url` (DNS + IP range check); Docker SDK (`docker==7.1.0`) replaces CLI subprocess; `stream_task_execution` routes webhook actors through `_dispatch_external_agent`; company-level AI keys resolved at dispatch time
+- `providers/` — `OpenAIProvider`, `AnthropicProvider`, `get_provider()` accept optional `api_key` param
+- `api/companies.py` — AI keys stripped from responses; `openai_key_set`/`anthropic_key_set` boolean flags returned instead
+- `api/tasks.py` — `_strip_task()` removes `agent_callback_token` and `agent_dispatched_at` from read responses
+- `api/projects.py` — sprint runner now dispatches webhook actors (any type with `webhook_url`), not only `type: ai`
+- `supabase/migrations/014_external_agents.sql` + `database_full.sql` — `company_agents` RLS restricted to `service_role`; composite index on `(company_id, created_at)`
+- `frontend/src/types.ts` + `CompanySettingsPage.tsx` — boolean key flags, stale store fix via query invalidation, Rotate/Set key UI
+- `README.md` — Agents section added (built-in Docker, external webhook, company registry); `docs/agent-flow.md` linked
+- `backend/tests/` — SSRF tests, Docker SDK mock tests, callback tests (74 passed)
+
+---
+
+## 2026-05-03 | `1f2ce25` — fix: mask agent_api_key in update_company_agent response
+
+- `backend/app/api/companies.py` — `update_company_agent()` now masks `agent_api_key` as `"***"` in the response, consistent with create and list endpoints
+
+---
+
+## 2026-05-03 | `435ceba` — fix: security hardening — webhook_url validation, XSS guard, atomic callback token, PR-only-with-files, remove redundant type casts
+
+- `backend/app/api/companies.py` — `field_validator` rejects `webhook_url` values that don't start with `https://` or `http://` on both create and update
+- `frontend/src/pages/AgentsPage.tsx` — `<ExternalLink>` anchor only rendered for `http(s)://` URLs (prevents `javascript:` XSS via user-controlled webhook_url)
+- `backend/app/api/agents.py` — callback token atomically consumed with `UPDATE … WHERE agent_callback_token=?`; duplicate concurrent callbacks now get 409 before any deliverable is inserted; removed spurious `else` PR attempt (PR now only triggered when `body.files` is present)
+- `frontend/src/types.ts` — added `phone?: string | null` to `Company` interface
+- `frontend/src/pages/CompanySettingsPage.tsx` — replaced all inline `as { … }` type casts with direct `company.phone / .openai_api_key / .anthropic_api_key` access
+- `agents/senior_dev/README.md` — corrected registration instructions (Team Settings → Agents, no Type field, webhook_url drives routing)
+
+---
+
+## 2026-05-03 | `0136cbe` — chore: add pytest.ini, copilot-instructions.md, AGENTS.md; silence asyncio warning
+
+- `backend/pytest.ini` — set `asyncio_mode = strict` and `asyncio_default_fixture_loop_scope = function`; silences PytestDeprecationWarning
+- `.github/copilot-instructions.md` — Copilot commit/push discipline, checks, GitHub Actions versions, coding rules
+- `AGENTS.md` — same rules for all AI coding agents working in this repo
+
+---
+
+## 2026-05-03 | `db5a994` — fix: add pytest-asyncio to requirements-dev.txt so CI can run async tests
+
+- `backend/requirements-dev.txt` — added `pytest-asyncio==0.25.3`; was missing so CI failed with "async def functions are not natively supported"
+
+---
+
+## 2026-05-03 | `c583e1f` — feat: structured agent logging, docker socket mount, agent callback logs+prompt persistence
+
+- `agents/builtin/main.py` — builtin agent now collects timestamped structured log lines (`[HH:MM:SS] [INFO/ERROR]`) throughout execution (task start, AI call, response size, files parsed, PR result, callback); sends them back in callback body as `logs: [...]`
+- `agents/builtin/main.py` — also sends `prompt` and `model` fields back in callback body for full audit trail
+- `backend/app/api/agents.py` — `AgentCallbackBody` extended with `logs`, `prompt`, `model` optional fields; callback handler persists each log line to `ai_logs` (level auto-detected), and writes prompt+response to `ai_messages` table
+- `docker-compose.prod.yml` — mounted `/var/run/docker.sock` into backend container (required for docker-per-task dispatch to work on the VPS)
+- `backend/tests/test_actor_executor.py` — 10 new tests for `actor_executor.py` (all passing, 41 total)
+- `agents/builtin/` — new built-in agent Docker image (Dockerfile, main.py, requirements.txt)
+
+---
+
+## 2026-05-03 | `0763687` — fix: move GitHub OAuth connect to Team Settings; project settings shows repo picker only
+
+- `backend/app/api/github.py` — `GET /github/status` now returns `has_token: true` when OAuth token exists but no repo is set yet
+- `frontend/src/pages/ProjectBoardPage.tsx` — removed OAuth connect button and PAT fallback from project settings; when no token → "Connect GitHub in Team Settings" button; when token exists → repo picker with yellow "Token saved — pick a repo" badge until repo is set; removed unused `connectGithub`, `tokenInput`, `githubError`, `showPatFallback`
+
+---
+
 ## 2026-05-03 | `49d1703` — fix: redirect browser to GitHub OAuth URL instead of returning JSON
 
 - `backend/app/api/github.py` — `GET /github/oauth/start` now returns a 302 redirect to the GitHub authorization page instead of `{"url": "..."}` JSON
@@ -832,3 +907,23 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Fix ruff F841: removed unused `link_resp` variable in `send_magic_link` endpoint (`auth.py`)
 - Fix CI: bumped pydantic 2.9.2 → 2.13.3 to satisfy `realtime==2.29.0` constraint (requires `pydantic>=2.11.7`)
 - Memory: commit discipline recorded — never auto-commit; always run checks first, only commit on "tested"
+## 2026-05-03 — 0b637bc
+- style(proposal): matched partner one-pager visual style to main site (Space Mono font, wider layout, bolder spacing, larger type)
+## 2026-05-03 — 6948bc3
+- content(proposal): updated stack to AI-first (Python/FastAPI/LangChain), TutorPro metric (0→paying in 2mo), fixed domains label overlap
+
+## 2026-05-04
+- Project: 21century
+- Summary: Updated partner proposal commission terms to 20% (one-time) and 10% (recurring), with payout wording changed to paid from each collected check.
+- Commit: 53b20d9
+
+## 2026-05-04 — security fixes (trackingapp)
+
+Fixed 5 security vulnerabilities found by static review:
+- [Critical] DLL allowlist added to block arbitrary assembly loading from writable app data dir
+- [High] macOS SecureStorageWrapper now uses Keychain-backed SecureStorage instead of plaintext Preferences
+- [Medium] EncryptionKey redacted from debug logs
+- [Medium] Login password only retained in memory on successful login (removed always-persisting finally block)
+- [Low] Presigned screenshot URL validation restricted to HTTPS only
+
+Commit: 42ad2e9

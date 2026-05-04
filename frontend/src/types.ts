@@ -6,6 +6,20 @@ export interface Company {
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'
   default_team_id?: string
+  phone?: string | null
+  openai_key_set?: boolean
+  anthropic_key_set?: boolean
+}
+
+export interface CompanyAgent {
+  id: string
+  company_id: string
+  name: string
+  role?: string
+  webhook_url: string
+  agent_api_key?: string | null  // masked as '***' from API
+  description?: string
+  created_at: string
 }
 
 export interface Team {
@@ -89,6 +103,7 @@ export interface Actor {
   model?: string
   capabilities: string[]
   avatar_url?: string
+  webhook_url?: string
 }
 
 export interface Task {

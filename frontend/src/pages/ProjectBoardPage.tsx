@@ -54,6 +54,8 @@ export default function ProjectBoardPage() {
   const [newActorRole, setNewActorRole] = useState('')
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
+  const [newActorWebhookUrl, setNewActorWebhookUrl] = useState('')
+  const [newActorApiKey, setNewActorApiKey] = useState('')
   const [repoInput, setRepoInput] = useState('')
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -102,6 +104,8 @@ export default function ProjectBoardPage() {
         role: newActorRole || undefined,
         type: newActorType,
         model: newActorType === 'ai' ? newActorModel : undefined,
+        webhook_url: newActorWebhookUrl || undefined,
+        agent_api_key: newActorWebhookUrl && newActorApiKey ? newActorApiKey : undefined,
         capabilities: [],
       }),
     onSuccess: () => {
@@ -110,6 +114,8 @@ export default function ProjectBoardPage() {
       setNewActorRole('')
       setNewActorType('ai')
       setNewActorModel('gpt-4o')
+      setNewActorWebhookUrl('')
+      setNewActorApiKey('')
     },
   })
 
@@ -491,6 +497,7 @@ export default function ProjectBoardPage() {
                       ? <Bot size={13} className="text-purple-400 shrink-0" />
                       : <User size={13} className="text-blue-400 shrink-0" />}
                     <span className="text-white flex-1">{a.name}</span>
+                    {a.webhook_url && <LinkIcon size={10} className="text-green-400 shrink-0" />}
                     {(a.role || a.model) && <span className="text-gray-500 text-xs">{a.role ?? a.model}</span>}
                     <button
                       onClick={() => removeActor.mutate(a.id)}
@@ -543,6 +550,27 @@ export default function ProjectBoardPage() {
                 >
                   <Plus size={13} /> Add
                 </button>
+              </div>
+              {/* Webhook URL — task dispatch target for both AI and non-AI actors */}
+              <div className="space-y-2 mt-1">
+                <input
+                  placeholder="Webhook URL — if set, tasks are dispatched to this agent (optional)"
+                  value={newActorWebhookUrl}
+                  onChange={(e) => setNewActorWebhookUrl(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                {newActorWebhookUrl && (
+                  <input
+                    placeholder="API key (sent as X-Api-Key header, optional)"
+                    value={newActorApiKey}
+                    onChange={(e) => setNewActorApiKey(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    type="password"
+                  />
+                )}
+                {newActorWebhookUrl && (
+                  <p className="text-xs text-gray-500">Tasks assigned to this actor will be POSTed to the webhook. The agent calls back <span className="font-mono text-gray-400">/agents/callback</span> with the result.</p>
+                )}
               </div>
             </div>
             {/* GitHub integration */}

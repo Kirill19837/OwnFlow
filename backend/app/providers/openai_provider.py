@@ -7,9 +7,9 @@ from typing import List, Optional
 
 
 class OpenAIProvider(AIProvider):
-    def __init__(self, model: str = "gpt-4o"):
+    def __init__(self, model: str = "gpt-4o", api_key: Optional[str] = None):
         self.model = model
-        self._client = AsyncOpenAI(api_key=get_settings().openai_api_key)
+        self._client = AsyncOpenAI(api_key=api_key or get_settings().openai_api_key)
 
     async def complete(
         self,

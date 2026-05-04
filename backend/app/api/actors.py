@@ -6,13 +6,21 @@ from app.db import get_supabase
 router = APIRouter()
 
 
+def _mask_actor(actor: dict) -> dict:
+    """Never expose agent_api_key in API responses."""
+    result = {**actor}
+    if "agent_api_key" in result:
+        result["agent_api_key"] = "***" if result["agent_api_key"] else None
+    return result
+
+
 @router.get("/{actor_id}")
 def get_actor(actor_id: str):
     db = get_supabase()
     resp = db.table("actors").select("*").eq("id", actor_id).single().execute()
     if not resp.data:
         raise HTTPException(404, "Actor not found")
-    return resp.data
+    return _mask_actor(resp.data)
 
 
 @router.patch("/{actor_id}")
