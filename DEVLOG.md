@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-05-04 | `f748377` — feat: link project actors to company agents instead of manual webhook setup
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — Team actors tab now shows a Company agent dropdown per actor and for new actors; removed raw webhook URL and API key inputs from Project settings entirely
+- `frontend/src/pages/ProjectBoardPage.tsx` — added `Team actors` as a dedicated settings tab; actor queries (skills, team members, company agents) now gate on `settingsTab === 'team-actors'`
+- `frontend/src/pages/ProjectBoardPage.tsx` — selecting a company agent sets only its webhook URL on the actor; API key remains stored at company level and never exposed to the project page
+- `backend/app/services/actor_executor.py` — external dispatch now auto-resolves the `agent_api_key` from `company_agents` table by matching webhook URL, so the key is applied even when not stored per-actor
+
+---
+
 ## 2026-05-04 | `912237a` — feat: improve actor settings UX and runtime key-source resolution
 
 - `frontend/src/pages/ProjectBoardPage.tsx` — made Agents settings clearer with execution-mode explanation (Built-in vs Webhook), per-actor mode badges, enhanced team actor controls, role picker shortcuts, and improved actor editing flow
