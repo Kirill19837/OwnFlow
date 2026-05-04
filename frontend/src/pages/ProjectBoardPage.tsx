@@ -8,6 +8,23 @@ import { useCompanyStore } from '../store/companyStore'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../types'
+import { ExtraEnvEditor } from '../components/ExtraEnvEditor'
+import { envPairsToObj, envObjToPairs } from '../lib/envUtils'
+import type { EnvPair } from '../lib/envUtils'
+
+// Mirrors backend ROLE_IMAGE_MAP in actor_executor.py
+const ROLE_IMAGE_MAP: Record<string, string> = {
+  'default': 'ownflow-agent:latest',
+  'ui/ux designer': 'ownflow-figma-agent:latest',
+  'business analyst': 'ownflow-docs-agent:latest',
+}
+
+function resolveActorImage(actor: { webhook_url?: string; docker_image?: string | null; role?: string }): string | null {
+  if (actor.webhook_url) return null  // webhook — no Docker image
+  if (actor.docker_image) return actor.docker_image
+  const role = (actor.role || '').trim().toLowerCase()
+  return ROLE_IMAGE_MAP[role] ?? ROLE_IMAGE_MAP['default']
+}
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
@@ -75,6 +92,10 @@ export default function ProjectBoardPage() {
   const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
   const [newActorModel, setNewActorModel] = useState('gpt-4o')
   const [newActorCompanyAgentId, setNewActorCompanyAgentId] = useState('')
+  const [newActorEnvPairs, setNewActorEnvPairs] = useState<EnvPair[]>([])
+  // Per-actor extra_env edit state: actorId → EnvPair[]
+  const [actorEnvEdits, setActorEnvEdits] = useState<Record<string, EnvPair[]>>({})
+  const [actorEnvOpen, setActorEnvOpen] = useState<Record<string, boolean>>({})
   const [repoInput, setRepoInput] = useState('')
   const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'team-actors' | 'github'>('general')
   const [showRolePicker, setShowRolePicker] = useState(false)
@@ -125,6 +146,9 @@ export default function ProjectBoardPage() {
       model?: string
       user_id?: string | null
       webhook_url?: string
+      docker_image?: string
+      company_agent_id?: string
+      extra_env?: Record<string, string>
     }) =>
       api.post(`/projects/${projectId}/actors`, {
         project_id: projectId,
@@ -138,6 +162,7 @@ export default function ProjectBoardPage() {
       setNewActorType('ai')
       setNewActorModel('gpt-4o')
       setNewActorCompanyAgentId('')
+      setNewActorEnvPairs([])
     },
   })
 
@@ -603,7 +628,7 @@ export default function ProjectBoardPage() {
                         <div key={`mode-${a.id}`} className="flex items-center justify-between gap-2 text-xs">
                           <span className="text-gray-300 truncate">{a.name}</span>
                           <span className={`px-1.5 py-0.5 rounded border ${a.webhook_url ? 'text-green-300 border-green-800/60 bg-green-900/20' : 'text-purple-300 border-purple-800/60 bg-purple-900/20'}`}>
-                            {a.webhook_url ? 'Webhook' : 'Built-in'}
+                            {a.webhook_url ? 'Webhook' : (resolveActorImage(a) ?? 'Built-in')}
                           </span>
                         </div>
                       ))}
@@ -827,15 +852,11 @@ export default function ProjectBoardPage() {
                     <div className="space-y-2 mt-1">
                       {a.type === 'ai' && (<>
                         <select
-                          value={companyAgents.find((agent) => agent.webhook_url === (a.webhook_url || ''))?.id || ''}
+                          value={companyAgents.find((agent) => (agent.webhook_url && agent.webhook_url === a.webhook_url) || (agent.docker_image && agent.docker_image === a.docker_image))?.id || ''}
                           onChange={(e) => {
-                            const selected = companyAgents.find((agent) => agent.id === e.target.value)
                             updateActor.mutate({
                               actorId: a.id,
-                              patch: {
-                                webhook_url: selected?.webhook_url || null,
-                                agent_api_key: null,
-                              },
+                              patch: { company_agent_id: e.target.value || null },
                             })
                           }}
                           className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -850,9 +871,58 @@ export default function ProjectBoardPage() {
                         {a.webhook_url && (
                           <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
                         )}
+                        {!a.webhook_url && (
+                          <p className="text-xs text-gray-600 font-mono truncate">
+                            image: {resolveActorImage(a)}
+                          </p>
+                        )}
                         {companyAgents.length === 0 && (
                           <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
                         )}
+                        {/* Per-actor extra_env editor */}
+                        {a.type === 'ai' && (() => {
+                          const isOpen = !!actorEnvOpen[a.id]
+                          const existingKeys = a.extra_env ? Object.keys(a.extra_env) : []
+                          return (
+                            <div className="mt-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isOpen) {
+                                    setActorEnvEdits((prev) => ({ ...prev, [a.id]: envObjToPairs(a.extra_env) }))
+                                  }
+                                  setActorEnvOpen((prev) => ({ ...prev, [a.id]: !isOpen }))
+                                }}
+                                className="flex items-center gap-1 text-xs text-gray-600 hover:text-purple-400 transition-colors"
+                              >
+                                {isOpen ? '▾' : '▸'} Env vars
+                                {existingKeys.length > 0 && !isOpen && (
+                                  <span className="ml-1 font-mono text-gray-500">[{existingKeys.join(', ')}]</span>
+                                )}
+                              </button>
+                              {isOpen && (
+                                <div className="mt-1.5 pl-1 space-y-2">
+                                  <ExtraEnvEditor
+                                    pairs={actorEnvEdits[a.id] ?? []}
+                                    onChange={(p) => setActorEnvEdits((prev) => ({ ...prev, [a.id]: p }))}
+                                    hint="e.g. FIGMA_TOKEN"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const env = envPairsToObj(actorEnvEdits[a.id] ?? [])
+                                      updateActor.mutate({ actorId: a.id, patch: { extra_env: env ?? null } })
+                                      setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
+                                    }}
+                                    disabled={updateActor.isPending}
+                                    className="flex items-center gap-1 px-2 py-1 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs rounded-lg"
+                                  >
+                                    Save keys
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </>)}
                     </div>
                   </div>
@@ -897,7 +967,8 @@ export default function ProjectBoardPage() {
                     role: newActorRole.trim() || undefined,
                     type: newActorType,
                     model: newActorType === 'ai' ? newActorModel : undefined,
-                    webhook_url: companyAgents.find((agent) => agent.id === newActorCompanyAgentId)?.webhook_url || undefined,
+                    company_agent_id: newActorCompanyAgentId || undefined,
+                    extra_env: envPairsToObj(newActorEnvPairs),
                   })}
                   disabled={addActor.isPending}
                   className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
@@ -918,13 +989,26 @@ export default function ProjectBoardPage() {
                     </option>
                   ))}
                 </select>
-                {newActorCompanyAgentId && (
-                  <p className="text-xs text-gray-500 font-mono truncate">
-                    {companyAgents.find((agent) => agent.id === newActorCompanyAgentId)?.webhook_url}
-                  </p>
-                )}
+                {newActorCompanyAgentId && (() => {
+                    const agent = companyAgents.find((a) => a.id === newActorCompanyAgentId)
+                    return (
+                      <p className="text-xs text-gray-500 font-mono truncate">
+                        {agent?.webhook_url || agent?.docker_image || ''}
+                      </p>
+                    )
+                  })()}
                 {companyAgents.length === 0 && (
                   <p className="text-xs text-gray-500">Register reusable webhook agents in Company Settings -&gt; Agents.</p>
+                )}
+                {/* Per-actor extra env vars (e.g. FIGMA_TOKEN) */}
+                {!newActorCompanyAgentId && newActorType === 'ai' && (
+                  <div className="pt-1">
+                    <ExtraEnvEditor
+                      pairs={newActorEnvPairs}
+                      onChange={setNewActorEnvPairs}
+                      hint="e.g. FIGMA_TOKEN — overrides company agent keys"
+                    />
+                  </div>
                 )}
               </div>
               </div>

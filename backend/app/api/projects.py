@@ -534,10 +534,28 @@ def add_actor(project_id: str, body: ActorCreate):
     }
     if body.user_id:
         row["user_id"] = body.user_id
-    if body.webhook_url:
-        row["webhook_url"] = body.webhook_url
-    if body.agent_api_key:
-        row["agent_api_key"] = body.agent_api_key
+    # If a company agent template is specified, copy its dispatch fields server-side
+    if body.company_agent_id:
+        ca_resp = db.table("company_agents").select("*").eq("id", body.company_agent_id).single().execute()
+        if ca_resp.data:
+            ca = ca_resp.data
+            if ca.get("webhook_url"):
+                row["webhook_url"] = ca["webhook_url"]
+            if ca.get("docker_image"):
+                row["docker_image"] = ca["docker_image"]
+            if ca.get("agent_api_key"):
+                row["agent_api_key"] = ca["agent_api_key"]
+            if ca.get("extra_env"):
+                row["extra_env"] = ca["extra_env"]
+    else:
+        if body.webhook_url:
+            row["webhook_url"] = body.webhook_url
+        if body.agent_api_key:
+            row["agent_api_key"] = body.agent_api_key
+        if body.docker_image:
+            row["docker_image"] = body.docker_image
+        if body.extra_env:
+            row["extra_env"] = body.extra_env
     db.table("actors").insert(row).execute()
     return _mask_actor(row)
 

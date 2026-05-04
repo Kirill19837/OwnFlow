@@ -16,8 +16,11 @@ export interface CompanyAgent {
   company_id: string
   name: string
   role?: string
-  webhook_url: string
+  agent_type: 'webhook' | 'builtin'
+  webhook_url?: string | null
   agent_api_key?: string | null  // masked as '***' from API
+  docker_image?: string | null
+  extra_env?: Record<string, string> | null  // keys visible, values masked as '***'
   description?: string
   created_at: string
 }
@@ -106,6 +109,8 @@ export interface Actor {
   capabilities: string[]
   avatar_url?: string
   webhook_url?: string
+  docker_image?: string | null
+  extra_env?: Record<string, string> | null  // keys visible, values masked as '***'
 }
 
 export interface Task {

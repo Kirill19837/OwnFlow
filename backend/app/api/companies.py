@@ -295,21 +295,11 @@ def _validate_webhook_url(v: str) -> str:
 class CompanyAgentCreate(BaseModel):
     name: str
     role: Optional[str] = None
-    webhook_url: str
-    agent_api_key: Optional[str] = None
-    description: Optional[str] = None
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str) -> str:
-        return _validate_webhook_url(v)
-
-
-class CompanyAgentUpdate(BaseModel):
-    name: Optional[str] = None
-    role: Optional[str] = None
+    agent_type: str = "webhook"  # 'webhook' | 'builtin'
     webhook_url: Optional[str] = None
+    docker_image: Optional[str] = None
     agent_api_key: Optional[str] = None
+    extra_env: Optional[dict] = None   # {KEY: VALUE} injected into Docker containers; values are secrets
     description: Optional[str] = None
 
     @field_validator("webhook_url")
@@ -317,6 +307,38 @@ class CompanyAgentUpdate(BaseModel):
     def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
             return _validate_webhook_url(v)
+        return v
+
+    @field_validator("agent_type")
+    @classmethod
+    def validate_agent_type(cls, v: str) -> str:
+        if v not in ("webhook", "builtin"):
+            raise ValueError("agent_type must be 'webhook' or 'builtin'")
+        return v
+
+
+class CompanyAgentUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    agent_type: Optional[str] = None
+    webhook_url: Optional[str] = None
+    docker_image: Optional[str] = None
+    agent_api_key: Optional[str] = None
+    extra_env: Optional[dict] = None
+    description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_webhook_url(v)
+        return v
+
+    @field_validator("agent_type")
+    @classmethod
+    def validate_agent_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("webhook", "builtin"):
+            raise ValueError("agent_type must be 'webhook' or 'builtin'")
         return v
 
 
@@ -336,10 +358,13 @@ def list_company_agents(company_id: str, user_id: str):
     if not member.data:
         raise HTTPException(403, "Not a member of this company")
     resp = db.table("company_agents").select("*").eq("company_id", company_id).order("created_at").execute()
-    # Never return agent_api_key in list — mask it
     agents = []
     for a in (resp.data or []):
-        agents.append({**a, "agent_api_key": "***" if a.get("agent_api_key") else None})
+        masked = {**a, "agent_api_key": "***" if a.get("agent_api_key") else None}
+        # Mask extra_env values — keys are safe to expose, values are secrets
+        if isinstance(masked.get("extra_env"), dict):
+            masked["extra_env"] = {k: "***" for k in masked["extra_env"]}
+        agents.append(masked)
     return agents
 
 
@@ -348,17 +373,27 @@ def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str
     """Register a new agent. Only company owner."""
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
+    if body.agent_type == "webhook" and not body.webhook_url:
+        raise HTTPException(400, "webhook_url is required for webhook agents")
+    if body.agent_type == "builtin" and not body.docker_image:
+        raise HTTPException(400, "docker_image is required for builtin agents")
     row = {
         "id": str(uuid.uuid4()),
         "company_id": company_id,
         "name": body.name,
         "role": body.role,
+        "agent_type": body.agent_type,
         "webhook_url": body.webhook_url,
+        "docker_image": body.docker_image,
         "agent_api_key": body.agent_api_key,
+        "extra_env": body.extra_env,
         "description": body.description,
     }
     db.table("company_agents").insert(row).execute()
-    return {**row, "agent_api_key": "***" if row.get("agent_api_key") else None}
+    masked = {**row, "agent_api_key": "***" if row.get("agent_api_key") else None}
+    if isinstance(masked.get("extra_env"), dict):
+        masked["extra_env"] = {k: "***" for k in masked["extra_env"]}
+    return masked
 
 
 @router.patch("/{company_id}/agents/{agent_id}")
@@ -378,12 +413,12 @@ def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdat
         raise HTTPException(400, "No fields to update")
     if "name" in update and not update["name"]:
         raise HTTPException(400, "name cannot be empty or null")
-    if "webhook_url" in update and update["webhook_url"] is None:
-        raise HTTPException(400, "webhook_url cannot be cleared")
     db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
     response = {"agent_id": agent_id, **update}
     if "agent_api_key" in response:
         response["agent_api_key"] = "***"
+    if isinstance(response.get("extra_env"), dict):
+        response["extra_env"] = {k: "***" for k in response["extra_env"]}
     return response
 
 

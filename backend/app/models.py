@@ -68,6 +68,9 @@ class ActorCreate(BaseModel):
     characteristics: Optional[str] = None  # stored in capabilities[0] for now
     webhook_url: Optional[str] = None      # external agents: dispatch target URL
     agent_api_key: Optional[str] = None    # sent as X-Api-Key to the external agent
+    docker_image: Optional[str] = None     # override server default Docker image
+    extra_env: Optional[dict] = None       # additional env vars injected at dispatch (secrets)
+    company_agent_id: Optional[str] = None # if set, backend resolves template and copies dispatch fields
 
 
 class Actor(BaseModel):
