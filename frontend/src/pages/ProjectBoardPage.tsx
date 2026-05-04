@@ -25,6 +25,15 @@ function resolveActorImage(actor: { webhook_url?: string; docker_image?: string 
   const role = (actor.role || '').trim().toLowerCase()
   return ROLE_IMAGE_MAP[role] ?? ROLE_IMAGE_MAP['default']
 }
+
+/** Returns how the image was resolved: 'explicit' | 'role' | 'default' */
+function resolveActorImageSource(actor: { webhook_url?: string; docker_image?: string | null; role?: string }): 'webhook' | 'explicit' | 'role' | 'default' {
+  if (actor.webhook_url) return 'webhook'
+  if (actor.docker_image) return 'explicit'
+  const role = (actor.role || '').trim().toLowerCase()
+  if (role && ROLE_IMAGE_MAP[role]) return 'role'
+  return 'default'
+}
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
@@ -622,16 +631,37 @@ export default function ProjectBoardPage() {
                     <p><span className="text-green-300 font-medium">Webhook</span> — webhook URL set; OwnFlow sends the task to your external agent endpoint.</p>
                   </div>
                   <div className="mt-2 rounded-lg border border-gray-800 bg-gray-900/70 p-2">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Actor execution modes</p>
-                    <div className="space-y-1">
-                      {(project.actors ?? []).map((a) => (
-                        <div key={`mode-${a.id}`} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="text-gray-300 truncate">{a.name}</span>
-                          <span className={`px-1.5 py-0.5 rounded border ${a.webhook_url ? 'text-green-300 border-green-800/60 bg-green-900/20' : 'text-purple-300 border-purple-800/60 bg-purple-900/20'}`}>
-                            {a.webhook_url ? 'Webhook' : (resolveActorImage(a) ?? 'Built-in')}
-                          </span>
-                        </div>
-                      ))}
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1.5">Actor execution map</p>
+                    <div className="space-y-1.5">
+                      {(project.actors ?? []).filter((a) => a.type === 'ai').map((a) => {
+                        const src = resolveActorImageSource(a)
+                        const img = resolveActorImage(a)
+                        const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
+                        const chipCls = src === 'explicit'
+                          ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                          : src === 'role'
+                          ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+                          : 'bg-gray-800 text-gray-400 border-gray-700'
+                        return (
+                          <div key={`mode-${a.id}`} className="flex items-start justify-between gap-2 text-xs">
+                            <div className="min-w-0">
+                              <span className="text-gray-200 font-medium truncate block">{a.name}</span>
+                              {a.role && <span className="text-gray-500 truncate block">{a.role}</span>}
+                            </div>
+                            {a.webhook_url ? (
+                              <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-green-300 border-green-800/60 bg-green-900/20 font-mono">
+                                webhook
+                              </span>
+                            ) : (
+                              <span className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono ${chipCls}`}>
+                                <span className="opacity-60">[{srcLabel}]</span>
+                                {img}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">Runtime defaults used by built-in mode:</p>
@@ -871,11 +901,22 @@ export default function ProjectBoardPage() {
                         {a.webhook_url && (
                           <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
                         )}
-                        {!a.webhook_url && (
-                          <p className="text-xs text-gray-600 font-mono truncate">
-                            image: {resolveActorImage(a)}
-                          </p>
-                        )}
+                        {!a.webhook_url && (() => {
+                          const img = resolveActorImage(a)
+                          const src = resolveActorImageSource(a)
+                          const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
+                          const chipCls = src === 'explicit'
+                            ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                            : src === 'role'
+                            ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+                            : 'bg-gray-800 text-gray-400 border-gray-700'
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded border ${chipCls}`}>
+                              <span className="opacity-60">[{srcLabel}]</span>
+                              {img}
+                            </span>
+                          )
+                        })()}
                         {companyAgents.length === 0 && (
                           <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
                         )}
