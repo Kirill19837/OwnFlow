@@ -9,7 +9,6 @@ from app.services.actor_executor import execute_task, stream_task_execution
 from app.providers.registry import get_provider
 from app.assistants import (
     build_task_assistant_messages,
-    has_mark_ready_action,
     resolve_task_assistant_model_and_name,
     strip_duplicate_task_details,
 )
@@ -324,12 +323,10 @@ async def prompt_task_stream(task_id: str, body: dict):
         yield "data: [DONE]\n\n"
         # Persist assistant reply — strip duplicate detail keys before saving
         assistant_content = strip_duplicate_task_details("".join(full_response), task_details)
-        # If the AI emitted mark_ready, set ai_ready on the task
-        try:
-            if has_mark_ready_action(assistant_content):
-                db.table("tasks").update({"ai_ready": True}).eq("id", task_id).execute()
-        except Exception:
-            pass
+        # NOTE: ai_ready is NOT set here from chat.
+        # It is only set by _auto_check_ready after the user actually saves decisions
+        # via the /tasks/{id}/details endpoint. This prevents chat proposals that were
+        # never saved from marking the task ready.
         try:
             db.table("task_interactions").insert({
                 "task_id": task_id,
