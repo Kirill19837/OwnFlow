@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-04 | `76241c7` — fix: use valid docker-socket-proxy image tag in prod compose
+
+- `docker-compose.prod.yml` — changed `tecnativa/docker-socket-proxy:0.4.2` to `tecnativa/docker-socket-proxy:v0.4.2` to match published image tag and fix deploy pull error (`manifest unknown`)
+
+---
+
 ## 2026-05-04 | `66ebb8e` — feat: executor dashboard monitor, proxy docs, and UTC callback timestamp fix
 
 - `frontend/src/pages/DashboardPage.tsx` — added Executor Monitor panel with auto-refresh, running task list, and recent executor failures feed
