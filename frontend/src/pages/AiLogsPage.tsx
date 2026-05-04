@@ -4,7 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import { formatDistanceToNow } from 'date-fns'
-import { ScrollText, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ScrollText, RefreshCw, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import ClearAiLogsModal from '../components/ClearAiLogsModal'
 
 const LOG_LEVEL_STYLE: Record<number, string> = {
   0: 'text-gray-500',
@@ -66,17 +67,21 @@ export default function AiLogsPage() {
   const [phaseFilter, setPhaseFilter] = useState(-1)
   const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState('')
+  const [showClearModal, setShowClearModal] = useState(false)
+
+  const scopeParams: Record<string, string> = {}
+  if (activeTeam) {
+    scopeParams.team_id = activeTeam.id
+  } else if (session?.user.id) {
+    scopeParams.owner_id = session.user.id
+  }
 
   const params: Record<string, string | number> = {
     limit: LIMIT,
     offset,
     level: levelFilter,
     phase: phaseFilter,
-  }
-  if (activeTeam) {
-    params.team_id = activeTeam.id
-  } else if (session?.user.id) {
-    params.owner_id = session.user.id
+    ...scopeParams,
   }
 
   const { data, isFetching, refetch } = useQuery<{ logs: AiLog[]; total: number }>({
@@ -113,14 +118,23 @@ export default function AiLogsPage() {
             <span className="text-xs text-gray-500 ml-1">— {activeTeam.name}</span>
           )}
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm text-gray-300 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm text-gray-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setShowClearModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-red-900/60 text-sm text-gray-400 hover:text-red-300 transition-colors"
+          >
+            <Trash2 size={13} />
+            Clear logs
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -245,6 +259,15 @@ export default function AiLogsPage() {
             Next <ChevronRight size={14} />
           </button>
         </div>
+      )}
+
+      {showClearModal && (
+        <ClearAiLogsModal
+          scopeParams={scopeParams}
+          teamName={activeTeam?.name}
+          onClose={() => setShowClearModal(false)}
+          onCleared={() => { setShowClearModal(false); setOffset(0) }}
+        />
       )}
     </div>
   )

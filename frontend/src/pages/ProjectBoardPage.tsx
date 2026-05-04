@@ -729,198 +729,185 @@ export default function ProjectBoardPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                {(project.actors ?? []).map((a) => (
-                  <div key={a.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      {a.type === 'ai' ? (
-                        <Bot size={15} className="text-purple-400 shrink-0" />
-                      ) : (
-                        <User size={15} className="text-blue-400 shrink-0" />
-                      )}
-                      <input
-                        list={`role-list-${a.id}`}
-                        defaultValue={a.role || ''}
-                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { role: e.target.value.trim() || null } })}
-                        placeholder="Role…"
-                        className={`text-xs bg-transparent focus:outline-none min-w-0 flex-1 ${
-                          !(a.role || '').trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-400 focus:text-gray-200'
-                        }`}
-                      />
-                      <datalist id={`role-list-${a.id}`}>
-                        {skills.map((s) => <option key={s.id} value={s.name} />)}
-                      </datalist>
-                      <div className="flex-1" />
-                      <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => updateActor.mutate({ actorId: a.id, patch: { type: 'ai', model: a.model || 'gpt-4o', user_id: null } })}
-                          className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
-                            a.type === 'ai' ? 'bg-purple-900 text-purple-300' : 'text-gray-500 hover:text-gray-300'
-                          }`}
-                        >
-                          <Bot size={10} /> AI
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateActor.mutate({ actorId: a.id, patch: { type: 'human', model: null } })}
-                          className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
-                            a.type === 'human' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'
-                          }`}
-                        >
-                          <User size={10} /> Human
-                        </button>
-                      </div>
-                      {a.type === 'ai' && (
-                        <select
-                          value={a.model || 'gpt-4o'}
-                          onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
-                          disabled={updateActor.isPending}
-                          className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none"
-                        >
-                          {AI_MODELS.map((m) => (
-                            <option key={m.value} value={m.value}>{m.label}</option>
-                          ))}
-                        </select>
-                      )}
-                      <button
-                        onClick={() => removeActor.mutate(a.id)}
-                        disabled={removeActor.isPending}
-                        className="text-gray-600 hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-
-                    {a.type === 'ai' ? (
-                      <input
-                        type="text"
-                        defaultValue={a.name}
-                        onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { name: e.target.value.trim() || a.name } })}
-                        placeholder="AI agent name"
-                        className="w-full bg-transparent text-white text-sm font-medium focus:outline-none pl-6 border-t border-gray-800 pt-1.5"
-                      />
-                    ) : (
-                      <div className="pl-6 border-t border-gray-800 pt-1.5">
-                        <select
-                          value={a.user_id ?? ''}
-                          disabled={teamMembersLoading}
-                          onChange={(e) => {
-                            const uid = e.target.value
-                            if (!uid) {
-                              updateActor.mutate({ actorId: a.id, patch: { user_id: null, name: 'Unassigned teammate' } })
-                            } else {
-                              const member = teamMembers.find((m) => m.user_id === uid)
-                              updateActor.mutate({ actorId: a.id, patch: { user_id: uid, name: member?.full_name || member?.email || uid } })
+              <div className="grid grid-cols-3 gap-2">
+                {(project.actors ?? []).map((a) => {
+                  const isExpanded = !!actorEnvOpen[a.id]
+                  const isAi = a.type === 'ai'
+                  return (
+                    <div
+                      key={a.id}
+                      className={`bg-gray-950 border rounded-xl overflow-hidden flex flex-col ${
+                        isAi ? 'border-purple-900/60' : 'border-blue-900/60'
+                      }`}
+                    >
+                      {/* Card body */}
+                      <div className="px-3 pt-3 pb-2 flex-1 space-y-1.5">
+                        {/* Icon row */}
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            title={isAi ? 'Switch to human' : 'Switch to AI'}
+                            onClick={() => isAi
+                              ? updateActor.mutate({ actorId: a.id, patch: { type: 'human', model: null } })
+                              : updateActor.mutate({ actorId: a.id, patch: { type: 'ai', model: a.model || 'gpt-4o', user_id: null } })
                             }
-                          }}
-                          className="w-full bg-transparent text-white text-sm font-medium focus:outline-none focus:text-purple-300 appearance-none"
-                        >
-                          <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
-                          {teamMembers.map((m) => (
-                            <option key={m.user_id} value={m.user_id} className="bg-gray-900">
-                              {m.full_name || m.email || m.user_id}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isAi ? 'bg-purple-900/40 text-purple-400 hover:bg-purple-900/70' : 'bg-blue-900/40 text-blue-400 hover:bg-blue-900/70'
+                            }`}
+                          >
+                            {isAi ? <Bot size={20} /> : <User size={20} />}
+                          </button>
+                          <button
+                            onClick={() => removeActor.mutate(a.id)}
+                            disabled={removeActor.isPending}
+                            className="text-gray-700 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
 
-                    <div className="space-y-2 mt-1">
-                      {a.type === 'ai' && (<>
-                        <select
-                          value={companyAgents.find((agent) => (agent.webhook_url && agent.webhook_url === a.webhook_url) || (agent.docker_image && agent.docker_image === a.docker_image))?.id || ''}
-                          onChange={(e) => {
-                            updateActor.mutate({
-                              actorId: a.id,
-                              patch: { company_agent_id: e.target.value || null },
-                            })
+                        {/* Name */}
+                        <input
+                          type="text"
+                          defaultValue={a.name}
+                          onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { name: e.target.value.trim() || a.name } })}
+                          placeholder="Name…"
+                          className="w-full bg-transparent text-sm font-semibold text-white focus:outline-none placeholder-gray-600 truncate"
+                        />
+
+                        {/* Role */}
+                        <input
+                          list={`role-list-${a.id}`}
+                          defaultValue={a.role || ''}
+                          onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { role: e.target.value.trim() || null } })}
+                          placeholder="Role…"
+                          className={`w-full bg-transparent text-xs focus:outline-none ${
+                            !(a.role || '').trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-500 focus:text-gray-200'
+                          }`}
+                        />
+                        <datalist id={`role-list-${a.id}`}>
+                          {skills.map((s) => <option key={s.id} value={s.name} />)}
+                        </datalist>
+                      </div>
+
+                      {/* Card footer */}
+                      <div className={`flex items-center justify-between px-3 py-1.5 border-t ${
+                        isAi ? 'border-purple-900/40' : 'border-blue-900/40'
+                      }`}>
+                        {isAi ? (
+                          <select
+                            value={a.model || 'gpt-4o'}
+                            onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
+                            disabled={updateActor.isPending}
+                            className="bg-transparent text-gray-500 text-[11px] focus:outline-none focus:text-gray-300 cursor-pointer max-w-[90px]"
+                          >
+                            {AI_MODELS.map((m) => (
+                              <option key={m.value} value={m.value} className="bg-gray-900">{m.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[11px] text-gray-600">human</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isExpanded) setActorEnvEdits((prev) => ({ ...prev, [a.id]: envObjToPairs(a.extra_env) }))
+                            setActorEnvOpen((prev) => ({ ...prev, [a.id]: !isExpanded }))
                           }}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className={`flex items-center gap-1 transition-colors ${isExpanded ? 'text-purple-400' : 'text-gray-600 hover:text-gray-400'}`}
                         >
-                          <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
-                          {companyAgents.map((agent) => (
-                            <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
-                              {agent.name}{agent.role ? ` - ${agent.role}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                        {a.webhook_url && (
-                          <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
-                        )}
-                        {!a.webhook_url && (() => {
-                          const img = resolveActorImage(a)
-                          const src = resolveActorImageSource(a)
-                          const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
-                          const chipCls = src === 'explicit'
-                            ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
-                            : src === 'role'
-                            ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
-                            : 'bg-gray-800 text-gray-400 border-gray-700'
-                          return (
-                            <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded border ${chipCls}`}>
-                              <span className="opacity-60">[{srcLabel}]</span>
-                              {img}
-                            </span>
-                          )
-                        })()}
-                        {companyAgents.length === 0 && (
-                          <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
-                        )}
-                        {/* Per-actor extra_env editor */}
-                        {a.type === 'ai' && (() => {
-                          const isOpen = !!actorEnvOpen[a.id]
-                          const existingKeys = a.extra_env ? Object.keys(a.extra_env) : []
-                          return (
-                            <div className="mt-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!isOpen) {
-                                    setActorEnvEdits((prev) => ({ ...prev, [a.id]: envObjToPairs(a.extra_env) }))
-                                  }
-                                  setActorEnvOpen((prev) => ({ ...prev, [a.id]: !isOpen }))
-                                }}
-                                className="flex items-center gap-1 text-xs text-gray-600 hover:text-purple-400 transition-colors"
+                          <span className="text-[11px]">Options</span>
+                          <ChevronDown size={12} className={`transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                        </button>
+                      </div>
+
+                      {/* Expanded config */}
+                      {isExpanded && (
+                        <div className={`border-t px-3 py-2.5 space-y-2 ${
+                          isAi ? 'border-purple-900/40' : 'border-blue-900/40'
+                        }`}>
+                          {!isAi && (
+                            <select
+                              value={a.user_id ?? ''}
+                              disabled={teamMembersLoading}
+                              onChange={(e) => {
+                                const uid = e.target.value
+                                if (!uid) {
+                                  updateActor.mutate({ actorId: a.id, patch: { user_id: null, name: 'Unassigned teammate' } })
+                                } else {
+                                  const member = teamMembers.find((m) => m.user_id === uid)
+                                  updateActor.mutate({ actorId: a.id, patch: { user_id: uid, name: member?.full_name || member?.email || uid } })
+                                }
+                              }}
+                              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                            >
+                              <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
+                              {teamMembers.map((m) => (
+                                <option key={m.user_id} value={m.user_id} className="bg-gray-900">
+                                  {m.full_name || m.email || m.user_id}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+
+                          {isAi && (
+                            <>
+                              <select
+                                value={companyAgents.find((agent) => (agent.webhook_url && agent.webhook_url === a.webhook_url) || (agent.docker_image && agent.docker_image === a.docker_image))?.id || ''}
+                                onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { company_agent_id: e.target.value || null } })}
+                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
                               >
-                                {isOpen ? '▾' : '▸'} Env vars
-                                {existingKeys.length > 0 && !isOpen && (
-                                  <span className="ml-1 font-mono text-gray-500">[{existingKeys.join(', ')}]</span>
-                                )}
-                              </button>
-                              {isOpen && (
-                                <div className="mt-1.5 pl-1 space-y-2">
-                                  <ExtraEnvEditor
-                                    pairs={actorEnvEdits[a.id] ?? []}
-                                    onChange={(p) => setActorEnvEdits((prev) => ({ ...prev, [a.id]: p }))}
-                                    hint="e.g. FIGMA_TOKEN"
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      const pairs = actorEnvEdits[a.id] ?? []
-                                      const hasMasked = pairs.some((p) => p.isMasked)
-                                      // Only replace extra_env when every key has been explicitly entered.
-                                      // Skipping masked pairs here would drop their server-side secrets.
-                                      const patch = hasMasked
-                                        ? {}
-                                        : { extra_env: envPairsToObj(pairs) ?? null }
-                                      updateActor.mutate({ actorId: a.id, patch })
-                                      setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
-                                    }}
-                                    disabled={updateActor.isPending}
-                                    className="flex items-center gap-1 px-2 py-1 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs rounded-lg"
-                                  >
-                                    Save keys
-                                  </button>
-                                </div>
+                                <option value="" className="bg-gray-900 text-gray-400">Built-in</option>
+                                {companyAgents.map((agent) => (
+                                  <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
+                                    {agent.name}{agent.role ? ` - ${agent.role}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              {a.webhook_url && (
+                                <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
                               )}
-                            </div>
-                          )
-                        })()}
-                      </>)}
+                              {!a.webhook_url && (() => {
+                                const img = resolveActorImage(a)
+                                const src = resolveActorImageSource(a)
+                                const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
+                                const chipCls = src === 'explicit'
+                                  ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                                  : src === 'role'
+                                  ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+                                  : 'bg-gray-800 text-gray-400 border-gray-700'
+                                return (
+                                  <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded border ${chipCls}`}>
+                                    <span className="opacity-60">[{srcLabel}]</span>
+                                    {img}
+                                  </span>
+                                )
+                              })()}
+                              <ExtraEnvEditor
+                                pairs={actorEnvEdits[a.id] ?? []}
+                                onChange={(p) => setActorEnvEdits((prev) => ({ ...prev, [a.id]: p }))}
+                                hint="e.g. FIGMA_TOKEN"
+                              />
+                              <button
+                                onClick={() => {
+                                  const pairs = actorEnvEdits[a.id] ?? []
+                                  const hasMasked = pairs.some((p) => p.isMasked)
+                                  const patch = hasMasked ? {} : { extra_env: envPairsToObj(pairs) ?? null }
+                                  updateActor.mutate({ actorId: a.id, patch })
+                                  setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
+                                }}
+                                disabled={updateActor.isPending}
+                                className="flex items-center gap-1 px-2 py-1 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs rounded-lg"
+                              >
+                                Save
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               </div>
             )}
