@@ -996,3 +996,9 @@ Fixed 5 security vulnerabilities found by static review:
 - [Low] Presigned screenshot URL validation restricted to HTTPS only
 
 Commit: 42ad2e9
+
+## 2026-05-04 — security hardening + masked env fix (040cbc3)
+- Tenant-scoped company_agent_id lookups in add_actor (projects.py) and update_actor (actors.py)
+- update_company_agent enforces webhook_url/docker_image invariants on update; auto-clears stale dispatch field on type change
+- envUtils: isMasked sentinel on EnvPair prevents masked secrets being overwritten on save
+- ExtraEnvEditor: clears isMasked on user input, shows '(unchanged)' placeholder
