@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-05-04 | `4f3d1a8` — feat: multiple builtin agent types with role-based image routing
+
+- Migration 017: `actors.docker_image`, `actors.extra_env`, `company_agents.docker_image/extra_env/agent_type`; `webhook_url` nullable
+- `ROLE_IMAGE_MAP` in `actor_executor.py`: `ui/ux designer` → figma agent, `business analyst` → docs agent, `default` → general agent; per-actor `docker_image` override always wins
+- New `agents/figma/` — design-focused agent with Figma API context enrichment (reads `FIGMA_TOKEN` from `extra_env`)
+- New `agents/docs/` — BA/technical writing agent (BRDs, specs, ADRs, runbooks)
+- Backend: `CompanyAgentCreate/Update` accept `agent_type`, `docker_image`, `extra_env`; values masked in all API responses; injected into Docker env at dispatch; actors PATCH resolves `company_agent_id` server-side
+- Frontend: `AgentsPage` reworked with Webhook/Builtin toggle + `ExtraEnvEditor`; `ProjectBoardPage` selector sends `company_agent_id`; per-actor env editor inline; `ExtraEnvEditor` extracted to shared component + `lib/envUtils.ts`
+- 15 new tests for `ROLE_IMAGE_MAP`, `_resolve_builtin_image`, and dispatch integration (93 total, all passing)
+
 ## 2026-05-04 | `3924ca5` — feat: AI Logs page with paginated, filterable log viewer
 
 - `GET /projects/dashboard/ai-logs` — paginated ai_logs scoped to team/owner, level/phase filters, resolves project_name + task_title
