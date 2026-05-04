@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-05-04 | `17ada2c` — fix: resolve company_id via team, fix smallint type errors in ai_logs queries
+
+- `projects.py` agent-runtime: removed `company_id` from projects SELECT (column never existed); always resolve via `team_id → teams.company_id`
+- `actor_executor.py`: added `_resolve_company_id()` helper; replaced all `project["company_id"]` direct accesses with team lookup
+- `projects.py` executor-state: fixed `.eq("level", "error")` and `.in_("phase", [...strings...])` → numeric smallint values (`3` and `[3, 2, 1]`) per migration 016
+- `ProjectBoardPage.tsx`: hide company agent selector for human actors (`type !== 'ai'`)
+
 ## 2026-05-04 | `30c5a93` — feat: collapsible executor monitor bar with per-task activity logs
 
 - `frontend/src/pages/DashboardPage.tsx` — Executor Monitor is now a compact single-line collapsible bar (collapsed by default); shows running count + failure count as inline badges; expands to running task list with per-task activity drill-down
