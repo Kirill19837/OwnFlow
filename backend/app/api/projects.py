@@ -205,7 +205,7 @@ def get_project_agent_runtime(project_id: str):
 
     project_resp = (
         db.table("projects")
-        .select("id,company_id,team_id")
+        .select("id,team_id")
         .eq("id", project_id)
         .single()
         .execute()
@@ -214,8 +214,8 @@ def get_project_agent_runtime(project_id: str):
     if not project:
         raise HTTPException(404, "Project not found")
 
-    company_id = project.get("company_id")
-    if not company_id and project.get("team_id"):
+    company_id = None
+    if project.get("team_id"):
         team_resp = (
             db.table("teams")
             .select("company_id")
@@ -416,8 +416,8 @@ def dashboard_executor_state(owner_id: str = "", team_id: str = ""):
         db.table("ai_logs")
         .select("project_id,phase,message,created_at")
         .in_("project_id", project_ids)
-        .eq("level", "error")
-        .in_("phase", ["docker_dispatch", "external_dispatch", "agent_execution"])
+        .eq("level", 3)
+        .in_("phase", [3, 2, 1])
         .order("created_at", desc=True)
         .limit(12)
         .execute()

@@ -15,6 +15,15 @@ from app.config import get_settings
 import uuid
 from datetime import datetime, timezone
 
+def _resolve_company_id(project: dict, db) -> str | None:
+    """Resolve company_id for a project via its team (projects has no company_id column)."""
+    team_id = project.get("team_id")
+    if not team_id:
+        return None
+    resp = db.table("teams").select("company_id").eq("id", team_id).single().execute()
+    return (resp.data or {}).get("company_id")
+
+
 EXECUTOR_SYSTEM = """You are an AI actor working on a software project.
 You will be given a task with its description and project context.
 Produce a high-quality, detailed deliverable for the task.
@@ -230,14 +239,15 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
     github_conn = await get_connection_for_project(project["id"])
 
     # Prefer company-level AI keys; fall back to server-level keys
+    company_id = _resolve_company_id(project, db)
     company_resp = (
         db.table("companies")
         .select("openai_api_key, anthropic_api_key")
-        .eq("id", project["company_id"])
+        .eq("id", company_id)
         .single()
         .execute()
-    )
-    company = company_resp.data or {}
+    ) if company_id else None
+    company = (company_resp.data if company_resp else None) or {}
 
     payload = {
         "task_id": task["id"],
@@ -397,14 +407,15 @@ async def stream_task_execution(task_id: str, actor_id: str):
 
     # ── In-process streaming: resolve company-level AI keys ────────────────────
     settings = get_settings()
+    company_id = _resolve_company_id(project, db)
     company_resp = (
         db.table("companies")
         .select("openai_api_key, anthropic_api_key")
-        .eq("id", project["company_id"])
+        .eq("id", company_id)
         .single()
         .execute()
-    )
-    company = company_resp.data or {}
+    ) if company_id else None
+    company = (company_resp.data if company_resp else None) or {}
     model = actor.get("model") or "gpt-4o"
 
     if model.startswith("claude"):

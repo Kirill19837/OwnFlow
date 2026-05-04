@@ -825,33 +825,35 @@ export default function ProjectBoardPage() {
                     )}
 
                     <div className="space-y-2 mt-1">
-                      <select
-                        value={companyAgents.find((agent) => agent.webhook_url === (a.webhook_url || ''))?.id || ''}
-                        onChange={(e) => {
-                          const selected = companyAgents.find((agent) => agent.id === e.target.value)
-                          updateActor.mutate({
-                            actorId: a.id,
-                            patch: {
-                              webhook_url: selected?.webhook_url || null,
-                              agent_api_key: null,
-                            },
-                          })
-                        }}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      >
-                        <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
-                        {companyAgents.map((agent) => (
-                          <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
-                            {agent.name}{agent.role ? ` - ${agent.role}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {a.webhook_url && (
-                        <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
-                      )}
-                      {companyAgents.length === 0 && (
-                        <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
-                      )}
+                      {a.type === 'ai' && (<>
+                        <select
+                          value={companyAgents.find((agent) => agent.webhook_url === (a.webhook_url || ''))?.id || ''}
+                          onChange={(e) => {
+                            const selected = companyAgents.find((agent) => agent.id === e.target.value)
+                            updateActor.mutate({
+                              actorId: a.id,
+                              patch: {
+                                webhook_url: selected?.webhook_url || null,
+                                agent_api_key: null,
+                              },
+                            })
+                          }}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
+                          {companyAgents.map((agent) => (
+                            <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
+                              {agent.name}{agent.role ? ` - ${agent.role}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {a.webhook_url && (
+                          <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
+                        )}
+                        {companyAgents.length === 0 && (
+                          <p className="text-xs text-gray-500">No company agents found. Register agents in Company Settings -&gt; Agents.</p>
+                        )}
+                      </>)}
                     </div>
                   </div>
                 ))}
