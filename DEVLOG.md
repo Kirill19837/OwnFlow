@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-05-04 | `30c5a93` — feat: collapsible executor monitor bar with per-task activity logs
+
+- `frontend/src/pages/DashboardPage.tsx` — Executor Monitor is now a compact single-line collapsible bar (collapsed by default); shows running count + failure count as inline badges; expands to running task list with per-task activity drill-down
+- `frontend/src/pages/DashboardPage.tsx` — per-task activity panel shows timestamped log stream from `ai_logs` and latest AI response preview with model name; auto-refreshes every 5s while open
+- `backend/app/api/projects.py` — added `GET /projects/{project_id}/tasks/{task_id}/activity` returning logs since dispatch and latest AI message for a running task
+
+---
+
 ## 2026-05-04 | `f748377` — feat: link project actors to company agents instead of manual webhook setup
 
 - `frontend/src/pages/ProjectBoardPage.tsx` — Team actors tab now shows a Company agent dropdown per actor and for new actors; removed raw webhook URL and API key inputs from Project settings entirely
