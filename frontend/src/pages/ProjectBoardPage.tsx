@@ -55,21 +55,6 @@ const COLUMNS = [
   { id: 'rework', label: 'Rework' },
 ] as const
 
-type AgentRuntimeStatus = {
-  builtin_agent_image: string
-  image_source: 'server_env' | string
-  openai_key: {
-    source: 'company' | 'server' | 'none' | string
-    company_available: boolean
-    server_available: boolean
-  }
-  anthropic_key: {
-    source: 'company' | 'server' | 'none' | string
-    company_available: boolean
-    server_available: boolean
-  }
-}
-
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -95,13 +80,6 @@ export default function ProjectBoardPage() {
   const [settingsName, setSettingsName] = useState('')
   const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
-  // New actor form state
-  const [newActorName, setNewActorName] = useState('')
-  const [newActorRole, setNewActorRole] = useState('')
-  const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
-  const [newActorModel, setNewActorModel] = useState('gpt-4o')
-  const [newActorCompanyAgentId, setNewActorCompanyAgentId] = useState('')
-  const [newActorEnvPairs, setNewActorEnvPairs] = useState<EnvPair[]>([])
   // Per-actor extra_env edit state: actorId → EnvPair[]
   const [actorEnvEdits, setActorEnvEdits] = useState<Record<string, EnvPair[]>>({})
   const [actorEnvOpen, setActorEnvOpen] = useState<Record<string, boolean>>({})
@@ -166,12 +144,6 @@ export default function ProjectBoardPage() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', projectId] })
-      setNewActorName('')
-      setNewActorRole('')
-      setNewActorType('ai')
-      setNewActorModel('gpt-4o')
-      setNewActorCompanyAgentId('')
-      setNewActorEnvPairs([])
     },
   })
 
@@ -260,12 +232,6 @@ export default function ProjectBoardPage() {
   })
   const roleCategories = useMemo(() => [...new Set(skills.map((s) => s.category))], [skills])
 
-  const { data: agentRuntimeStatus } = useQuery({
-    queryKey: ['agent-runtime', projectId],
-    queryFn: () => api.get<AgentRuntimeStatus>(`/projects/${projectId}/agent-runtime`).then((r) => r.data),
-    enabled: !!projectId && showSettings && settingsTab === 'agents',
-  })
-
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   void apiBase // reserved for future use
 
@@ -353,7 +319,7 @@ export default function ProjectBoardPage() {
       name: type === 'ai' ? skill.name : 'Unassigned teammate',
       role: skill.name,
       type,
-      model: type === 'ai' ? (newActorModel || 'gpt-4o') : undefined,
+      model: type === 'ai' ? 'gpt-4o' : undefined,
     })
   }
 
@@ -664,25 +630,6 @@ export default function ProjectBoardPage() {
 
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500">Runtime defaults used by built-in mode:</p>
-                  <div className="grid gap-2 text-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-400">Docker image</span>
-                      <span className="font-mono text-gray-200 break-all text-right">{agentRuntimeStatus?.builtin_agent_image || 'ownflow-agent:latest'}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-400">Image source</span>
-                      <span className="text-gray-200">{agentRuntimeStatus?.image_source === 'server_env' ? 'Server env (BUILTIN_AGENT_IMAGE)' : 'Server config'}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-400">OpenAI key source</span>
-                      <span className="text-gray-200 capitalize">{agentRuntimeStatus?.openai_key?.source || 'none'}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-400">Anthropic key source</span>
-                      <span className="text-gray-200 capitalize">{agentRuntimeStatus?.anthropic_key?.source || 'none'}</span>
-                    </div>
-                  </div>
                 </div>
                 <p className="text-xs text-gray-500">Manage actor roles, teammates, and webhooks in the Team actors tab.</p>
               </div>
@@ -974,89 +921,6 @@ export default function ProjectBoardPage() {
                     </div>
                   </div>
                 ))}
-              </div>
-
-              <div className="mt-3 flex gap-2 items-end flex-wrap">
-                <input
-                  placeholder="Name"
-                  value={newActorName}
-                  onChange={(e) => setNewActorName(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-36"
-                />
-                <input
-                  placeholder="Role"
-                  value={newActorRole}
-                  onChange={(e) => setNewActorRole(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-40"
-                />
-                <select
-                  value={newActorType}
-                  onChange={(e) => setNewActorType(e.target.value as 'ai' | 'human')}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="ai">AI</option>
-                  <option value="human">Human</option>
-                </select>
-                {newActorType === 'ai' && (
-                  <select
-                    value={newActorModel}
-                    onChange={(e) => setNewActorModel(e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
-                    {AI_MODELS.map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  onClick={() => addActor.mutate({
-                    name: newActorName.trim() || (newActorType === 'ai' ? 'AI Agent' : 'Unassigned teammate'),
-                    role: newActorRole.trim() || undefined,
-                    type: newActorType,
-                    model: newActorType === 'ai' ? newActorModel : undefined,
-                    company_agent_id: newActorCompanyAgentId || undefined,
-                    extra_env: envPairsToObj(newActorEnvPairs),
-                  })}
-                  disabled={addActor.isPending}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-                >
-                  <Plus size={13} /> Add
-                </button>
-              </div>
-              <div className="space-y-2 mt-2">
-                <select
-                  value={newActorCompanyAgentId}
-                  onChange={(e) => setNewActorCompanyAgentId(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="" className="bg-gray-900 text-gray-400">Built-in (no external agent)</option>
-                  {companyAgents.map((agent) => (
-                    <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
-                      {agent.name}{agent.role ? ` - ${agent.role}` : ''}
-                    </option>
-                  ))}
-                </select>
-                {newActorCompanyAgentId && (() => {
-                    const agent = companyAgents.find((a) => a.id === newActorCompanyAgentId)
-                    return (
-                      <p className="text-xs text-gray-500 font-mono truncate">
-                        {agent?.webhook_url || agent?.docker_image || ''}
-                      </p>
-                    )
-                  })()}
-                {companyAgents.length === 0 && (
-                  <p className="text-xs text-gray-500">Register reusable webhook agents in Company Settings -&gt; Agents.</p>
-                )}
-                {/* Per-actor extra env vars (e.g. FIGMA_TOKEN) */}
-                {!newActorCompanyAgentId && newActorType === 'ai' && (
-                  <div className="pt-1">
-                    <ExtraEnvEditor
-                      pairs={newActorEnvPairs}
-                      onChange={setNewActorEnvPairs}
-                      hint="e.g. FIGMA_TOKEN — overrides company agent keys"
-                    />
-                  </div>
-                )}
               </div>
               </div>
             )}
