@@ -64,10 +64,16 @@ OwnFlow turns a product prompt into a planned board of sprints and tasks, assign
 - Frontend app: [frontend/src](frontend/src)
 - Backend API: [backend/app/api](backend/app/api)
 - Services/providers: [backend/app/services](backend/app/services), [backend/app/providers](backend/app/providers)
+- Agent workers: [agents/builtin](agents/builtin), [agents/senior_dev](agents/senior_dev)
 - Canonical schema: [supabase/migrations/001_schema.sql](supabase/migrations/001_schema.sql)
 - Full DB reference: [docs/database.md](docs/database.md)
 - Auth & onboarding flow: [docs/auth-flow.md](docs/auth-flow.md)
+- Agent dispatch & callback protocol: [docs/agent-flow.md](docs/agent-flow.md)
 - Detailed release log: [DEVLOG.md](DEVLOG.md)
+
+### Production note
+
+In production compose, backend Docker API calls go through `tecnativa/docker-socket-proxy` (`DOCKER_HOST=tcp://docker-socket-proxy:2375`) instead of mounting `/var/run/docker.sock` directly into backend. This keeps built-in agent dispatch working while reducing exposed Docker API surface.
 
 ## Key API Areas
 
@@ -79,6 +85,8 @@ OwnFlow turns a product prompt into a planned board of sprints and tasks, assign
 | `/projects/*` | Projects, AI planning stream |
 | `/tasks/*` | Task CRUD and AI execution |
 | `/actors/*` | Human/AI actor management |
+| `/agents/callback` | Webhook agent callback endpoint (token-authenticated) |
+| `/companies/{id}/agents` | Company-level agent registry CRUD |
 | `/skills/*` | Skills catalogue and user skill profiles |
 | `/github/*` | GitHub PAT integration |
 
@@ -312,3 +320,33 @@ make check-frontend
 - GitHub PAT integration and task/board AI workflow enhancements
 
 For full chronological details and commit-by-commit notes, see [DEVLOG.md](DEVLOG.md).
+
+## Known TODOs
+
+### Database — RLS policies need `TO service_role` scoping
+
+All `service_role_all_*` policies currently use `FOR ALL USING (true)` with no role
+restriction, meaning any PostgREST role (`anon`, `authenticated`) can reach those tables.
+
+The fix (already applied to `company_agents` in migration 014) is to add `TO service_role`
+and `WITH CHECK (true)` to every backend-only policy:
+
+```sql
+-- before
+create policy "service_role_all_tasks" on tasks for all using (true);
+-- after
+create policy "service_role_all_tasks" on tasks for all to service_role using (true) with check (true);
+```
+
+**Affected tables** (all policies named `service_role_all_*`):  
+`roles`, `companies`, `company_members`, `teams`, `team_members`, `notifications`,
+`notification_types`, `team_api_logs`, `team_invites`, `user_signups`, `projects`,
+`project_members`, `actors`, `sprints`, `tasks`, `task_interactions`, `assignments`,
+`deliverables`, `ai_logs`, `ai_messages`, `github_connections`, `team_github_tokens`,
+`github_oauth_states`, `skills`, `user_skills`
+
+**Steps to fix:**
+1. Write migration `015_rls_service_role.sql` — drop each old policy and recreate with
+   `TO service_role … WITH CHECK (true)`.
+2. Update matching blocks in `supabase/database_full.sql`.
+3. Deploy migration to the production Supabase project.

@@ -1,11 +1,39 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import api from '../lib/api'
+import { useAuthStore } from '../store/authStore'
+import { useCompanyStore } from '../store/companyStore'
 import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
-import type { Project, Assignment } from '../types'
+import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../types'
+import { ExtraEnvEditor } from '../components/ExtraEnvEditor'
+import { envPairsToObj, envObjToPairs } from '../lib/envUtils'
+import type { EnvPair } from '../lib/envUtils'
+
+// Mirrors backend ROLE_IMAGE_MAP in actor_executor.py
+const ROLE_IMAGE_MAP: Record<string, string> = {
+  'default': 'ownflow-agent:latest',
+  'ui/ux designer': 'ownflow-figma-agent:latest',
+  'business analyst': 'ownflow-docs-agent:latest',
+}
+
+function resolveActorImage(actor: { webhook_url?: string; docker_image?: string | null; role?: string }): string | null {
+  if (actor.webhook_url) return null  // webhook — no Docker image
+  if (actor.docker_image) return actor.docker_image
+  const role = (actor.role || '').trim().toLowerCase()
+  return ROLE_IMAGE_MAP[role] ?? ROLE_IMAGE_MAP['default']
+}
+
+/** Returns how the image was resolved: 'explicit' | 'role' | 'default' */
+function resolveActorImageSource(actor: { webhook_url?: string; docker_image?: string | null; role?: string }): 'webhook' | 'explicit' | 'role' | 'default' {
+  if (actor.webhook_url) return 'webhook'
+  if (actor.docker_image) return 'explicit'
+  const role = (actor.role || '').trim().toLowerCase()
+  if (role && ROLE_IMAGE_MAP[role]) return 'role'
+  return 'default'
+}
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
@@ -30,7 +58,10 @@ const COLUMNS = [
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const { session } = useAuthStore()
+  const { company } = useCompanyStore()
   const { currentProject, setCurrentProject } = useProjectStore()
+  const userId = session?.user?.id ?? ''
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(
@@ -49,12 +80,12 @@ export default function ProjectBoardPage() {
   const [settingsName, setSettingsName] = useState('')
   const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
-  // New actor form state
-  const [newActorName, setNewActorName] = useState('')
-  const [newActorRole, setNewActorRole] = useState('')
-  const [newActorType, setNewActorType] = useState<'ai' | 'human'>('ai')
-  const [newActorModel, setNewActorModel] = useState('gpt-4o')
+  // Per-actor extra_env edit state: actorId → EnvPair[]
+  const [actorEnvEdits, setActorEnvEdits] = useState<Record<string, EnvPair[]>>({})
+  const [actorEnvOpen, setActorEnvOpen] = useState<Record<string, boolean>>({})
   const [repoInput, setRepoInput] = useState('')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'team-actors' | 'github'>('general')
+  const [showRolePicker, setShowRolePicker] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['project', projectId],
@@ -95,26 +126,35 @@ export default function ProjectBoardPage() {
   })
 
   const addActor = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: {
+      name: string
+      role?: string
+      type: 'ai' | 'human'
+      model?: string
+      user_id?: string | null
+      webhook_url?: string
+      docker_image?: string
+      company_agent_id?: string
+      extra_env?: Record<string, string>
+    }) =>
       api.post(`/projects/${projectId}/actors`, {
         project_id: projectId,
-        name: newActorName,
-        role: newActorRole || undefined,
-        type: newActorType,
-        model: newActorType === 'ai' ? newActorModel : undefined,
+        ...payload,
         capabilities: [],
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', projectId] })
-      setNewActorName('')
-      setNewActorRole('')
-      setNewActorType('ai')
-      setNewActorModel('gpt-4o')
     },
   })
 
   const removeActor = useMutation({
     mutationFn: (actorId: string) => api.delete(`/actors/${actorId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const updateActor = useMutation({
+    mutationFn: ({ actorId, patch }: { actorId: string; patch: Record<string, unknown> }) =>
+      api.patch(`/actors/${actorId}`, patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
@@ -166,6 +206,31 @@ export default function ProjectBoardPage() {
     },
     enabled: !!projectId && githubTokenAvailable,
   })
+
+  const { data: companyAgents = [] } = useQuery<CompanyAgent[]>({
+    queryKey: ['company-agents', company?.id],
+    queryFn: () =>
+      api
+        .get<CompanyAgent[]>(`/companies/${company!.id}/agents`, { params: { user_id: userId } })
+        .then((r) => r.data),
+    enabled: !!company?.id && !!userId && showSettings && settingsTab === 'team-actors',
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: teamData, isLoading: teamMembersLoading } = useQuery({
+    queryKey: ['team', data?.team_id],
+    queryFn: () => api.get<{ members?: TeamMember[] }>(`/teams/${data!.team_id}`).then((r) => r.data),
+    enabled: !!data?.team_id && showSettings && settingsTab === 'team-actors',
+  })
+  const teamMembers: TeamMember[] = useMemo(() => teamData?.members ?? [], [teamData?.members])
+
+  const { data: skills = [] } = useQuery<Skill[]>({
+    queryKey: ['skills'],
+    queryFn: () => api.get<Skill[]>('/skills').then((r) => r.data),
+    enabled: showSettings && settingsTab === 'team-actors',
+    staleTime: 5 * 60 * 1000,
+  })
+  const roleCategories = useMemo(() => [...new Set(skills.map((s) => s.category))], [skills])
 
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   void apiBase // reserved for future use
@@ -247,6 +312,27 @@ export default function ProjectBoardPage() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const project = currentProject ?? data
+
+  const addFromTemplate = (skill: Skill, typeOverride?: 'human' | 'ai') => {
+    const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
+    addActor.mutate({
+      name: type === 'ai' ? skill.name : 'Unassigned teammate',
+      role: skill.name,
+      type,
+      model: type === 'ai' ? 'gpt-4o' : undefined,
+    })
+  }
+
+  const addHumanTeammate = () => {
+    const used = new Set((project?.actors ?? []).map((a) => a.user_id).filter(Boolean))
+    const candidate = teamMembers.find((m) => !used.has(m.user_id))
+    addActor.mutate({
+      name: candidate?.full_name || candidate?.email || 'Unassigned teammate',
+      role: 'Contributor',
+      type: 'human',
+      user_id: candidate?.user_id ?? null,
+    })
+  }
 
   const handleDragEnd = async (result: DropResult) => {
     if (!result.destination) return
@@ -418,134 +504,415 @@ export default function ProjectBoardPage() {
               </button>
             </div>
 
-            {/* Name */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Project name</label>
-              <input
-                value={settingsName}
-                onChange={(e) => setSettingsName(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
+            <div className="flex items-center gap-1 rounded-lg bg-gray-950 border border-gray-800 p-1 w-fit">
+              {[
+                { id: 'general', label: 'General' },
+                { id: 'agents', label: 'Agents' },
+                { id: 'team-actors', label: 'Team actors' },
+                { id: 'github', label: 'GitHub' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSettingsTab(tab.id as 'general' | 'agents' | 'team-actors' | 'github')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    settingsTab === tab.id
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            {/* Description */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Project description / prompt</label>
-              <textarea
-                rows={4}
-                value={settingsPrompt}
-                onChange={(e) => setSettingsPrompt(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-              />
-            </div>
+            {settingsTab === 'general' && (
+              <>
+                {/* Name */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">Project name</label>
+                  <input
+                    value={settingsName}
+                    onChange={(e) => setSettingsName(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
 
-            {/* Sprint length */}
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">Sprint length (days) — applies to future sprints</label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {[1, 2, 3, 5, 7, 10, 14].map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setSettingsSprintDays(d)}
-                    className={`w-9 h-8 rounded-lg text-sm font-medium transition-colors ${
-                      settingsSprintDays === d
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-                <span className="text-xs text-gray-500 ml-1">{settingsSprintDays * 8}h capacity</span>
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">Project description / prompt</label>
+                  <textarea
+                    rows={4}
+                    value={settingsPrompt}
+                    onChange={(e) => setSettingsPrompt(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                  />
+                </div>
+
+                {/* Sprint length */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-2">Sprint length (days) — applies to future sprints</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {[1, 2, 3, 5, 7, 10, 14].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setSettingsSprintDays(d)}
+                        className={`w-9 h-8 rounded-lg text-sm font-medium transition-colors ${
+                          settingsSprintDays === d
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                        }`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                    <span className="text-xs text-gray-500 ml-1">{settingsSprintDays * 8}h capacity</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => saveSettings.mutate()}
+                  disabled={saveSettings.isPending}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                >
+                  {saveSettings.isPending ? 'Saving…' : 'Save changes'}
+                </button>
+              </>
+            )}
+
+            {settingsTab === 'agents' && (
+              <div className="border-t border-gray-700 pt-4">
+                <div className="mb-3 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-1">
+                  <p className="text-xs text-gray-300">
+                    <span className="text-purple-300 font-medium">Built-in agents</span> run inside OwnFlow and use each actor's selected model.
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    If an actor is linked to a registered Company agent, tasks for that actor are dispatched to that external endpoint.
+                  </p>
+                </div>
+                <div className="mb-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 space-y-2">
+                  <p className="text-xs text-gray-300 font-medium">How execution works</p>
+                  <p className="text-xs text-gray-500">Each actor runs in one of two modes:</p>
+                  <div className="grid gap-1 text-xs text-gray-300">
+                    <p><span className="text-purple-300 font-medium">Built-in</span> — no webhook URL; OwnFlow runs the task in its internal agent container.</p>
+                    <p><span className="text-green-300 font-medium">Webhook</span> — webhook URL set; OwnFlow sends the task to your external agent endpoint.</p>
+                  </div>
+                  <div className="mt-2 rounded-lg border border-gray-800 bg-gray-900/70 p-2">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1.5">Actor execution map</p>
+                    <div className="space-y-1.5">
+                      {(project.actors ?? []).filter((a) => a.type === 'ai').map((a) => {
+                        const src = resolveActorImageSource(a)
+                        const img = resolveActorImage(a)
+                        const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
+                        const chipCls = src === 'explicit'
+                          ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                          : src === 'role'
+                          ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+                          : 'bg-gray-800 text-gray-400 border-gray-700'
+                        return (
+                          <div key={`mode-${a.id}`} className="flex items-start justify-between gap-2 text-xs">
+                            <div className="min-w-0">
+                              <span className="text-gray-200 font-medium truncate block">{a.name}</span>
+                              {a.role && <span className="text-gray-500 truncate block">{a.role}</span>}
+                            </div>
+                            {a.webhook_url ? (
+                              <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-green-300 border-green-800/60 bg-green-900/20 font-mono">
+                                webhook
+                              </span>
+                            ) : (
+                              <span className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono ${chipCls}`}>
+                                <span className="opacity-60">[{srcLabel}]</span>
+                                {img}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">Manage actor roles, teammates, and webhooks in the Team actors tab.</p>
               </div>
-            </div>
+            )}
 
-            <button
-              onClick={() => saveSettings.mutate()}
-              disabled={saveSettings.isPending}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-            >
-              {saveSettings.isPending ? 'Saving…' : 'Save changes'}
-            </button>
-
-            {/* Divider */}
-            <div className="border-t border-gray-700 pt-4">
+            {settingsTab === 'team-actors' && (
+              <div className="border-t border-gray-700 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <label className="block text-xs font-medium text-gray-400">Team actors</label>
-                <button
-                  onClick={() => autoFillActors.mutate()}
-                  disabled={autoFillActors.isPending}
-                  title="Replace AI actors with the standard default set (human actors preserved)"
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 disabled:opacity-40 transition-colors"
-                >
-                  <Zap size={11} />
-                  {autoFillActors.isPending ? 'Filling…' : 'Auto-fill AI actors'}
-                </button>
-              </div>
-
-              {/* Existing actors */}
-              <div className="space-y-1.5 mb-3">
-                {(project.actors ?? []).map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 text-sm">
-                    {a.type === 'ai'
-                      ? <Bot size={13} className="text-purple-400 shrink-0" />
-                      : <User size={13} className="text-blue-400 shrink-0" />}
-                    <span className="text-white flex-1">{a.name}</span>
-                    {(a.role || a.model) && <span className="text-gray-500 text-xs">{a.role ?? a.model}</span>}
-                    <button
-                      onClick={() => removeActor.mutate(a.id)}
-                      disabled={removeActor.isPending}
-                      className="text-gray-600 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Add actor */}
-              <div className="flex gap-2 items-end flex-wrap">
-                <input
-                  placeholder="Name"
-                  value={newActorName}
-                  onChange={(e) => setNewActorName(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-28"
-                />
-                <input
-                  placeholder="Role (e.g. Lead QA)"
-                  value={newActorRole}
-                  onChange={(e) => setNewActorRole(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-36"
-                />
-                <select
-                  value={newActorType}
-                  onChange={(e) => setNewActorType(e.target.value as 'ai' | 'human')}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="ai">AI</option>
-                  <option value="human">Human</option>
-                </select>
-                {newActorType === 'ai' && (
-                  <select
-                    value={newActorModel}
-                    onChange={(e) => setNewActorModel(e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                <div className="flex gap-2">
+                  <button
+                    onClick={addHumanTeammate}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-blue-900/40 text-blue-300 hover:bg-blue-900/70 transition-colors"
                   >
-                    {AI_MODELS.map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  onClick={() => addActor.mutate()}
-                  disabled={addActor.isPending || !newActorName.trim()}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
-                >
-                  <Plus size={13} /> Add
-                </button>
+                    <User size={11} /> Add teammate
+                  </button>
+                  <button
+                    onClick={() => autoFillActors.mutate()}
+                    disabled={autoFillActors.isPending}
+                    title="Replace AI actors with the standard default set (human actors preserved)"
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 disabled:opacity-40 transition-colors"
+                  >
+                    <Zap size={11} />
+                    {autoFillActors.isPending ? 'Filling…' : 'Auto-fill AI actors'}
+                  </button>
+                  <button
+                    onClick={() => setShowRolePicker((v) => !v)}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+                  >
+                    <Plus size={11} /> Add role
+                  </button>
+                </div>
               </div>
-            </div>
+
+              {showRolePicker && (
+                <div className="mb-3 bg-gray-900 border border-gray-700 rounded-lg p-3 space-y-3">
+                  {skills.length === 0 && <p className="text-xs text-gray-500">Loading skills…</p>}
+                  {roleCategories.map((cat) => (
+                    <div key={cat}>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1.5">{cat}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {skills.filter((s) => s.category === cat).map((skill) => {
+                          const hasAI = (project.actors ?? []).some((a) => a.role === skill.name && a.type === 'ai')
+                          const hasHuman = (project.actors ?? []).some((a) => a.role === skill.name && a.type === 'human')
+
+                          if (skill.actor_type === 'both') {
+                            return (
+                              <span key={skill.name} className="inline-flex rounded-md overflow-hidden border border-gray-700 text-xs">
+                                <button
+                                  type="button"
+                                  disabled={hasAI}
+                                  onClick={() => addFromTemplate(skill, 'ai')}
+                                  className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                                    hasAI ? 'text-gray-600 cursor-default' : 'text-purple-300 hover:bg-purple-900/40'
+                                  }`}
+                                >
+                                  <Bot size={10} />{skill.name}
+                                </button>
+                                <span className="w-px bg-gray-700" />
+                                <button
+                                  type="button"
+                                  disabled={hasHuman}
+                                  onClick={() => addFromTemplate(skill, 'human')}
+                                  className={`flex items-center gap-1 px-1.5 py-1 transition-colors ${
+                                    hasHuman ? 'text-gray-600 cursor-default' : 'text-blue-300 hover:bg-blue-900/40'
+                                  }`}
+                                >
+                                  <User size={10} />
+                                </button>
+                              </span>
+                            )
+                          }
+
+                          const already = skill.actor_type === 'ai' ? hasAI : hasHuman
+                          return (
+                            <button
+                              key={skill.name}
+                              type="button"
+                              disabled={already}
+                              onClick={() => addFromTemplate(skill)}
+                              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${
+                                already
+                                  ? 'border-gray-700 text-gray-600 cursor-default'
+                                  : skill.actor_type === 'ai'
+                                    ? 'border-purple-700/60 text-purple-300 hover:bg-purple-900/40'
+                                    : 'border-blue-700/60 text-blue-300 hover:bg-blue-900/40'
+                              }`}
+                            >
+                              {skill.actor_type === 'ai' ? <Bot size={10} /> : <User size={10} />}
+                              {skill.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2">
+                {(project.actors ?? []).map((a) => {
+                  const isExpanded = !!actorEnvOpen[a.id]
+                  const isAi = a.type === 'ai'
+                  return (
+                    <div
+                      key={a.id}
+                      className={`bg-gray-950 border rounded-xl overflow-hidden flex flex-col ${
+                        isAi ? 'border-purple-900/60' : 'border-blue-900/60'
+                      }`}
+                    >
+                      {/* Card body */}
+                      <div className="px-3 pt-3 pb-2 flex-1 space-y-1.5">
+                        {/* Icon row */}
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            title={isAi ? 'Switch to human' : 'Switch to AI'}
+                            onClick={() => isAi
+                              ? updateActor.mutate({ actorId: a.id, patch: { type: 'human', model: null } })
+                              : updateActor.mutate({ actorId: a.id, patch: { type: 'ai', model: a.model || 'gpt-4o', user_id: null } })
+                            }
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isAi ? 'bg-purple-900/40 text-purple-400 hover:bg-purple-900/70' : 'bg-blue-900/40 text-blue-400 hover:bg-blue-900/70'
+                            }`}
+                          >
+                            {isAi ? <Bot size={20} /> : <User size={20} />}
+                          </button>
+                          <button
+                            onClick={() => removeActor.mutate(a.id)}
+                            disabled={removeActor.isPending}
+                            className="text-gray-700 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+
+                        {/* Name */}
+                        <input
+                          type="text"
+                          defaultValue={a.name}
+                          onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { name: e.target.value.trim() || a.name } })}
+                          placeholder="Name…"
+                          className="w-full bg-transparent text-sm font-semibold text-white focus:outline-none placeholder-gray-600 truncate"
+                        />
+
+                        {/* Role */}
+                        <input
+                          list={`role-list-${a.id}`}
+                          defaultValue={a.role || ''}
+                          onBlur={(e) => updateActor.mutate({ actorId: a.id, patch: { role: e.target.value.trim() || null } })}
+                          placeholder="Role…"
+                          className={`w-full bg-transparent text-xs focus:outline-none ${
+                            !(a.role || '').trim() ? 'text-red-400 placeholder-red-600' : 'text-gray-500 focus:text-gray-200'
+                          }`}
+                        />
+                        <datalist id={`role-list-${a.id}`}>
+                          {skills.map((s) => <option key={s.id} value={s.name} />)}
+                        </datalist>
+                      </div>
+
+                      {/* Card footer */}
+                      <div className={`flex items-center justify-between px-3 py-1.5 border-t ${
+                        isAi ? 'border-purple-900/40' : 'border-blue-900/40'
+                      }`}>
+                        {isAi ? (
+                          <select
+                            value={a.model || 'gpt-4o'}
+                            onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { model: e.target.value } })}
+                            disabled={updateActor.isPending}
+                            className="bg-transparent text-gray-500 text-[11px] focus:outline-none focus:text-gray-300 cursor-pointer max-w-[90px]"
+                          >
+                            {AI_MODELS.map((m) => (
+                              <option key={m.value} value={m.value} className="bg-gray-900">{m.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[11px] text-gray-600">human</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isExpanded) setActorEnvEdits((prev) => ({ ...prev, [a.id]: envObjToPairs(a.extra_env) }))
+                            setActorEnvOpen((prev) => ({ ...prev, [a.id]: !isExpanded }))
+                          }}
+                          className={`flex items-center gap-1 transition-colors ${isExpanded ? 'text-purple-400' : 'text-gray-600 hover:text-gray-400'}`}
+                        >
+                          <span className="text-[11px]">Options</span>
+                          <ChevronDown size={12} className={`transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                        </button>
+                      </div>
+
+                      {/* Expanded config */}
+                      {isExpanded && (
+                        <div className={`border-t px-3 py-2.5 space-y-2 ${
+                          isAi ? 'border-purple-900/40' : 'border-blue-900/40'
+                        }`}>
+                          {!isAi && (
+                            <select
+                              value={a.user_id ?? ''}
+                              disabled={teamMembersLoading}
+                              onChange={(e) => {
+                                const uid = e.target.value
+                                if (!uid) {
+                                  updateActor.mutate({ actorId: a.id, patch: { user_id: null, name: 'Unassigned teammate' } })
+                                } else {
+                                  const member = teamMembers.find((m) => m.user_id === uid)
+                                  updateActor.mutate({ actorId: a.id, patch: { user_id: uid, name: member?.full_name || member?.email || uid } })
+                                }
+                              }}
+                              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                            >
+                              <option value="" className="bg-gray-900 text-gray-400">— unassigned —</option>
+                              {teamMembers.map((m) => (
+                                <option key={m.user_id} value={m.user_id} className="bg-gray-900">
+                                  {m.full_name || m.email || m.user_id}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+
+                          {isAi && (
+                            <>
+                              <select
+                                value={companyAgents.find((agent) => (agent.webhook_url && agent.webhook_url === a.webhook_url) || (agent.docker_image && agent.docker_image === a.docker_image))?.id || ''}
+                                onChange={(e) => updateActor.mutate({ actorId: a.id, patch: { company_agent_id: e.target.value || null } })}
+                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                              >
+                                <option value="" className="bg-gray-900 text-gray-400">Built-in</option>
+                                {companyAgents.map((agent) => (
+                                  <option key={agent.id} value={agent.id} className="bg-gray-900 text-gray-200">
+                                    {agent.name}{agent.role ? ` - ${agent.role}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              {a.webhook_url && (
+                                <p className="text-xs text-gray-500 font-mono truncate">{a.webhook_url}</p>
+                              )}
+                              {!a.webhook_url && (() => {
+                                const img = resolveActorImage(a)
+                                const src = resolveActorImageSource(a)
+                                const srcLabel = src === 'explicit' ? 'actor' : src === 'role' ? 'role map' : 'default'
+                                const chipCls = src === 'explicit'
+                                  ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                                  : src === 'role'
+                                  ? 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+                                  : 'bg-gray-800 text-gray-400 border-gray-700'
+                                return (
+                                  <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded border ${chipCls}`}>
+                                    <span className="opacity-60">[{srcLabel}]</span>
+                                    {img}
+                                  </span>
+                                )
+                              })()}
+                              <ExtraEnvEditor
+                                pairs={actorEnvEdits[a.id] ?? []}
+                                onChange={(p) => setActorEnvEdits((prev) => ({ ...prev, [a.id]: p }))}
+                                hint="e.g. FIGMA_TOKEN"
+                              />
+                              <button
+                                onClick={() => {
+                                  const pairs = actorEnvEdits[a.id] ?? []
+                                  const hasMasked = pairs.some((p) => p.isMasked)
+                                  const patch = hasMasked ? {} : { extra_env: envPairsToObj(pairs) ?? null }
+                                  updateActor.mutate({ actorId: a.id, patch })
+                                  setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
+                                }}
+                                disabled={updateActor.isPending}
+                                className="flex items-center gap-1 px-2 py-1 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs rounded-lg"
+                              >
+                                Save
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              </div>
+            )}
             {/* GitHub integration */}
+            {settingsTab === 'github' && (
             <div className="border-t border-gray-700 pt-4 space-y-3">
               <div className="flex items-center gap-2">
                 <GitBranch size={13} className="text-gray-400" />
@@ -575,26 +942,21 @@ export default function ProjectBoardPage() {
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Repository for this project</label>
                     <div className="flex gap-2 items-center flex-wrap">
-                      {githubRepos && githubRepos.length > 0 ? (
-                        <select
-                          value={repoInput || githubStatus?.repo || ''}
-                          onChange={(e) => setRepoInput(e.target.value)}
-                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="">— select a repo —</option>
+                      <input
+                        placeholder={githubRepos && githubRepos.length > 0 ? 'Search repository…' : 'owner/repo-name'}
+                        value={repoInput || githubStatus?.repo || ''}
+                        onChange={(e) => setRepoInput(e.target.value)}
+                        list={githubRepos && githubRepos.length > 0 ? 'github-repo-options' : undefined}
+                        className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      {githubRepos && githubRepos.length > 0 && (
+                        <datalist id="github-repo-options">
                           {githubRepos.map((r) => (
                             <option key={r.full_name} value={r.full_name}>
-                              {r.private ? '🔒 ' : ''}{r.full_name}
+                              {r.private ? 'private' : 'public'}
                             </option>
                           ))}
-                        </select>
-                      ) : (
-                        <input
-                          placeholder="owner/repo-name"
-                          value={repoInput || githubStatus?.repo || ''}
-                          onChange={(e) => setRepoInput(e.target.value)}
-                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        />
+                        </datalist>
                       )}
                       <button
                         onClick={() => { const r = (repoInput || githubStatus?.repo || '').trim(); if (r) setRepo.mutate(r) }}
@@ -636,6 +998,7 @@ export default function ProjectBoardPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 

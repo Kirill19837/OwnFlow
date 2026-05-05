@@ -2,6 +2,162 @@
 
 ---
 
+## 2026-05-04 | `69efd0e` — Decouple actors/tasks APIs, rewrite docs, fix builtin agent GPT file output
+
+- `actors.py`: added `project_router` — moved `POST /projects/{id}/actors` and `POST /projects/{id}/actors/auto-fill` out of `projects.py`
+- `tasks.py`: added `project_router` — moved `POST/PATCH/DELETE /projects/{id}/tasks/batch`, `POST /projects/{id}/tasks`, `GET /projects/{id}/tasks/{id}/activity` out of `projects.py`
+- `main.py`: registered both `project_router`s under `/projects` prefix
+- `docs/database.md`: full rewrite — added `company_agents`, `team_github_tokens`, `team_api_logs`, `notifications`, `skills`, `user_skills`, `github_oauth_states`; updated `companies`, `teams`, `actors`, `tasks` with all new columns; complete migrations table
+- `docs/agent-flow.md`: rewrite — Docker image resolution table, AI key resolution, SSRF protection section, company agent templates
+- `docs/auth-flow.md`: rewrite — added skills modal section, cleaned up all flows
+- `agents/builtin/main.py`: GPT now uses single `response_format=json_object` call returning `{"narrative": "...", "files": [...]}` — no regex; Claude keeps `###FILES###` marker path; full response + extraction debug logging added
+
+---
+
+## 2026-05-04 | `4f3d1a8` — feat: multiple builtin agent types with role-based image routing
+
+- Migration 017: `actors.docker_image`, `actors.extra_env`, `company_agents.docker_image/extra_env/agent_type`; `webhook_url` nullable
+- `ROLE_IMAGE_MAP` in `actor_executor.py`: `ui/ux designer` → figma agent, `business analyst` → docs agent, `default` → general agent; per-actor `docker_image` override always wins
+- New `agents/figma/` — design-focused agent with Figma API context enrichment (reads `FIGMA_TOKEN` from `extra_env`)
+- New `agents/docs/` — BA/technical writing agent (BRDs, specs, ADRs, runbooks)
+- Backend: `CompanyAgentCreate/Update` accept `agent_type`, `docker_image`, `extra_env`; values masked in all API responses; injected into Docker env at dispatch; actors PATCH resolves `company_agent_id` server-side
+- Frontend: `AgentsPage` reworked with Webhook/Builtin toggle + `ExtraEnvEditor`; `ProjectBoardPage` selector sends `company_agent_id`; per-actor env editor inline; `ExtraEnvEditor` extracted to shared component + `lib/envUtils.ts`
+- 15 new tests for `ROLE_IMAGE_MAP`, `_resolve_builtin_image`, and dispatch integration (93 total, all passing)
+
+## 2026-05-04 | `3924ca5` — feat: AI Logs page with paginated, filterable log viewer
+
+- `GET /projects/dashboard/ai-logs` — paginated ai_logs scoped to team/owner, level/phase filters, resolves project_name + task_title
+- `AiLogsPage.tsx` — level badge colors, phase labels, text search, dropdowns, prev/next pagination (100/page)
+- `/ai-logs` route in App.tsx; "AI Logs" nav link in AppLayout (owner-only, next to Agents)
+
+## 2026-05-04 | `ebdf952` — feat(builtin-agent): verbose debug logging throughout execution
+
+- Startup: PAYLOAD length, JSON parse guard, API key presence printed before agent begins
+- `main()`: DEBUG-level logs for payload keys, capabilities, system prompt length, prompt preview, AI elapsed time, response preview, `###FILES###` marker detection, per-file path/size, callback body summary, callback HTTP status, full error body on failure
+- `create_pr()`: `print()`-based tracing for each GitHub API step (default branch, base SHA, branch create status, blob count, tree SHA, commit SHA, PR URL)
+- Distinguishes "no repo" vs "no token" in skipped-PR log message
+- Fixes silent ignore of branch-create HTTP errors
+
+## 2026-05-04 | `17ada2c` — fix: resolve company_id via team, fix smallint type errors in ai_logs queries
+
+- `projects.py` agent-runtime: removed `company_id` from projects SELECT (column never existed); always resolve via `team_id → teams.company_id`
+- `actor_executor.py`: added `_resolve_company_id()` helper; replaced all `project["company_id"]` direct accesses with team lookup
+- `projects.py` executor-state: fixed `.eq("level", "error")` and `.in_("phase", [...strings...])` → numeric smallint values (`3` and `[3, 2, 1]`) per migration 016
+- `ProjectBoardPage.tsx`: hide company agent selector for human actors (`type !== 'ai'`)
+
+## 2026-05-04 | `30c5a93` — feat: collapsible executor monitor bar with per-task activity logs
+
+- `frontend/src/pages/DashboardPage.tsx` — Executor Monitor is now a compact single-line collapsible bar (collapsed by default); shows running count + failure count as inline badges; expands to running task list with per-task activity drill-down
+- `frontend/src/pages/DashboardPage.tsx` — per-task activity panel shows timestamped log stream from `ai_logs` and latest AI response preview with model name; auto-refreshes every 5s while open
+- `backend/app/api/projects.py` — added `GET /projects/{project_id}/tasks/{task_id}/activity` returning logs since dispatch and latest AI message for a running task
+
+---
+
+## 2026-05-04 | `f748377` — feat: link project actors to company agents instead of manual webhook setup
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — Team actors tab now shows a Company agent dropdown per actor and for new actors; removed raw webhook URL and API key inputs from Project settings entirely
+- `frontend/src/pages/ProjectBoardPage.tsx` — added `Team actors` as a dedicated settings tab; actor queries (skills, team members, company agents) now gate on `settingsTab === 'team-actors'`
+- `frontend/src/pages/ProjectBoardPage.tsx` — selecting a company agent sets only its webhook URL on the actor; API key remains stored at company level and never exposed to the project page
+- `backend/app/services/actor_executor.py` — external dispatch now auto-resolves the `agent_api_key` from `company_agents` table by matching webhook URL, so the key is applied even when not stored per-actor
+
+---
+
+## 2026-05-04 | `912237a` — feat: improve actor settings UX and runtime key-source resolution
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — made Agents settings clearer with execution-mode explanation (Built-in vs Webhook), per-actor mode badges, enhanced team actor controls, role picker shortcuts, and improved actor editing flow
+- `backend/app/api/projects.py` — updated `GET /projects/{project_id}/agent-runtime` to resolve company key availability via `teams.company_id` fallback when `projects.company_id` is missing
+- `backend/app/api/actors.py` + `frontend/src/types.ts` — aligned actor update payload/types for `type`, `user_id`, `webhook_url`, and `agent_api_key`
+
+## 2026-05-04 | `db064e0` — feat: project settings tabs, agents runtime panel, and executor-state schema fix
+
+- `frontend/src/pages/ProjectBoardPage.tsx` — split Project Settings into `General`, `Agents`, and `GitHub` tabs; moved actor setup into `Agents`; added per-AI-actor model selector; repo picker now supports search via input+datalist
+- `frontend/src/pages/ProjectBoardPage.tsx` — added built-in agent runtime read-only panel (image source + OpenAI/Anthropic key source) fed by new project runtime endpoint
+- `backend/app/api/projects.py` — added `GET /projects/{project_id}/agent-runtime` (non-secret runtime metadata)
+- `backend/app/api/projects.py` — fixed `dashboard_executor_state` query to use existing `tasks.agent_dispatched_at` / `tasks.created_at` instead of missing `tasks.updated_at`
+
+---
+
+## 2026-05-04 | `76241c7` — fix: use valid docker-socket-proxy image tag in prod compose
+
+- `docker-compose.prod.yml` — changed `tecnativa/docker-socket-proxy:0.4.2` to `tecnativa/docker-socket-proxy:v0.4.2` to match published image tag and fix deploy pull error (`manifest unknown`)
+
+---
+
+## 2026-05-04 | `66ebb8e` — feat: executor dashboard monitor, proxy docs, and UTC callback timestamp fix
+
+- `frontend/src/pages/DashboardPage.tsx` — added Executor Monitor panel with auto-refresh, running task list, and recent executor failures feed
+- `backend/app/api/projects.py` — added `GET /projects/dashboard/executor-state` aggregate endpoint returning running executor jobs and recent executor error logs (`docker_dispatch`, `external_dispatch`, `agent_execution`)
+- `docker-compose.prod.yml` — documented why `docker-socket-proxy` is used and why backend routes Docker SDK via `DOCKER_HOST=tcp://docker-socket-proxy:2375`
+- `docs/agent-flow.md` + `README.md` — documented production docker-socket-proxy security rationale
+- `backend/app/api/agents.py` — replaced deprecated `datetime.utcnow()` with timezone-aware `datetime.now(UTC)` for deliverable timestamps
+
+---
+
+## 2026-05-03 | `229ac42` — feat: webhook agents — SSRF guard, Docker SDK, callback protocol, key masking, sprint dispatch, RLS, docs
+
+Branch: `feature/agents` (branched off `feature/webhook-agents`)
+
+- `actor_executor.py` — SSRF guard on `webhook_url` (DNS + IP range check); Docker SDK (`docker==7.1.0`) replaces CLI subprocess; `stream_task_execution` routes webhook actors through `_dispatch_external_agent`; company-level AI keys resolved at dispatch time
+- `providers/` — `OpenAIProvider`, `AnthropicProvider`, `get_provider()` accept optional `api_key` param
+- `api/companies.py` — AI keys stripped from responses; `openai_key_set`/`anthropic_key_set` boolean flags returned instead
+- `api/tasks.py` — `_strip_task()` removes `agent_callback_token` and `agent_dispatched_at` from read responses
+- `api/projects.py` — sprint runner now dispatches webhook actors (any type with `webhook_url`), not only `type: ai`
+- `supabase/migrations/014_external_agents.sql` + `database_full.sql` — `company_agents` RLS restricted to `service_role`; composite index on `(company_id, created_at)`
+- `frontend/src/types.ts` + `CompanySettingsPage.tsx` — boolean key flags, stale store fix via query invalidation, Rotate/Set key UI
+- `README.md` — Agents section added (built-in Docker, external webhook, company registry); `docs/agent-flow.md` linked
+- `backend/tests/` — SSRF tests, Docker SDK mock tests, callback tests (74 passed)
+
+---
+
+## 2026-05-03 | `1f2ce25` — fix: mask agent_api_key in update_company_agent response
+
+- `backend/app/api/companies.py` — `update_company_agent()` now masks `agent_api_key` as `"***"` in the response, consistent with create and list endpoints
+
+---
+
+## 2026-05-03 | `435ceba` — fix: security hardening — webhook_url validation, XSS guard, atomic callback token, PR-only-with-files, remove redundant type casts
+
+- `backend/app/api/companies.py` — `field_validator` rejects `webhook_url` values that don't start with `https://` or `http://` on both create and update
+- `frontend/src/pages/AgentsPage.tsx` — `<ExternalLink>` anchor only rendered for `http(s)://` URLs (prevents `javascript:` XSS via user-controlled webhook_url)
+- `backend/app/api/agents.py` — callback token atomically consumed with `UPDATE … WHERE agent_callback_token=?`; duplicate concurrent callbacks now get 409 before any deliverable is inserted; removed spurious `else` PR attempt (PR now only triggered when `body.files` is present)
+- `frontend/src/types.ts` — added `phone?: string | null` to `Company` interface
+- `frontend/src/pages/CompanySettingsPage.tsx` — replaced all inline `as { … }` type casts with direct `company.phone / .openai_api_key / .anthropic_api_key` access
+- `agents/senior_dev/README.md` — corrected registration instructions (Team Settings → Agents, no Type field, webhook_url drives routing)
+
+---
+
+## 2026-05-03 | `0136cbe` — chore: add pytest.ini, copilot-instructions.md, AGENTS.md; silence asyncio warning
+
+- `backend/pytest.ini` — set `asyncio_mode = strict` and `asyncio_default_fixture_loop_scope = function`; silences PytestDeprecationWarning
+- `.github/copilot-instructions.md` — Copilot commit/push discipline, checks, GitHub Actions versions, coding rules
+- `AGENTS.md` — same rules for all AI coding agents working in this repo
+
+---
+
+## 2026-05-03 | `db5a994` — fix: add pytest-asyncio to requirements-dev.txt so CI can run async tests
+
+- `backend/requirements-dev.txt` — added `pytest-asyncio==0.25.3`; was missing so CI failed with "async def functions are not natively supported"
+
+---
+
+## 2026-05-03 | `c583e1f` — feat: structured agent logging, docker socket mount, agent callback logs+prompt persistence
+
+- `agents/builtin/main.py` — builtin agent now collects timestamped structured log lines (`[HH:MM:SS] [INFO/ERROR]`) throughout execution (task start, AI call, response size, files parsed, PR result, callback); sends them back in callback body as `logs: [...]`
+- `agents/builtin/main.py` — also sends `prompt` and `model` fields back in callback body for full audit trail
+- `backend/app/api/agents.py` — `AgentCallbackBody` extended with `logs`, `prompt`, `model` optional fields; callback handler persists each log line to `ai_logs` (level auto-detected), and writes prompt+response to `ai_messages` table
+- `docker-compose.prod.yml` — mounted `/var/run/docker.sock` into backend container (required for docker-per-task dispatch to work on the VPS)
+- `backend/tests/test_actor_executor.py` — 10 new tests for `actor_executor.py` (all passing, 41 total)
+- `agents/builtin/` — new built-in agent Docker image (Dockerfile, main.py, requirements.txt)
+
+---
+
+## 2026-05-03 | `0763687` — fix: move GitHub OAuth connect to Team Settings; project settings shows repo picker only
+
+- `backend/app/api/github.py` — `GET /github/status` now returns `has_token: true` when OAuth token exists but no repo is set yet
+- `frontend/src/pages/ProjectBoardPage.tsx` — removed OAuth connect button and PAT fallback from project settings; when no token → "Connect GitHub in Team Settings" button; when token exists → repo picker with yellow "Token saved — pick a repo" badge until repo is set; removed unused `connectGithub`, `tokenInput`, `githubError`, `showPatFallback`
+
+---
+
 ## 2026-05-03 | `49d1703` — fix: redirect browser to GitHub OAuth URL instead of returning JSON
 
 - `backend/app/api/github.py` — `GET /github/oauth/start` now returns a 302 redirect to the GitHub authorization page instead of `{"url": "..."}` JSON
@@ -832,3 +988,36 @@ Each project owner enters their own GitHub Personal Access Token + target repo i
 - Fix ruff F841: removed unused `link_resp` variable in `send_magic_link` endpoint (`auth.py`)
 - Fix CI: bumped pydantic 2.9.2 → 2.13.3 to satisfy `realtime==2.29.0` constraint (requires `pydantic>=2.11.7`)
 - Memory: commit discipline recorded — never auto-commit; always run checks first, only commit on "tested"
+## 2026-05-03 — 0b637bc
+- style(proposal): matched partner one-pager visual style to main site (Space Mono font, wider layout, bolder spacing, larger type)
+## 2026-05-03 — 6948bc3
+- content(proposal): updated stack to AI-first (Python/FastAPI/LangChain), TutorPro metric (0→paying in 2mo), fixed domains label overlap
+
+## 2026-05-04
+- Project: 21century
+- Summary: Updated partner proposal commission terms to 20% (one-time) and 10% (recurring), with payout wording changed to paid from each collected check.
+- Commit: 53b20d9
+
+## 2026-05-04 — security fixes (trackingapp)
+
+Fixed 5 security vulnerabilities found by static review:
+- [Critical] DLL allowlist added to block arbitrary assembly loading from writable app data dir
+- [High] macOS SecureStorageWrapper now uses Keychain-backed SecureStorage instead of plaintext Preferences
+- [Medium] EncryptionKey redacted from debug logs
+- [Medium] Login password only retained in memory on successful login (removed always-persisting finally block)
+- [Low] Presigned screenshot URL validation restricted to HTTPS only
+
+Commit: 42ad2e9
+
+## 2026-05-04 — security hardening + masked env fix (040cbc3)
+- Tenant-scoped company_agent_id lookups in add_actor (projects.py) and update_actor (actors.py)
+- update_company_agent enforces webhook_url/docker_image invariants on update; auto-clears stale dispatch field on type change
+- envUtils: isMasked sentinel on EnvPair prevents masked secrets being overwritten on save
+- ExtraEnvEditor: clears isMasked on user input, shows '(unchanged)' placeholder
+
+## 2026-05-04 — docs agent callback fix + masked env guard (99f7412)
+- agents/docs/main.py: payload now uses content (not status/result); adds prompt/model
+- AgentsPage + ProjectBoardPage: skip extra_env in PATCH when masked pairs remain
+
+## 2026-05-04 — Merge feature/kind-agents → main (1157a21)
+- Full feature/kind-agents branch merged: kind agents, security hardening, masked env fix, execution map UI

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, Building2, Pencil, Check, Trash2 } from 'lucide-react'
+import { ChevronLeft, Building2, Pencil, Check, Trash2, Key, Bot } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useCompanyStore } from '../store/companyStore'
 import { useTeamStore } from '../store/teamStore'
@@ -23,6 +23,10 @@ export default function CompanySettingsPage() {
   const [editingPhone, setEditingPhone] = useState(false)
   const [newPhone, setNewPhone] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editingOpenAI, setEditingOpenAI] = useState(false)
+  const [newOpenAIKey, setNewOpenAIKey] = useState('')
+  const [editingAnthropic, setEditingAnthropic] = useState(false)
+  const [newAnthropicKey, setNewAnthropicKey] = useState('')
 
   const rename = useMutation({
     mutationFn: (name: string) =>
@@ -48,6 +52,30 @@ export default function CompanySettingsPage() {
       toast.success('Phone updated')
     },
     onError: () => toast.error('Failed to update phone'),
+  })
+
+  const updateOpenAIKey = useMutation({
+    mutationFn: (openai_api_key: string) =>
+      api.patch(`/companies/${company!.id}`, { openai_api_key }, { params: { user_id: userId } }),
+    onSuccess: () => {
+      setEditingOpenAI(false)
+      setNewOpenAIKey('')
+      qc.invalidateQueries({ queryKey: ['company', userId] })
+      toast.success('OpenAI key saved')
+    },
+    onError: () => toast.error('Failed to save key'),
+  })
+
+  const updateAnthropicKey = useMutation({
+    mutationFn: (anthropic_api_key: string) =>
+      api.patch(`/companies/${company!.id}`, { anthropic_api_key }, { params: { user_id: userId } }),
+    onSuccess: () => {
+      setEditingAnthropic(false)
+      setNewAnthropicKey('')
+      qc.invalidateQueries({ queryKey: ['company', userId] })
+      toast.success('Anthropic key saved')
+    },
+    onError: () => toast.error('Failed to save key'),
   })
 
   const deleteCompany = useMutation({
@@ -173,15 +201,129 @@ export default function CompanySettingsPage() {
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-white">{(company as { phone?: string }).phone ?? <span className="text-gray-500 italic">Not set</span>}</span>
+              <span className="text-white">{company.phone ?? <span className="text-gray-500 italic">Not set</span>}</span>
               <button
-                onClick={() => { setNewPhone((company as { phone?: string }).phone ?? ''); setEditingPhone(true) }}
+                onClick={() => { setNewPhone(company.phone ?? ''); setEditingPhone(true) }}
                 className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
               >
                 <Pencil size={13} /> Edit
               </button>
             </div>
           )}
+        </section>
+
+        {/* AI API Keys */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+          <h2 className="font-semibold text-white flex items-center gap-2">
+            <Key size={15} className="text-purple-400" /> AI provider keys
+          </h2>
+          <p className="text-gray-500 text-xs -mt-2">
+            These keys are used by built-in AI actors across all projects in your company.
+          </p>
+
+          {/* OpenAI */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-2">OpenAI API key</label>
+            {editingOpenAI ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="password"
+                  value={newOpenAIKey}
+                  onChange={(e) => setNewOpenAIKey(e.target.value)}
+                  placeholder="sk-..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newOpenAIKey.trim()) updateOpenAIKey.mutate(newOpenAIKey.trim())
+                    if (e.key === 'Escape') setEditingOpenAI(false)
+                  }}
+                  className="flex-1 bg-gray-800 border border-purple-500 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none"
+                />
+                <button
+                  onClick={() => newOpenAIKey.trim() && updateOpenAIKey.mutate(newOpenAIKey.trim())}
+                  disabled={!newOpenAIKey.trim() || updateOpenAIKey.isPending}
+                  className="flex items-center gap-1 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-sm rounded-lg"
+                >
+                  <Check size={14} /> Save
+                </button>
+                <button onClick={() => setEditingOpenAI(false)} className="text-sm text-gray-400 hover:text-white">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-white font-mono">
+                  {company.openai_key_set
+                    ? <span className="text-green-400">●&nbsp;Set</span>
+                    : <span className="text-gray-500 italic font-sans">Not set</span>}
+                </span>
+                <button
+                  onClick={() => setEditingOpenAI(true)}
+                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  <Pencil size={13} /> {company.openai_key_set ? 'Rotate' : 'Set key'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Anthropic */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-2">Anthropic API key</label>
+            {editingAnthropic ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="password"
+                  value={newAnthropicKey}
+                  onChange={(e) => setNewAnthropicKey(e.target.value)}
+                  placeholder="sk-ant-..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newAnthropicKey.trim()) updateAnthropicKey.mutate(newAnthropicKey.trim())
+                    if (e.key === 'Escape') setEditingAnthropic(false)
+                  }}
+                  className="flex-1 bg-gray-800 border border-purple-500 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none"
+                />
+                <button
+                  onClick={() => newAnthropicKey.trim() && updateAnthropicKey.mutate(newAnthropicKey.trim())}
+                  disabled={!newAnthropicKey.trim() || updateAnthropicKey.isPending}
+                  className="flex items-center gap-1 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-sm rounded-lg"
+                >
+                  <Check size={14} /> Save
+                </button>
+                <button onClick={() => setEditingAnthropic(false)} className="text-sm text-gray-400 hover:text-white">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-white font-mono">
+                  {company.anthropic_key_set
+                    ? <span className="text-green-400">●&nbsp;Set</span>
+                    : <span className="text-gray-500 italic font-sans">Not set</span>}
+                </span>
+                <button
+                  onClick={() => setEditingAnthropic(true)}
+                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  <Pencil size={13} /> {company.anthropic_key_set ? 'Rotate' : 'Set key'}
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Agents shortcut */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-white flex items-center gap-2">
+                <Bot size={15} className="text-purple-400" /> Webhook agents
+              </h2>
+              <p className="text-gray-500 text-xs mt-1">Manage reusable external agents available across all projects.</p>
+            </div>
+            <button
+              onClick={() => navigate('/company/agents')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
+            >
+              <Bot size={13} /> Manage agents
+            </button>
+          </div>
         </section>
 
         {/* Delete */}

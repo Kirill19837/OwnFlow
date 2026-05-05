@@ -6,6 +6,23 @@ export interface Company {
   created_at: string
   my_role?: 'owner' | 'admin' | 'member'
   default_team_id?: string
+  phone?: string | null
+  openai_key_set?: boolean
+  anthropic_key_set?: boolean
+}
+
+export interface CompanyAgent {
+  id: string
+  company_id: string
+  name: string
+  role?: string
+  agent_type: 'webhook' | 'builtin'
+  webhook_url?: string | null
+  agent_api_key?: string | null  // masked as '***' from API
+  docker_image?: string | null
+  extra_env?: Record<string, string> | null  // keys visible, values masked as '***'
+  description?: string
+  created_at: string
 }
 
 export interface Team {
@@ -15,9 +32,10 @@ export interface Team {
   owner_id: string
   company_id?: string
   default_ai_model: string
+  log_level?: number  // 0=debug 1=info 2=warning 3=error; defaults to 1
   created_at: string
-  my_role?: 'owner' | 'admin' | 'member'   // display name, may change
-  my_role_id?: string                       // stable UUID, use for permission checks
+  my_role?: 'owner' | 'admin' | 'member'
+  my_role_id?: string
   members?: TeamMember[]
   pending_invites?: TeamPendingInvite[]
 }
@@ -85,10 +103,14 @@ export interface Actor {
   project_id: string
   name: string
   type: ActorType
+  user_id?: string
   role?: string
   model?: string
   capabilities: string[]
   avatar_url?: string
+  webhook_url?: string
+  docker_image?: string | null
+  extra_env?: Record<string, string> | null  // keys visible, values masked as '***'
 }
 
 export interface Task {

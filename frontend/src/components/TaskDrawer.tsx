@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
@@ -50,6 +50,20 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [confirmedIndices, setConfirmedIndices] = useState<Set<number>>(new Set())
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
+
+  // Unsaved decisions from the most recent AI message — shown as sticky panel in task window
+  const pendingDetails = useMemo(() => {
+    const lastAssistant = [...chat].reverse().find((m) => m.kind === 'assistant')
+    if (!lastAssistant) return null
+    const actions = parseAllTaskActions((lastAssistant as { kind: string; content: string }).content)
+    const detailsAction = actions.find((a) => a.intent === 'update_details')
+    if (!detailsAction?.details || Object.keys(detailsAction.details).length === 0) return null
+    const existing = new Set(Object.keys(task.task_details ?? {}))
+    const pending = Object.fromEntries(
+      Object.entries(detailsAction.details as Record<string, string>).filter(([k]) => !existing.has(k))
+    )
+    return Object.keys(pending).length > 0 ? pending : null
+  }, [chat, task.task_details])
 
   const scrollBottom = () => setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
 
@@ -156,6 +170,9 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     const historyForBackend = chat
       .filter((m) => m.kind === 'user' || m.kind === 'assistant')
       .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
+
+    // Reset ai_ready: user is actively refining — previous readiness judgement is now stale
+    if (task.ai_ready) setAiReady.mutate(false)
 
     setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
     scrollBottom()
@@ -383,6 +400,31 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Pending decisions from AI — sticky, won't get buried in chat scroll */}
+          {pendingDetails && assignedActor?.type === 'ai' && (
+            <div className="bg-blue-950/40 border border-blue-700/50 rounded-xl p-3 space-y-2">
+              <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide flex items-center gap-1.5">
+                <ListChecks size={11} /> Unsaved decisions from AI
+              </p>
+              <div className="space-y-1">
+                {Object.entries(pendingDetails).map(([k, v]) => (
+                  <div key={k} className="flex gap-2 text-xs bg-gray-950 rounded px-2 py-1">
+                    <span className="text-gray-400 capitalize min-w-[90px] shrink-0">{k.replace(/_/g, ' ')}</span>
+                    <span className="text-gray-200">{v}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => updateDetails.mutate(pendingDetails)}
+                disabled={updateDetails.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-blue-900/30 border border-blue-700/50 text-blue-300 hover:bg-blue-800/40 transition-colors disabled:opacity-50"
+              >
+                {updateDetails.isPending ? <Loader2 size={11} className="animate-spin" /> : <ListChecks size={11} />}
+                Save to details
+              </button>
             </div>
           )}
 
@@ -714,18 +756,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         )
                       }
                       if (action.intent === 'mark_ready') {
-                        // Auto-set ai_ready only — user approval is separate
-                        if (!confirmed && !setAiReady.isPending) {
-                          setAiReady.mutate(true, { onSuccess: markCardDone })
-                        }
                         return (
-                          <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1">
-                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI ready to implement</p>
+                          <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
+                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
                             <p className="text-xs text-gray-300">{action.summary}</p>
-                            <p className="text-xs text-gray-500">Approve the task above to allow execution.</p>
-                            {setAiReady.isPending && (
-                              <p className="text-xs text-gray-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</p>
-                            )}
+                            <p className="text-xs text-gray-500">Save the decision cards above — the task will be marked ready automatically once decisions are persisted.</p>
                           </div>
                         )
                       }

@@ -1,4 +1,20 @@
 services:
+  # Security boundary: backend never mounts the raw Docker socket directly.
+  # It talks to this proxy, which only exposes the Docker API scopes we enable below.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      VERSION: 1
+      INFO: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app-net
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -15,8 +31,16 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       BACKEND_URL: ${BACKEND_URL}
+      # Route Docker SDK calls through the restricted socket proxy service.
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      - docker-socket-proxy
     networks:
       - app-net
 

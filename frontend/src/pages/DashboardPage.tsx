@@ -6,8 +6,51 @@ import { useProjectStore } from '../store/projectStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import type { Project } from '../types'
-import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, RefreshCw } from 'lucide-react'
+import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+
+interface TaskActivity {
+  task: { id: string; title: string; status: string; priority: string; agent_dispatched_at?: string }
+  logs: { id: string; phase: number; message: string; level: number; created_at: string }[]
+  latest_response?: string | null
+  model?: string | null
+}
+
+const LOG_LEVEL_STYLE: Record<number, string> = {
+  0: 'text-gray-500',   // debug
+  1: 'text-gray-300',   // info
+  2: 'text-yellow-400', // warning
+  3: 'text-red-400',    // error
+}
+const LOG_LEVEL_LABEL: Record<number, string> = { 0: 'DBG', 1: 'INF', 2: 'WRN', 3: 'ERR' }
+const LOG_PHASE_LABEL: Record<number, string> = {
+  0: 'planning', 1: 'exec', 2: 'ext-dispatch', 3: 'docker', 4: 'task-exec',
+}
+
+interface ExecutorRunningTask {
+  task_id: string
+  task_title: string
+  project_id: string
+  project_name: string
+  status: string
+  priority: string
+  updated_at?: string
+  actor_name?: string
+  actor_type?: string
+}
+
+interface ExecutorState {
+  running_count: number
+  projects_with_running: number
+  running: ExecutorRunningTask[]
+  recent_failures: {
+    project_id: string
+    project_name: string
+    phase: string
+    message: string
+    created_at?: string
+  }[]
+}
 
 const STATUS_ICON = {
   planning: <Clock size={14} className="text-yellow-400" />,
@@ -27,6 +70,8 @@ export default function DashboardPage() {
   const [regenError, setRegenError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const [monitorOpen, setMonitorOpen] = useState(false)
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -41,6 +86,38 @@ export default function DashboardPage() {
       return api.get<Project[]>('/projects', { params }).then((r) => r.data)
     },
     enabled: !!session,
+  })
+
+  const { data: executorState, isFetching: executorRefreshing } = useQuery({
+    queryKey: ['executor-state', activeTeam?.id, session?.user.id],
+    queryFn: () => {
+      const params = activeTeam
+        ? { team_id: activeTeam.id }
+        : { owner_id: session!.user.id }
+      return api.get<ExecutorState>('/projects/dashboard/executor-state', { params }).then((r) => r.data)
+    },
+    enabled: !!session,
+    refetchInterval: 8000,
+  })
+
+  // Expanded task activity — auto-refresh while open
+  const expandedTask = (executorState?.running ?? []).find((t) => t.task_id === expandedTaskId)
+  const { data: taskActivity } = useQuery<TaskActivity>({
+    queryKey: ['task-activity', expandedTaskId],
+    queryFn: () =>
+      api
+        .get<TaskActivity>(`/projects/${expandedTask!.project_id}/tasks/${expandedTaskId}/activity`)
+        .then((r) => r.data),
+    enabled: !!expandedTaskId && !!expandedTask,
+    refetchInterval: 5000,
+  })
+
+  const rerunTask = useMutation({
+    mutationFn: (task_id: string) => api.post(`/tasks/${task_id}/execute`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['executor-state'] })
+      queryClient.invalidateQueries({ queryKey: ['task-activity', expandedTaskId] })
+    },
   })
 
   useEffect(() => {
@@ -125,6 +202,127 @@ export default function DashboardPage() {
           </Link>
         </div>
       )}
+
+      {/* ── Executor Monitor (collapsible) ────────────────────────────── */}
+      <div className="mb-5 rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden">
+        {/* Summary bar — always visible */}
+        <button
+          onClick={() => setMonitorOpen((v) => !v)}
+          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800/60 transition-colors"
+        >
+          <span className="text-xs font-medium text-gray-400">Executor</span>
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+            (executorState?.running_count ?? 0) > 0
+              ? 'border-yellow-700/50 bg-yellow-900/20 text-yellow-300'
+              : 'border-gray-700 bg-gray-800/60 text-gray-500'
+          }`}>
+            {executorState?.running_count ?? 0} running
+          </span>
+          {(executorState?.recent_failures?.length ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-red-800/60 bg-red-900/20 px-2 py-0.5 text-[11px] font-medium text-red-400">
+              {executorState!.recent_failures.length} failure{executorState!.recent_failures.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {executorRefreshing && <span className="text-[11px] text-gray-600 ml-1">↻</span>}
+          <span className="ml-auto text-gray-600">{monitorOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span>
+        </button>
+
+        {/* Expanded detail */}
+        {monitorOpen && (
+          <div className="border-t border-gray-800 p-3 space-y-2">
+            {(executorState?.running?.length ?? 0) === 0 ? (
+              <p className="text-xs text-gray-500 px-1">No executor jobs are currently running.</p>
+            ) : (
+              (executorState?.running ?? []).slice(0, 8).map((item) => {
+                const isExpanded = expandedTaskId === item.task_id
+                return (
+                  <div key={item.task_id} className="rounded-lg border border-gray-800 bg-gray-950 overflow-hidden">
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-900 transition-colors"
+                      onClick={() => setExpandedTaskId(isExpanded ? null : item.task_id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-white font-medium truncate">{item.task_title}</p>
+                        <p className="text-[11px] text-gray-500">
+                          {item.project_name} · {item.actor_name || 'Unassigned'}
+                          {item.updated_at && ` · ${formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}`}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/projects/${item.project_id}?task=${item.task_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-gray-600 hover:text-purple-400 text-xs shrink-0"
+                      >→</Link>
+                      <button
+                        title="Re-run task"
+                        onClick={(e) => { e.stopPropagation(); rerunTask.mutate(item.task_id) }}
+                        disabled={rerunTask.isPending}
+                        className="text-gray-600 hover:text-yellow-400 transition-colors disabled:opacity-40 shrink-0"
+                      >
+                        <RefreshCw size={12} className={rerunTask.isPending && rerunTask.variables === item.task_id ? 'animate-spin' : ''} />
+                      </button>
+                      {isExpanded ? <ChevronUp size={12} className="text-gray-600 shrink-0" /> : <ChevronDown size={12} className="text-gray-600 shrink-0" />}
+                    </div>
+                    {isExpanded && (
+                      <div className="border-t border-gray-800 px-3 py-2 space-y-2">
+                        {!taskActivity ? (
+                          <p className="text-xs text-gray-500 animate-pulse">Loading activity…</p>
+                        ) : (
+                          <>
+                            {taskActivity.logs.length === 0 ? (
+                              <p className="text-xs text-gray-500">No log entries yet since dispatch.</p>
+                            ) : (
+                              <div className="space-y-0.5 max-h-40 overflow-y-auto font-mono text-[11px]">
+                                {taskActivity.logs.map((log) => (
+                                  <div key={log.id} className="flex gap-2 leading-snug">
+                                    <span className="text-gray-600 shrink-0">{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                                    <span className={`shrink-0 w-8 ${LOG_LEVEL_STYLE[log.level] ?? 'text-gray-400'}`}>{LOG_LEVEL_LABEL[log.level] ?? log.level}</span>
+                                    <span className="text-gray-500 shrink-0 w-20 truncate">{LOG_PHASE_LABEL[log.phase] ?? log.phase}</span>
+                                    <span className={LOG_LEVEL_STYLE[log.level] ?? 'text-gray-300'}>{log.message}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {taskActivity.latest_response && (
+                              <div className="border-t border-gray-800 pt-2">
+                                <p className="text-[11px] text-gray-500 mb-1">Latest AI response{taskActivity.model ? ` (${taskActivity.model})` : ''}</p>
+                                <p className="text-xs text-gray-300 whitespace-pre-wrap line-clamp-5">{taskActivity.latest_response}</p>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+
+            {(executorState?.recent_failures?.length ?? 0) > 0 && (
+              <div className="pt-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-red-400 mb-1.5 px-1">Recent Failures</p>
+                <div className="space-y-1.5">
+                  {(executorState?.recent_failures ?? []).map((failure, idx) => (
+                    <Link
+                      key={`${failure.project_id}-${failure.created_at ?? idx}`}
+                      to={`/projects/${failure.project_id}`}
+                      className="block rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 hover:border-red-700 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs text-red-100 leading-tight truncate">{failure.message}</p>
+                        <span className="text-[10px] uppercase rounded-full border border-red-800/70 px-1.5 py-0.5 text-red-300 shrink-0">{failure.phase}</span>
+                      </div>
+                      <p className="text-[11px] text-red-300/60 mt-0.5">
+                        {failure.project_name}{failure.created_at ? ` · ${formatDistanceToNow(new Date(failure.created_at), { addSuffix: true })}` : ''}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((p) => (

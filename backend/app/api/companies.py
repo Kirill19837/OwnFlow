@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.db import get_supabase
 
@@ -140,7 +140,7 @@ def my_company(user_id: str):
     company = db.table("companies").select("*").eq("id", m["company_id"]).single().execute()
     if not company.data:
         return None
-    return {**company.data, "my_role": ROLE_NAMES.get(m["role"], m["role"])}
+    return {**_mask_company(company.data), "my_role": ROLE_NAMES.get(m["role"], m["role"])}
 
 
 @router.get("/{company_id}/teams")
@@ -214,6 +214,26 @@ def create_team(company_id: str, body: TeamCreate):
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+
+_SECRET_COMPANY_FIELDS = {"openai_api_key", "anthropic_api_key"}
+
+
+def _mask_company(data: dict) -> dict:
+    """Replace sensitive API key fields with presence booleans.
+
+    The raw key values are never sent to the client — only whether a key is
+    set (True) or not (False/None).  The frontend stores these as
+    openai_key_set / anthropic_key_set.
+    """
+    result = {k: v for k, v in data.items() if k not in _SECRET_COMPANY_FIELDS}
+    for field in _SECRET_COMPANY_FIELDS:
+        if field in data:
+            set_field = field.replace("_api_key", "_key_set")
+            result[set_field] = bool(data.get(field))
+    return result
 
 
 def _require_company_owner(db, company_id: str, user_id: str) -> None:
@@ -240,7 +260,7 @@ def update_company(company_id: str, body: CompanyUpdate, user_id: str):
     if not update:
         raise HTTPException(400, "No fields to update")
     db.table("companies").update(update).eq("id", company_id).execute()
-    return {"company_id": company_id, **update}
+    return {"company_id": company_id, **_mask_company(update)}
 
 
 @router.delete("/{company_id}", status_code=204)
@@ -262,4 +282,187 @@ def delete_company(company_id: str, user_id: str):
 
     db.table("company_members").delete().eq("company_id", company_id).execute()
     db.table("companies").delete().eq("id", company_id).execute()
+
+
+# ── Company Agents ────────────────────────────────────────────────────────────
+
+def _validate_webhook_url(v: str) -> str:
+    if not v.startswith(("https://", "http://")):
+        raise ValueError("webhook_url must start with https:// or http://")
+    return v
+
+
+class CompanyAgentCreate(BaseModel):
+    name: str
+    role: Optional[str] = None
+    agent_type: str = "webhook"  # 'webhook' | 'builtin'
+    webhook_url: Optional[str] = None
+    docker_image: Optional[str] = None
+    agent_api_key: Optional[str] = None
+    extra_env: Optional[dict] = None   # {KEY: VALUE} injected into Docker containers; values are secrets
+    description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_webhook_url(v)
+        return v
+
+    @field_validator("agent_type")
+    @classmethod
+    def validate_agent_type(cls, v: str) -> str:
+        if v not in ("webhook", "builtin"):
+            raise ValueError("agent_type must be 'webhook' or 'builtin'")
+        return v
+
+
+class CompanyAgentUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    agent_type: Optional[str] = None
+    webhook_url: Optional[str] = None
+    docker_image: Optional[str] = None
+    agent_api_key: Optional[str] = None
+    extra_env: Optional[dict] = None
+    description: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_webhook_url(v)
+        return v
+
+    @field_validator("agent_type")
+    @classmethod
+    def validate_agent_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("webhook", "builtin"):
+            raise ValueError("agent_type must be 'webhook' or 'builtin'")
+        return v
+
+
+@router.get("/{company_id}/agents")
+def list_company_agents(company_id: str, user_id: str):
+    """List all reusable agents registered for the company."""
+    db = get_supabase()
+    # Any member can read agents
+    member = (
+        db.table("company_members")
+        .select("role")
+        .eq("company_id", company_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not member.data:
+        raise HTTPException(403, "Not a member of this company")
+    resp = db.table("company_agents").select("*").eq("company_id", company_id).order("created_at").execute()
+    agents = []
+    for a in (resp.data or []):
+        masked = {**a, "agent_api_key": "***" if a.get("agent_api_key") else None}
+        # Mask extra_env values — keys are safe to expose, values are secrets
+        if isinstance(masked.get("extra_env"), dict):
+            masked["extra_env"] = {k: "***" for k in masked["extra_env"]}
+        agents.append(masked)
+    return agents
+
+
+@router.post("/{company_id}/agents", status_code=201)
+def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str):
+    """Register a new agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    if body.agent_type == "webhook" and not body.webhook_url:
+        raise HTTPException(400, "webhook_url is required for webhook agents")
+    if body.agent_type == "builtin" and not body.docker_image:
+        raise HTTPException(400, "docker_image is required for builtin agents")
+    row = {
+        "id": str(uuid.uuid4()),
+        "company_id": company_id,
+        "name": body.name,
+        "role": body.role,
+        "agent_type": body.agent_type,
+        "webhook_url": body.webhook_url,
+        "docker_image": body.docker_image,
+        "agent_api_key": body.agent_api_key,
+        "extra_env": body.extra_env,
+        "description": body.description,
+    }
+    db.table("company_agents").insert(row).execute()
+    masked = {**row, "agent_api_key": "***" if row.get("agent_api_key") else None}
+    if isinstance(masked.get("extra_env"), dict):
+        masked["extra_env"] = {k: "***" for k in masked["extra_env"]}
+    return masked
+
+
+@router.patch("/{company_id}/agents/{agent_id}")
+def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdate, user_id: str):
+    """Update an agent. Only company owner.
+
+    Omitted fields are left unchanged.
+    Send null explicitly to clear optional fields (agent_api_key, description,
+    role, webhook_url, docker_image).  name cannot be cleared (400 if sent as null).
+
+    Invariants enforced after the patch:
+    - webhook agents must have a non-null webhook_url
+    - builtin agents must have a non-null docker_image
+    Switching agent_type auto-clears the dispatch field that no longer applies
+    (unless the client explicitly supplies a replacement in the same request).
+    """
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    # exclude_unset=True: only fields the client actually sent are included,
+    # so omitting a field leaves it unchanged, while sending null clears it.
+    update = body.model_dump(exclude_unset=True)
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    if "name" in update and not update["name"]:
+        raise HTTPException(400, "name cannot be empty or null")
+
+    # Fetch current row to evaluate the effective state after the patch.
+    current_resp = (
+        db.table("company_agents")
+        .select("agent_type,webhook_url,docker_image")
+        .eq("id", agent_id)
+        .eq("company_id", company_id)
+        .single()
+        .execute()
+    )
+    if not current_resp.data:
+        raise HTTPException(404, "Company agent not found")
+    current = current_resp.data
+
+    effective_type = update.get("agent_type") or current["agent_type"]
+    effective_webhook = update["webhook_url"] if "webhook_url" in update else current.get("webhook_url")
+    effective_docker = update["docker_image"] if "docker_image" in update else current.get("docker_image")
+
+    if effective_type == "webhook" and not effective_webhook:
+        raise HTTPException(400, "webhook_url is required for webhook agents")
+    if effective_type == "builtin" and not effective_docker:
+        raise HTTPException(400, "docker_image is required for builtin agents")
+
+    # On type change, clear the dispatch field that no longer applies
+    # (only if the client did not supply an explicit value for it).
+    if "agent_type" in update and update["agent_type"] != current["agent_type"]:
+        if update["agent_type"] == "webhook":
+            update.setdefault("docker_image", None)
+        elif update["agent_type"] == "builtin":
+            update.setdefault("webhook_url", None)
+
+    db.table("company_agents").update(update).eq("id", agent_id).eq("company_id", company_id).execute()
+    response = {"agent_id": agent_id, **update}
+    if "agent_api_key" in response:
+        response["agent_api_key"] = "***"
+    if isinstance(response.get("extra_env"), dict):
+        response["extra_env"] = {k: "***" for k in response["extra_env"]}
+    return response
+
+
+@router.delete("/{company_id}/agents/{agent_id}", status_code=204)
+def delete_company_agent(company_id: str, agent_id: str, user_id: str):
+    """Delete an agent. Only company owner."""
+    db = get_supabase()
+    _require_company_owner(db, company_id, user_id)
+    db.table("company_agents").delete().eq("id", agent_id).eq("company_id", company_id).execute()
 
