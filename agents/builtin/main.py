@@ -56,21 +56,16 @@ ACTOR_ROLE: str = ACTOR.get("role") or ""
 ACTOR_CAPABILITIES: list = ACTOR.get("capabilities") or []
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(include_files_instruction: bool = True) -> str:
     role_line = f"You are acting as: **{ACTOR_ROLE}**" if ACTOR_ROLE else "You are an AI actor working on a software project."
     cap_lines = ""
     if ACTOR_CAPABILITIES:
         caps = "\n".join(f"- {c}" for c in ACTOR_CAPABILITIES if c)
         cap_lines = f"\n\n## Your capabilities\n{caps}"
 
-    return f"""\
-{role_line}
-You will be given a task with its description and project context.
-Produce a high-quality, detailed deliverable for the task.
-Apply the expertise and perspective appropriate to your role.
-If the task is code-related, write complete, working code with comments.
-If the task is research, analysis, requirements, or design, produce a thorough structured document.
-Format your response in Markdown.{cap_lines}
+    files_section = ""
+    if include_files_instruction:
+        files_section = f"""
 
 ## File output — REQUIRED for every task
 You MUST always append a ###FILES### block at the very end of your response (after all narrative).
@@ -98,22 +93,64 @@ Example for a requirements task:
 
 Never include binary files or generated lock files.
 Never omit the ###FILES### block — every task must produce at least one file.
+Do NOT wrap the ###FILES### JSON array in a markdown code fence (no ```json). Output the raw [ ... ] array directly after the ###FILES### marker."""
+
+    return f"""\
+{role_line}
+You will be given a task with its description and project context.
+Produce a high-quality, detailed deliverable for the task.
+Apply the expertise and perspective appropriate to your role.
+If the task is code-related, write complete, working code with comments.
+If the task is research, analysis, requirements, or design, produce a thorough structured document.
+Format your response in Markdown.{cap_lines}{files_section}
 """
 
 
-SYSTEM_PROMPT = _build_system_prompt()
+# System prompt for Claude (single call, files embedded via ###FILES### marker)
+SYSTEM_PROMPT = _build_system_prompt(include_files_instruction=True)
+
+# System prompt for GPT — single call returning structured JSON
+_GPT_SYSTEM_PROMPT = _build_system_prompt(include_files_instruction=False) + """
+## Output format — REQUIRED
+You MUST respond with a single JSON object (no markdown fences) in exactly this shape:
+{
+  "narrative": "<your full Markdown deliverable here>",
+  "files": [
+    {"path": "<repo-relative path>", "content": "<full file text>"}
+  ]
+}
+
+Choose file paths based on the task type:
+- Source code / config / tests  → appropriate repo path (e.g. src/auth/login.py)
+- Requirements / specs          → docs/<kebab-case-title>.md
+- Research / analysis           → docs/research/<kebab-case-title>.md
+- Design / architecture         → docs/design/<kebab-case-title>.md
+- General documentation         → docs/<kebab-case-title>.md
+
+Always include at least one file. Never include binary or lock files.
+"""
+
 
 
 # ── AI provider call ──────────────────────────────────────────────────────────
 
-async def call_ai(prompt: str) -> str:
-    """Call the appropriate AI provider based on MODEL."""
+async def call_ai(prompt: str) -> tuple[str, list[dict]]:
+    """Call the appropriate AI provider.
+
+    Returns (narrative_content, files).
+    GPT: single call with response_format=json_object → {narrative, files}.
+    Claude: single call with ###FILES### marker parsed from the response.
+    """
     if MODEL.startswith("claude"):
-        return await _call_anthropic(prompt)
+        content = await _call_anthropic(prompt)
+        files = parse_files(content)
+        return content, files
+
     return await _call_openai(prompt)
 
 
-async def _call_openai(prompt: str) -> str:
+async def _call_openai(prompt: str) -> tuple[str, list[dict]]:
+    """Single GPT call returning structured JSON with narrative + files."""
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY not set")
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -123,14 +160,23 @@ async def _call_openai(prompt: str) -> str:
             json={
                 "model": MODEL,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": _GPT_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 "max_tokens": 8192,
+                "response_format": {"type": "json_object"},
             },
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        raw = resp.json()["choices"][0]["message"]["content"]
+    print(f"[builtin-agent] DEBUG openai raw response ({len(raw)} chars):\n{raw}", flush=True)
+    try:
+        parsed = json.loads(raw)
+        narrative = parsed.get("narrative") or ""
+        files = parsed.get("files") or []
+        return narrative, files
+    except (json.JSONDecodeError, AttributeError):
+        return raw, []
 
 
 async def _call_anthropic(prompt: str) -> str:
@@ -157,7 +203,13 @@ async def _call_anthropic(prompt: str) -> str:
 # ── File parsing ──────────────────────────────────────────────────────────────
 
 def parse_files(text: str) -> list[dict]:
-    match = re.search(r"###FILES###\s*(\[.*\])", text, re.DOTALL)
+    # Models sometimes wrap the JSON in a markdown code fence (```json ... ```).
+    # The optional non-capturing group strips it before we try to parse.
+    match = re.search(
+        r"###FILES###\s*(?:```(?:json)?\s*)?(\[.*\])\s*(?:```)?\s*$",
+        text,
+        re.DOTALL,
+    )
     if not match:
         return []
     try:
@@ -290,23 +342,24 @@ async def main() -> None:
     log(f"Calling AI provider (model={MODEL})...")
     t0 = datetime.now(timezone.utc)
     try:
-        content = await call_ai(prompt)
+        content, files = await call_ai(prompt)
     except Exception as exc:
         log(f"AI provider call failed: {type(exc).__name__}: {exc}", level="ERROR")
         raise
     elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     log(f"AI responded in {elapsed:.1f}s — {len(content)} chars")
     log(f"response_preview={content[:300]!r}", level="DEBUG")
-    has_files_marker = "###FILES###" in content
-    log(f"###FILES### marker present={has_files_marker}", level="DEBUG")
+    log(f"response_full=\n{content}", level="DEBUG")
 
-    files = parse_files(content)
     log(f"Parsed {len(files)} file(s) from response")
     if files:
         for i, f in enumerate(files):
             log(f"file[{i}] path={f.get('path')!r} content_length={len(f.get('content', ''))} chars", level="DEBUG")
-    elif has_files_marker:
-        log("###FILES### marker found but JSON parse failed or empty array", level="WARNING")
+    else:
+        log("No files extracted from response", level="WARNING")
+        if MODEL.startswith("claude"):
+            has_files_marker = "###FILES###" in content
+            log(f"###FILES### marker present={has_files_marker}", level="DEBUG")
 
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")

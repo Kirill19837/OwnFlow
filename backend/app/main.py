@@ -27,7 +27,9 @@ app.add_middleware(
 
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
+app.include_router(tasks.project_router, prefix="/projects", tags=["projects"])
 app.include_router(actors.router, prefix="/actors", tags=["actors"])
+app.include_router(actors.project_router, prefix="/projects", tags=["projects"])
 app.include_router(teams.router, prefix="/teams", tags=["teams"])
 app.include_router(companies.router)
 app.include_router(auth.router)

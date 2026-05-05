@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import TaskAssign
@@ -15,6 +16,7 @@ from app.assistants import (
 import json
 
 router = APIRouter()
+project_router = APIRouter()
 
 _TASK_SECRET_FIELDS = {"agent_callback_token", "agent_dispatched_at"}
 
@@ -337,3 +339,130 @@ async def prompt_task_stream(task_id: str, body: dict):
             pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@project_router.post("/{project_id}/tasks", status_code=201)
+async def create_tasks_for_project(project_id: str, body: dict):
+    """Create one or more tasks in a sprint from the AI suggestion."""
+    db = get_supabase()
+    tasks_in = body.get("tasks") or []
+    if not tasks_in:
+        raise HTTPException(400, "tasks list is required")
+
+    sprint_id = body.get("sprint_id")
+    if not sprint_id:
+        sr = (
+            db.table("sprints")
+            .select("id")
+            .eq("project_id", project_id)
+            .order("sprint_number")
+            .limit(1)
+            .execute()
+        )
+        if not sr.data:
+            raise HTTPException(400, "No sprints found — plan the project first")
+        sprint_id = sr.data[0]["id"]
+
+    rows = []
+    for t in tasks_in:
+        rows.append(
+            {
+                "id": str(uuid.uuid4()),
+                "sprint_id": sprint_id,
+                "project_id": project_id,
+                "title": (t.get("title") or "Untitled").strip(),
+                "description": t.get("description") or "",
+                "type": t.get("type") or "feature",
+                "priority": t.get("priority") or "medium",
+                "estimated_hours": float(t.get("estimated_hours") or 1),
+                "status": "todo",
+                "depends_on": [],
+            }
+        )
+
+    result = db.table("tasks").insert(rows).execute()
+    return {"created": len(rows), "tasks": result.data or []}
+
+
+@project_router.patch("/{project_id}/tasks/batch")
+async def batch_modify_tasks(project_id: str, body: dict):
+    """Bulk-update tasks. Each item must have an 'id' plus the fields to change."""
+    db = get_supabase()
+    tasks_in = body.get("tasks") or []
+    if not tasks_in:
+        raise HTTPException(400, "tasks list is required")
+    updated = []
+    allowed_fields = {"title", "description", "type", "priority", "estimated_hours", "status"}
+    for t in tasks_in:
+        task_id = t.get("id")
+        if not task_id:
+            continue
+        patch = {k: v for k, v in t.items() if k in allowed_fields and v is not None}
+        if patch:
+            r = db.table("tasks").update(patch).eq("id", task_id).eq("project_id", project_id).execute()
+            if r.data:
+                updated.extend(r.data)
+    return {"updated": len(updated), "tasks": updated}
+
+
+@project_router.delete("/{project_id}/tasks/batch")
+async def batch_delete_tasks(project_id: str, body: dict):
+    """Bulk-delete tasks by ID list."""
+    db = get_supabase()
+    task_ids = [t.get("id") for t in (body.get("tasks") or []) if t.get("id")]
+    if not task_ids:
+        raise HTTPException(400, "tasks list with ids is required")
+    db.table("tasks").delete().in_("id", task_ids).eq("project_id", project_id).execute()
+    return {"deleted": len(task_ids)}
+
+
+@project_router.get("/{project_id}/tasks/{task_id}/activity")
+def get_task_activity(project_id: str, task_id: str):
+    """Return recent logs and AI messages for a running task."""
+    db = get_supabase()
+
+    task_resp = (
+        db.table("tasks")
+        .select("id,title,status,priority,agent_dispatched_at,created_at")
+        .eq("id", task_id)
+        .eq("project_id", project_id)
+        .single()
+        .execute()
+    )
+    task = task_resp.data
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    dispatched_at = task.get("agent_dispatched_at") or task.get("created_at")
+
+    logs_q = (
+        db.table("ai_logs")
+        .select("id,phase,message,level,created_at")
+        .eq("task_id", task_id)
+        .order("created_at", desc=False)
+        .limit(40)
+    )
+    logs = logs_q.execute().data or []
+
+    messages_resp = (
+        db.table("ai_messages")
+        .select("id,phase,model,response,created_at")
+        .eq("task_id", task_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    messages = messages_resp.data or []
+
+    return {
+        "task": {
+            "id": task.get("id"),
+            "title": task.get("title"),
+            "status": task.get("status"),
+            "priority": task.get("priority"),
+            "agent_dispatched_at": dispatched_at,
+        },
+        "logs": logs,
+        "latest_response": messages[0]["response"][:800] if messages else None,
+        "model": messages[0].get("model") if messages else None,
+    }

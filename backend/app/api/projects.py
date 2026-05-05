@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
-from app.models import ProjectCreate, ActorCreate
+from app.models import ProjectCreate
 from app.db import get_supabase
 from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, generate_next_sprint
 from app.services.sprint_planner import plan_and_persist
@@ -264,58 +264,6 @@ def get_project_agent_runtime(project_id: str):
     }
 
 
-@router.get("/{project_id}/tasks/{task_id}/activity")
-def get_task_activity(project_id: str, task_id: str):
-    """Return recent logs and AI messages for a running task."""
-    db = get_supabase()
-
-    task_resp = (
-        db.table("tasks")
-        .select("id,title,status,priority,agent_dispatched_at,created_at")
-        .eq("id", task_id)
-        .eq("project_id", project_id)
-        .single()
-        .execute()
-    )
-    task = task_resp.data
-    if not task:
-        raise HTTPException(404, "Task not found")
-
-    dispatched_at = task.get("agent_dispatched_at") or task.get("created_at")
-
-    logs_q = (
-        db.table("ai_logs")
-        .select("id,phase,message,level,created_at")
-        .eq("task_id", task_id)
-        .order("created_at", desc=False)
-        .limit(40)
-    )
-    logs = logs_q.execute().data or []
-
-    messages_resp = (
-        db.table("ai_messages")
-        .select("id,phase,model,response,created_at")
-        .eq("task_id", task_id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    messages = messages_resp.data or []
-
-    return {
-        "task": {
-            "id": task.get("id"),
-            "title": task.get("title"),
-            "status": task.get("status"),
-            "priority": task.get("priority"),
-            "agent_dispatched_at": dispatched_at,
-        },
-        "logs": logs,
-        "latest_response": messages[0]["response"][:800] if messages else None,
-        "model": messages[0].get("model") if messages else None,
-    }
-
-
 @router.get("")
 def list_projects(owner_id: str = "", team_id: str = ""):
     db = get_supabase()
@@ -444,121 +392,6 @@ def dashboard_executor_state(owner_id: str = "", team_id: str = ""):
     }
 
 
-@router.post("/{project_id}/actors", status_code=201)
-def add_actor(project_id: str, body: ActorCreate):
-    db = get_supabase()
-    row = {
-        "id": str(uuid.uuid4()),
-        "project_id": project_id,
-        "name": body.name,
-        "type": body.type,
-        "role": body.role,
-        "model": body.model,
-        "capabilities": body.capabilities,
-        "avatar_url": body.avatar_url,
-    }
-    if body.user_id:
-        row["user_id"] = body.user_id
-    # If a company agent template is specified, resolve and copy its dispatch fields.
-    # Scope the lookup to the project's own company to prevent cross-tenant leakage.
-    if body.company_agent_id:
-        # Resolve project's company via team
-        proj_resp = db.table("projects").select("team_id").eq("id", project_id).single().execute()
-        team_id = (proj_resp.data or {}).get("team_id")
-        company_id = None
-        if team_id:
-            team_resp = db.table("teams").select("company_id").eq("id", team_id).single().execute()
-            company_id = (team_resp.data or {}).get("company_id")
-        ca_resp = (
-            db.table("company_agents")
-            .select("*")
-            .eq("id", body.company_agent_id)
-            .single()
-            .execute()
-        )
-        ca = ca_resp.data
-        if not ca:
-            raise HTTPException(404, "Company agent not found")
-        if not company_id or ca.get("company_id") != company_id:
-            raise HTTPException(403, "Company agent does not belong to this project's company")
-        if ca.get("webhook_url"):
-            row["webhook_url"] = ca["webhook_url"]
-        if ca.get("docker_image"):
-            row["docker_image"] = ca["docker_image"]
-        if ca.get("agent_api_key"):
-            row["agent_api_key"] = ca["agent_api_key"]
-        if ca.get("extra_env"):
-            row["extra_env"] = ca["extra_env"]
-    else:
-        if body.webhook_url:
-            row["webhook_url"] = body.webhook_url
-        if body.agent_api_key:
-            row["agent_api_key"] = body.agent_api_key
-        if body.docker_image:
-            row["docker_image"] = body.docker_image
-        if body.extra_env:
-            row["extra_env"] = body.extra_env
-    db.table("actors").insert(row).execute()
-    return _mask_actor(row)
-
-
-# Default AI actor set used by auto-fill (role → default model)
-_AUTO_FILL_ACTORS = [
-    ("AI Project Manager",  "ai"),
-    ("Architect",           "ai"),
-    ("Lead Developer",      "ai"),
-    ("Frontend Developer",  "ai"),
-    ("Backend Developer",   "ai"),
-    ("QA Automation Lead",  "ai"),
-]
-
-_AI_NAMES = [
-    "Aria", "Nova", "Orion", "Sage", "Atlas", "Echo", "Lyra", "Zara",
-    "Cleo", "Finn", "Mira", "Denis", "Skye", "Theo", "Wren", "Zion",
-]
-
-
-@router.post("/{project_id}/actors/auto-fill", status_code=200)
-def auto_fill_actors(project_id: str, body: dict):
-    """Replace all AI actors with the standard default set. Human actors are preserved."""
-    db = get_supabase()
-    ai_model = body.get("ai_model") or "gpt-4o"
-
-    # Fetch project to verify it exists
-    proj = db.table("projects").select("id").eq("id", project_id).single().execute()
-    if not proj.data:
-        raise HTTPException(404, "Project not found")
-
-    # Delete existing AI actors only
-    db.table("actors").delete().eq("project_id", project_id).eq("type", "ai").execute()
-
-    # Collect roles already covered by human actors so we don't add AI duplicates
-    humans_resp = db.table("actors").select("role").eq("project_id", project_id).eq("type", "human").execute()
-    human_roles = {(r.get("role") or "").strip().lower() for r in (humans_resp.data or [])}
-
-    # Insert standard AI actor set, skipping roles already covered by a human
-    import random
-    name_pool = _AI_NAMES.copy()
-    random.shuffle(name_pool)
-    rows = []
-    name_idx = 0
-    for role, atype in _AUTO_FILL_ACTORS:
-        if role.strip().lower() in human_roles:
-            continue  # human already covers this role
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "project_id": project_id,
-            "name": name_pool[name_idx % len(name_pool)],
-            "type": atype,
-            "role": role,
-            "model": ai_model,
-            "capabilities": [],
-        })
-        name_idx += 1
-    db.table("actors").insert(rows).execute()
-    return {"created": len(rows), "actors": [_mask_actor(r) for r in rows]}
-
-
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: str):
     db = get_supabase()
@@ -658,81 +491,6 @@ async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
         "sprint_number": next_sprint_num,
         "task_count": result["task_count"],
     }
-
-
-@router.post("/{project_id}/tasks", status_code=201)
-async def create_tasks_for_project(project_id: str, body: dict):
-    """Create one or more tasks in a sprint from the AI suggestion."""
-    db = get_supabase()
-    tasks_in = body.get("tasks") or []
-    if not tasks_in:
-        raise HTTPException(400, "tasks list is required")
-
-    sprint_id = body.get("sprint_id")
-    if not sprint_id:
-        sr = (
-            db.table("sprints")
-            .select("id")
-            .eq("project_id", project_id)
-            .order("sprint_number")
-            .limit(1)
-            .execute()
-        )
-        if not sr.data:
-            raise HTTPException(400, "No sprints found — plan the project first")
-        sprint_id = sr.data[0]["id"]
-
-    rows = []
-    for t in tasks_in:
-        rows.append(
-            {
-                "id": str(uuid.uuid4()),
-                "sprint_id": sprint_id,
-                "project_id": project_id,
-                "title": (t.get("title") or "Untitled").strip(),
-                "description": t.get("description") or "",
-                "type": t.get("type") or "feature",
-                "priority": t.get("priority") or "medium",
-                "estimated_hours": float(t.get("estimated_hours") or 1),
-                "status": "todo",
-                "depends_on": [],
-            }
-        )
-
-    result = db.table("tasks").insert(rows).execute()
-    return {"created": len(rows), "tasks": result.data or []}
-
-
-@router.patch("/{project_id}/tasks/batch")
-async def batch_modify_tasks(project_id: str, body: dict):
-    """Bulk-update tasks. Each item must have an 'id' plus the fields to change."""
-    db = get_supabase()
-    tasks_in = body.get("tasks") or []
-    if not tasks_in:
-        raise HTTPException(400, "tasks list is required")
-    updated = []
-    allowed_fields = {"title", "description", "type", "priority", "estimated_hours", "status"}
-    for t in tasks_in:
-        task_id = t.get("id")
-        if not task_id:
-            continue
-        patch = {k: v for k, v in t.items() if k in allowed_fields and v is not None}
-        if patch:
-            r = db.table("tasks").update(patch).eq("id", task_id).eq("project_id", project_id).execute()
-            if r.data:
-                updated.extend(r.data)
-    return {"updated": len(updated), "tasks": updated}
-
-
-@router.delete("/{project_id}/tasks/batch")
-async def batch_delete_tasks(project_id: str, body: dict):
-    """Bulk-delete tasks by ID list."""
-    db = get_supabase()
-    task_ids = [t.get("id") for t in (body.get("tasks") or []) if t.get("id")]
-    if not task_ids:
-        raise HTTPException(400, "tasks list with ids is required")
-    db.table("tasks").delete().in_("id", task_ids).eq("project_id", project_id).execute()
-    return {"deleted": len(task_ids)}
 
 
 @router.post("/{project_id}/prompt/stream")
