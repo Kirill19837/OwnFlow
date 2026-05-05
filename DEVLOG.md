@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-05-04 | `69efd0e` — Decouple actors/tasks APIs, rewrite docs, fix builtin agent GPT file output
+
+- `actors.py`: added `project_router` — moved `POST /projects/{id}/actors` and `POST /projects/{id}/actors/auto-fill` out of `projects.py`
+- `tasks.py`: added `project_router` — moved `POST/PATCH/DELETE /projects/{id}/tasks/batch`, `POST /projects/{id}/tasks`, `GET /projects/{id}/tasks/{id}/activity` out of `projects.py`
+- `main.py`: registered both `project_router`s under `/projects` prefix
+- `docs/database.md`: full rewrite — added `company_agents`, `team_github_tokens`, `team_api_logs`, `notifications`, `skills`, `user_skills`, `github_oauth_states`; updated `companies`, `teams`, `actors`, `tasks` with all new columns; complete migrations table
+- `docs/agent-flow.md`: rewrite — Docker image resolution table, AI key resolution, SSRF protection section, company agent templates
+- `docs/auth-flow.md`: rewrite — added skills modal section, cleaned up all flows
+- `agents/builtin/main.py`: GPT now uses single `response_format=json_object` call returning `{"narrative": "...", "files": [...]}` — no regex; Claude keeps `###FILES###` marker path; full response + extraction debug logging added
+
+---
+
 ## 2026-05-04 | `4f3d1a8` — feat: multiple builtin agent types with role-based image routing
 
 - Migration 017: `actors.docker_image`, `actors.extra_env`, `company_agents.docker_image/extra_env/agent_type`; `webhook_url` nullable

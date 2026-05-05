@@ -348,7 +348,6 @@ async def main() -> None:
         raise
     elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     log(f"AI responded in {elapsed:.1f}s — {len(content)} chars")
-    log(f"response_preview={content[:300]!r}", level="DEBUG")
     log(f"response_full=\n{content}", level="DEBUG")
 
     log(f"Parsed {len(files)} file(s) from response")
