@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction, Assignment, Project } from '../types'
 import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -159,6 +159,62 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       onClose()
     },
   })
+
+  const handleRefine = async () => {
+    const msg = 'Refine this task'
+    setIsStreaming(true)
+    setChatOpen(true)
+
+    // Snapshot history for backend (only user+assistant messages)
+    const historyForBackend = chat
+      .filter((m) => m.kind === 'user' || m.kind === 'assistant')
+      .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
+
+    // Reset ai_ready: user is actively refining — previous readiness judgement is now stale
+    if (task.ai_ready) setAiReady.mutate(false)
+
+    setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
+    scrollBottom()
+
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+    try {
+      const res = await fetch(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: msg, history: historyForBackend }),
+        signal: ctrl.signal,
+      })
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (payload === '[DONE]') break
+          try {
+            const { content } = JSON.parse(payload)
+            assistantContent += content
+          } catch { /* malformed SSE chunk — skip */ }
+        }
+      }
+      setChat((prev) => [
+        ...prev.filter((m) => m.kind !== 'thinking'),
+        { kind: 'assistant', content: assistantContent },
+      ])
+    } catch {
+      setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
+    }
+
+    setIsStreaming(false)
+    scrollBottom()
+  }
 
   const handlePrompt = async () => {
     const msg = promptInput.trim()
@@ -518,17 +574,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Status</h3>
-              <select
-                value={task.status}
-                onChange={(e) => updateStatus.mutate(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace('_', ' ')}
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={task.status}
+                  onChange={(e) => updateStatus.mutate(e.target.value)}
+                  className="flex-1 bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Assigned to</h3>
@@ -551,7 +609,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           </div>
 
           {/* Start Work */}
-          <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!task.is_ready && assignedActor && chat.length === 0 && (
+                <button
+                    onClick={handleRefine}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-blue-900/40 border border-blue-700/50 text-blue-400 hover:bg-blue-800/50 transition-colors disabled:opacity-50"
+                    title="Refine this task"
+                >
+                  {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                  Refine
+                </button>
+            )}
             <button
               onClick={() => {
                 const next = WORKFLOW[task.status]
@@ -703,7 +772,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                             <button onClick={() => { updateStatus.mutate(action.status, { onSuccess: markCardDone }) }} disabled={confirmed || updateStatus.isPending}
                               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
                               style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>
-                              {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><RefreshCw size={11} /> Apply</>}
+                              {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><Zap size={11} /> Apply</>}
                             </button>
                           </div>
                         )
@@ -756,12 +825,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         )
                       }
                       if (action.intent === 'mark_ready') {
+                        if (!confirmed && !setAiReady.isPending) {
+                          setAiReady.mutate(true, { onSuccess: markCardDone })
+                        }
                         return (
-                          <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
-                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
-                            <p className="text-xs text-gray-300">{action.summary}</p>
-                            <p className="text-xs text-gray-500">Save the decision cards above — the task will be marked ready automatically once decisions are persisted.</p>
-                          </div>
+                            <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
+                              <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
+                              <p className="text-xs text-gray-300">{action.summary}</p>
+                              <p className="text-xs text-gray-500">Approve the task above to allow execution.</p>
+                              {setAiReady.isPending && (
+                                  <p className="text-xs text-gray-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</p>
+                              )}
+                            </div>
                         )
                       }
                       if (action.intent === 'execute_task') {

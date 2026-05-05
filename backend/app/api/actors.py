@@ -65,6 +65,20 @@ def update_actor(actor_id: str, body: dict):
     # Scope the lookup to the actor's own company to prevent cross-tenant leakage.
     company_agent_id = body.get("company_agent_id")
     update = {k: v for k, v in body.items() if k in allowed_fields}
+    if "extra_env" in update and isinstance(update["extra_env"], dict):
+        incoming: dict = update["extra_env"]
+        existing_resp = db.table("actors").select("extra_env").eq("id", actor_id).single().execute()
+        existing: dict = (existing_resp.data or {}).get("extra_env") or {}
+        merged = {}
+        for key, value in incoming.items():
+            if not key.strip():
+                continue
+            if value == "***":
+                if key in existing:
+                    merged[key] = existing[key]
+            else:
+                merged[key] = value
+        update["extra_env"] = merged if merged else None
     if company_agent_id is not None:
         if company_agent_id:
             # Resolve actor → project → team → company
