@@ -24,6 +24,46 @@ const PRIORITY_COLOR: Record<string, string> = {
   critical: 'text-red-400',
 }
 
+async function readSSE(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onPayload: (payload: string) => void
+): Promise<void> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let done = false
+  const consumeLine = (line: string) => {
+    if (!line.startsWith('data:')) return
+    const payload = line.slice(5).trim()
+    if (payload === '[DONE]') {
+      done = true
+      return
+    }
+    onPayload(payload)
+  }
+  while (!done) {
+    const { done: streamDone, value } = await reader.read()
+    if (streamDone) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      consumeLine(line)
+      if (done) break
+    }
+  }
+  if (!done) {
+    // Flush any pending decoder bytes and process final line if stream ended without trailing newline.
+    buffer += decoder.decode()
+    if (buffer) {
+      for (const line of buffer.split('\n')) {
+        consumeLine(line)
+        if (done) break
+      }
+    }
+  }
+  reader.cancel()
+}
+
 // Chat message types
 type ChatMsg =
   | { kind: 'user'; content: string }
@@ -160,17 +200,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     },
   })
 
-  const handleRefine = async () => {
-    const msg = 'Refine this task'
+  const streamPrompt = async (msg: string) => {
     setIsStreaming(true)
-    setChatOpen(true)
 
-    // Snapshot history for backend (only user+assistant messages)
     const historyForBackend = chat
       .filter((m) => m.kind === 'user' || m.kind === 'assistant')
       .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
 
-    // Reset ai_ready: user is actively refining — previous readiness judgement is now stale
     if (task.ai_ready) setAiReady.mutate(false)
 
     setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
@@ -187,23 +223,14 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         body: JSON.stringify({ prompt: msg, history: historyForBackend }),
         signal: ctrl.signal,
       })
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
+      if (!res.ok || !res.body) throw new Error('Prompt stream unavailable')
       let assistantContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const { content } = JSON.parse(payload)
-            assistantContent += content
-          } catch { /* malformed SSE chunk — skip */ }
-        }
-      }
+      await readSSE(res.body!.getReader(), (payload) => {
+        try {
+          const { content } = JSON.parse(payload)
+          assistantContent += content
+        } catch { /* malformed SSE chunk — skip */ }
+      })
       setChat((prev) => [
         ...prev.filter((m) => m.kind !== 'thinking'),
         { kind: 'assistant', content: assistantContent },
@@ -216,61 +243,16 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     scrollBottom()
   }
 
+  const handleRefine = async () => {
+    setChatOpen(true)
+    await streamPrompt('Refine this task')
+  }
+
   const handlePrompt = async () => {
     const msg = promptInput.trim()
     if (!msg || isStreaming) return
     setPromptInput('')
-    setIsStreaming(true)
-
-    // Snapshot history for backend (only user+assistant messages)
-    const historyForBackend = chat
-      .filter((m) => m.kind === 'user' || m.kind === 'assistant')
-      .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
-
-    // Reset ai_ready: user is actively refining — previous readiness judgement is now stale
-    if (task.ai_ready) setAiReady.mutate(false)
-
-    setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
-    scrollBottom()
-
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-    try {
-      const res = await fetch(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: msg, history: historyForBackend }),
-        signal: ctrl.signal,
-      })
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let assistantContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const { content } = JSON.parse(payload)
-            assistantContent += content
-          } catch { /* malformed SSE chunk — skip */ }
-        }
-      }
-      setChat((prev) => [
-        ...prev.filter((m) => m.kind !== 'thinking'),
-        { kind: 'assistant', content: assistantContent },
-      ])
-    } catch {
-      setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
-    }
-
-    setIsStreaming(false)
-    scrollBottom()
+    await streamPrompt(msg)
   }
 
   const handleExecute = async () => {
@@ -287,36 +269,27 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
     try {
       const res = await fetch(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
+      if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
       let planShown = false
       let deliverableContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const evt = JSON.parse(payload)
-            if (evt.type === 'plan') {
-              setChat((prev) => [
-                ...prev.filter((m) => m.kind !== 'thinking'),
-                { kind: 'plan', content: evt.content },
-              ])
-              planShown = true
-              scrollBottom()
-            } else if (evt.type === 'content') {
-              deliverableContent += evt.content
-            } else if (evt.content) {
-              // legacy fallback (no type field)
-              deliverableContent += evt.content
-            }
-          } catch { /* malformed SSE chunk — skip */ }
-        }
-      }
+      await readSSE(res.body!.getReader(), (payload) => {
+        try {
+          const evt = JSON.parse(payload)
+          if (evt.type === 'plan') {
+            setChat((prev) => [
+              ...prev.filter((m) => m.kind !== 'thinking'),
+              { kind: 'plan', content: evt.content },
+            ])
+            planShown = true
+            scrollBottom()
+          } else if (evt.type === 'content') {
+            deliverableContent += evt.content
+          } else if (evt.content) {
+            // legacy fallback (no type field)
+            deliverableContent += evt.content
+          }
+        } catch { /* malformed SSE chunk — skip */ }
+      })
 
       // Show deliverable as a chat card
       if (deliverableContent) {
@@ -825,18 +798,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         )
                       }
                       if (action.intent === 'mark_ready') {
-                        if (!confirmed && !setAiReady.isPending) {
-                          setAiReady.mutate(true, { onSuccess: markCardDone })
-                        }
                         return (
-                            <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
-                              <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
-                              <p className="text-xs text-gray-300">{action.summary}</p>
-                              <p className="text-xs text-gray-500">Approve the task above to allow execution.</p>
-                              {setAiReady.isPending && (
-                                  <p className="text-xs text-gray-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</p>
-                              )}
-                            </div>
+                          <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
+                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
+                            <p className="text-xs text-gray-300">{action.summary}</p>
+                            <button
+                              onClick={() => setAiReady.mutate(true, { onSuccess: markCardDone })}
+                              disabled={confirmed || setAiReady.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.12)', color: '#facc15' }}
+                            >
+                              {confirmed ? <><CheckCircle size={11} /> Marked ready</> : setAiReady.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><Sparkles size={11} /> Mark as AI ready</>}
+                            </button>
+                          </div>
                         )
                       }
                       if (action.intent === 'execute_task') {
