@@ -7,6 +7,8 @@ import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
+import { useConfirmation } from '../hooks/useConfirmation'
+import { ConfirmationModal } from './ConfirmationModal'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -82,6 +84,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
+  const { confirmation, confirm } = useConfirmation()
 
   // Unified chat log — user msgs, agent replies, plans, deliverables
   const [chat, setChat] = useState<ChatMsg[]>([])
@@ -343,8 +346,15 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               <Activity size={16} />
             </button>
             <button
-              onClick={() => {
-                if (confirm('Delete this task? This cannot be undone.')) deleteTask.mutate()
+              onClick={async () => {
+                const confirmed = await confirm({
+                  title: 'Delete Task',
+                  message: 'Delete this task? This cannot be undone.',
+                  confirmText: 'Delete',
+                  cancelText: 'Cancel',
+                  isDangerous: true,
+                })
+                if (confirmed) deleteTask.mutate()
               }}
               disabled={deleteTask.isPending}
               className="text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
@@ -869,6 +879,12 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         }
         </div>
       </div>
+
+      <ConfirmationModal
+        confirmation={confirmation}
+        onConfirm={() => confirmation?.onConfirm()}
+        onCancel={() => confirmation?.onCancel()}
+      />
     </div>
   )
 }

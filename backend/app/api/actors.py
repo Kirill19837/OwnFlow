@@ -3,9 +3,10 @@ from __future__ import annotations
 import random
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.db import get_supabase
 from app.models import ActorCreate
+from app.auth_deps import current_user_id
 
 router = APIRouter()
 project_router = APIRouter()
@@ -46,8 +47,24 @@ def get_actor(actor_id: str):
 
 
 @router.patch("/{actor_id}")
-def update_actor(actor_id: str, body: dict):
+def update_actor(actor_id: str, body: dict, _caller_id: str = Depends(current_user_id)):
     db = get_supabase()
+    
+    # Verify that the actor belongs to a project/team the user has access to.
+    # This prevents cross-tenant leakage when fetching existing extra_env values.
+    actor_resp = db.table("actors").select("project_id").eq("id", actor_id).single().execute()
+    if not actor_resp.data:
+        raise HTTPException(404, "Actor not found")
+    project_id = actor_resp.data.get("project_id")
+    if project_id:
+        # Verify user is a member of the team that owns this project
+        proj_resp = db.table("projects").select("team_id").eq("id", project_id).single().execute()
+        team_id = (proj_resp.data or {}).get("team_id")
+        if team_id:
+            member_resp = db.table("team_members").select("user_id").eq("team_id", team_id).eq("user_id", _caller_id).single().execute()
+            if not member_resp.data:
+                raise HTTPException(403, "You do not have access to this actor")
+    
     allowed_fields = {
         "name",
         "role",
@@ -68,7 +85,8 @@ def update_actor(actor_id: str, body: dict):
     if "extra_env" in update and isinstance(update["extra_env"], dict):
         incoming: dict = update["extra_env"]
         # Only fetch existing values when a masked sentinel is present and merge is needed.
-        needs_merge = any(value in ("", "***") for value in incoming.values())
+        # Safe: actor belongs to authorized user's team (verified above).
+        needs_merge = any(value == "***" for value in incoming.values())
         existing: dict = {}
         if needs_merge:
             existing_resp = db.table("actors").select("extra_env").eq("id", actor_id).single().execute()
@@ -76,13 +94,14 @@ def update_actor(actor_id: str, body: dict):
 
         merged = {}
         for key, value in incoming.items():
-            if not key.strip():
+            k = key.strip()
+            if not k:
                 continue
-            if value in ("", "***"):
-                if key in existing:
-                    merged[key] = existing[key]
+            if value == "***":
+                if k in existing:
+                    merged[k] = existing[k]
             else:
-                merged[key] = value
+                merged[k] = value
         update["extra_env"] = merged if merged else None
     if company_agent_id is not None:
         if company_agent_id:

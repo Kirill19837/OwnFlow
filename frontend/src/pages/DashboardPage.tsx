@@ -8,6 +8,8 @@ import api from '../lib/api'
 import type { Project } from '../types'
 import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { useConfirmation } from '../hooks/useConfirmation'
+import { ConfirmationModal } from '../components/ConfirmationModal'
 
 interface TaskActivity {
   task: { id: string; title: string; status: string; priority: string; agent_dispatched_at?: string }
@@ -63,6 +65,7 @@ export default function DashboardPage() {
   const { setProjects, projects } = useProjectStore()
   const { activeTeam } = useTeamStore()
   const queryClient = useQueryClient()
+  const { confirmation, confirm } = useConfirmation()
 
   // Re-generate log panel state
   const [regenProjectId, setRegenProjectId] = useState<string | null>(null)
@@ -338,9 +341,16 @@ export default function DashboardPage() {
               </button>
               <button
                 title="Delete project"
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.preventDefault()
-                  if (confirm(`Delete "${p.name}"? This cannot be undone.`)) deleteProject.mutate(p.id)
+                  const confirmed = await confirm({
+                    title: 'Delete Project',
+                    message: `Delete "${p.name}"? This cannot be undone.`,
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    isDangerous: true,
+                  })
+                  if (confirmed) deleteProject.mutate(p.id)
                 }}
                 className="p-1.5 rounded-lg bg-gray-800 hover:bg-red-900/60 text-gray-400 hover:text-red-400 transition-colors"
               >
@@ -394,6 +404,12 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        confirmation={confirmation}
+        onConfirm={() => confirmation?.onConfirm()}
+        onCancel={() => confirmation?.onCancel()}
+      />
     </div>
   )
 }
