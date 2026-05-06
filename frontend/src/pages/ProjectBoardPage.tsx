@@ -9,7 +9,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useRealtimeProject } from '../hooks/useRealtimeProject'
 import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../types'
 import { ExtraEnvEditor } from '../components/ExtraEnvEditor'
-import { envPairsToObj, envObjToPairs } from '../lib/envUtils'
+import { envObjToPairs } from '../lib/envUtils'
 import type { EnvPair } from '../lib/envUtils'
 
 // Mirrors backend ROLE_IMAGE_MAP in actor_executor.py
@@ -891,8 +891,13 @@ export default function ProjectBoardPage() {
                               <button
                                 onClick={() => {
                                   const pairs = actorEnvEdits[a.id] ?? []
-                                  const hasMasked = pairs.some((p) => p.isMasked)
-                                  const patch = hasMasked ? {} : { extra_env: envPairsToObj(pairs) ?? null }
+                                  const envObj: Record<string, string> = {}
+                                  for (const p of pairs) {
+                                    if (p.key.trim()) {
+                                      envObj[p.key.trim()] = p.isMasked ? '***' : p.value
+                                    }
+                                  }
+                                  const patch = { extra_env: Object.keys(envObj).length > 0 ? envObj : null }
                                   updateActor.mutate({ actorId: a.id, patch })
                                   setActorEnvOpen((prev) => ({ ...prev, [a.id]: false }))
                                 }}

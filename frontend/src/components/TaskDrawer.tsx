@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, RefreshCw, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction, Assignment, Project } from '../types'
 import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
+import { useConfirmation } from '../hooks/useConfirmation'
+import { ConfirmationModal } from './ConfirmationModal'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -22,6 +24,46 @@ const PRIORITY_COLOR: Record<string, string> = {
   medium: 'text-yellow-400',
   high: 'text-orange-400',
   critical: 'text-red-400',
+}
+
+async function readSSE(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onPayload: (payload: string) => void
+): Promise<void> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let done = false
+  const consumeLine = (line: string) => {
+    if (!line.startsWith('data:')) return
+    const payload = line.slice(5).trim()
+    if (payload === '[DONE]') {
+      done = true
+      return
+    }
+    onPayload(payload)
+  }
+  while (!done) {
+    const { done: streamDone, value } = await reader.read()
+    if (streamDone) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      consumeLine(line)
+      if (done) break
+    }
+  }
+  if (!done) {
+    // Flush any pending decoder bytes and process final line if stream ended without trailing newline.
+    buffer += decoder.decode()
+    if (buffer) {
+      for (const line of buffer.split('\n')) {
+        consumeLine(line)
+        if (done) break
+      }
+    }
+  }
+  reader.cancel()
 }
 
 // Chat message types
@@ -42,6 +84,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
+  const { confirmation, confirm } = useConfirmation()
 
   // Unified chat log — user msgs, agent replies, plans, deliverables
   const [chat, setChat] = useState<ChatMsg[]>([])
@@ -160,18 +203,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     },
   })
 
-  const handlePrompt = async () => {
-    const msg = promptInput.trim()
-    if (!msg || isStreaming) return
-    setPromptInput('')
+  const streamPrompt = async (msg: string) => {
     setIsStreaming(true)
 
-    // Snapshot history for backend (only user+assistant messages)
     const historyForBackend = chat
       .filter((m) => m.kind === 'user' || m.kind === 'assistant')
       .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
 
-    // Reset ai_ready: user is actively refining — previous readiness judgement is now stale
     if (task.ai_ready) setAiReady.mutate(false)
 
     setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
@@ -188,23 +226,14 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         body: JSON.stringify({ prompt: msg, history: historyForBackend }),
         signal: ctrl.signal,
       })
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
+      if (!res.ok || !res.body) throw new Error('Prompt stream unavailable')
       let assistantContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const { content } = JSON.parse(payload)
-            assistantContent += content
-          } catch { /* malformed SSE chunk — skip */ }
-        }
-      }
+      await readSSE(res.body!.getReader(), (payload) => {
+        try {
+          const { content } = JSON.parse(payload)
+          assistantContent += content
+        } catch { /* malformed SSE chunk — skip */ }
+      })
       setChat((prev) => [
         ...prev.filter((m) => m.kind !== 'thinking'),
         { kind: 'assistant', content: assistantContent },
@@ -215,6 +244,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
     setIsStreaming(false)
     scrollBottom()
+  }
+
+  const handleRefine = async () => {
+    setChatOpen(true)
+    await streamPrompt('Refine this task')
+  }
+
+  const handlePrompt = async () => {
+    const msg = promptInput.trim()
+    if (!msg || isStreaming) return
+    setPromptInput('')
+    await streamPrompt(msg)
   }
 
   const handleExecute = async () => {
@@ -231,36 +272,27 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
     try {
       const res = await fetch(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
+      if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
       let planShown = false
       let deliverableContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const evt = JSON.parse(payload)
-            if (evt.type === 'plan') {
-              setChat((prev) => [
-                ...prev.filter((m) => m.kind !== 'thinking'),
-                { kind: 'plan', content: evt.content },
-              ])
-              planShown = true
-              scrollBottom()
-            } else if (evt.type === 'content') {
-              deliverableContent += evt.content
-            } else if (evt.content) {
-              // legacy fallback (no type field)
-              deliverableContent += evt.content
-            }
-          } catch { /* malformed SSE chunk — skip */ }
-        }
-      }
+      await readSSE(res.body!.getReader(), (payload) => {
+        try {
+          const evt = JSON.parse(payload)
+          if (evt.type === 'plan') {
+            setChat((prev) => [
+              ...prev.filter((m) => m.kind !== 'thinking'),
+              { kind: 'plan', content: evt.content },
+            ])
+            planShown = true
+            scrollBottom()
+          } else if (evt.type === 'content') {
+            deliverableContent += evt.content
+          } else if (evt.content) {
+            // legacy fallback (no type field)
+            deliverableContent += evt.content
+          }
+        } catch { /* malformed SSE chunk — skip */ }
+      })
 
       // Show deliverable as a chat card
       if (deliverableContent) {
@@ -314,8 +346,15 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               <Activity size={16} />
             </button>
             <button
-              onClick={() => {
-                if (confirm('Delete this task? This cannot be undone.')) deleteTask.mutate()
+              onClick={async () => {
+                const confirmed = await confirm({
+                  title: 'Delete Task',
+                  message: 'Delete this task? This cannot be undone.',
+                  confirmText: 'Delete',
+                  cancelText: 'Cancel',
+                  isDangerous: true,
+                })
+                if (confirmed) deleteTask.mutate()
               }}
               disabled={deleteTask.isPending}
               className="text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
@@ -518,17 +557,19 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Status</h3>
-              <select
-                value={task.status}
-                onChange={(e) => updateStatus.mutate(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace('_', ' ')}
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={task.status}
+                  onChange={(e) => updateStatus.mutate(e.target.value)}
+                  className="flex-1 bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Assigned to</h3>
@@ -551,7 +592,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           </div>
 
           {/* Start Work */}
-          <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!task.is_ready && assignedActor && chat.length === 0 && (
+                <button
+                    onClick={handleRefine}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-blue-900/40 border border-blue-700/50 text-blue-400 hover:bg-blue-800/50 transition-colors disabled:opacity-50"
+                    title="Refine this task"
+                >
+                  {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                  Refine
+                </button>
+            )}
             <button
               onClick={() => {
                 const next = WORKFLOW[task.status]
@@ -703,7 +755,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                             <button onClick={() => { updateStatus.mutate(action.status, { onSuccess: markCardDone }) }} disabled={confirmed || updateStatus.isPending}
                               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
                               style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>
-                              {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><RefreshCw size={11} /> Apply</>}
+                              {confirmed ? <><CheckCircle size={11} /> Done</> : updateStatus.isPending ? <><Loader2 size={11} className="animate-spin" /> Updating…</> : <><Zap size={11} /> Apply</>}
                             </button>
                           </div>
                         )
@@ -760,7 +812,14 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                           <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
                             <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
                             <p className="text-xs text-gray-300">{action.summary}</p>
-                            <p className="text-xs text-gray-500">Save the decision cards above — the task will be marked ready automatically once decisions are persisted.</p>
+                            <button
+                              onClick={() => setAiReady.mutate(true, { onSuccess: markCardDone })}
+                              disabled={confirmed || setAiReady.isPending}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.12)', color: '#facc15' }}
+                            >
+                              {confirmed ? <><CheckCircle size={11} /> Marked ready</> : setAiReady.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><Sparkles size={11} /> Mark as AI ready</>}
+                            </button>
                           </div>
                         )
                       }
@@ -820,6 +879,12 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         }
         </div>
       </div>
+
+      <ConfirmationModal
+        confirmation={confirmation}
+        onConfirm={() => confirmation?.onConfirm()}
+        onCancel={() => confirmation?.onCancel()}
+      />
     </div>
   )
 }
