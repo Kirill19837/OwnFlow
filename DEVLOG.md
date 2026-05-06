@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-05-06 | `507b617` — feat: AI commands help modal for board and task chat inputs
+
+- **AiCommandsModal.tsx**: New modal component listing available commands for both the board AI and task AI contexts. Each command shows an icon, label, clickable example prompt, and description. Clicking an example prefills the chat input.
+- **ProjectBoardPage.tsx**: Added `?` (HelpCircle) button to the left of the board AI input. Opens `AiCommandsModal` in `board` context, covering: create tasks, update tasks, delete tasks, assign actor, ask anything.
+- **TaskDrawer.tsx**: Added `?` button to the left of the task AI textarea. Opens `AiCommandsModal` in `task` context, covering: refine task, mark as AI ready, validate results, ask anything.
+
+---
+
 ## 2026-05-06 | `4a69ccd` — feat: AI ready UX polish + output-type guidance
 
 - **TaskDrawer.tsx — auto-confirm ai_ready**: When AI responds with a `mark_ready` action, `ai_ready` is now set automatically — no button click required. Chat card shows "Marked AI ready automatically".

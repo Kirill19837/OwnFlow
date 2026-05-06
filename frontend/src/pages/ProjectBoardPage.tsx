@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import api from '../lib/api'
@@ -59,14 +59,17 @@ const COLUMNS = [
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { session } = useAuthStore()
   const { company } = useCompanyStore()
   const { currentProject, setCurrentProject } = useProjectStore()
   const userId = session?.user?.id ?? ''
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const selectedTaskId = searchParams.get('task')
+  const setSelectedTaskId = (id: string | null) =>
+    setSearchParams((prev) => { const next = new URLSearchParams(prev); if (id) next.set('task', id); else next.delete('task'); return next }, { replace: true })
   const [activeSprint, setActiveSprint] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(
-    () => new URLSearchParams(window.location.search).get('github_connected') === '1'
+    () => searchParams.get('github_connected') === '1'
   )
 
   // Board-level prompt
