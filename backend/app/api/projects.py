@@ -510,12 +510,15 @@ async def prompt_project_stream(project_id: str, body: dict):
     sprints_resp = db.table("sprints").select("id,sprint_number").eq("project_id", project_id).execute()
     sprint_ids = [s["id"] for s in sprints_resp.data or []]
     tasks_resp = db.table("tasks").select("id,title,status,type,priority,estimated_hours").in_("sprint_id", sprint_ids).execute() if sprint_ids else type("R", (), {"data": []})()
+    # Actors come from the client (already in frontend state) — no extra DB roundtrip
+    actors = body.get("actors") or []
 
     history = body.get("history") or []
     messages = build_project_board_messages(
         project=project,
         sprints=sprints_resp.data or [],
         tasks=tasks_resp.data or [],
+        actors=actors,
         history=history,
         user_prompt=user_prompt,
     )

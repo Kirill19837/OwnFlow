@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-05-06 | `4a69ccd` — feat: AI ready UX polish + output-type guidance
+
+- **TaskDrawer.tsx — auto-confirm ai_ready**: When AI responds with a `mark_ready` action, `ai_ready` is now set automatically — no button click required. Chat card shows "Marked AI ready automatically".
+- **TaskDrawer.tsx — preserve AI Ready badge on follow-up**: Removed auto-clear of `ai_ready` on every user message. Badge now persists across follow-up questions; only resets when the user asks a new question that changes the AI's assessment (re-evaluation via next response).
+- **TaskDrawer.tsx — re-evaluate on new message**: `ai_ready` is cleared before each new user prompt so the AI can re-assess readiness and set it again if still confident.
+- **TaskDrawer.tsx — strip FILES block from chat**: Deliverable cards no longer show raw `###FILES###` text; file paths are parsed and rendered as monospace chips with file icons.
+- **task_assistant.py — output-type guidance**: System prompt now includes an EXPECTED OUTPUT section mapping each task type (code/design/review/research/qa/devops) to its concrete deliverable and key refinement questions. `mark_ready` summaries must name the specific deliverable.
+
+---
+
 ## 2026-05-06 | `8b57d4c` — feat: post-execution review flow
 
 - **agents.py**: Agent callback now sets `status="review"` + `is_ready=False` + `ai_ready=False` instead of `status="done"`. Tasks require human validation before closure.

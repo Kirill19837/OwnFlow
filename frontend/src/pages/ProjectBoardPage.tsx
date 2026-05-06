@@ -36,7 +36,8 @@ function resolveActorImageSource(actor: { webhook_url?: string; docker_image?: s
 }
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
-import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap } from 'lucide-react'
+import { AiCommandsModal } from '../components/AiCommandsModal'
+import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap, HelpCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -77,6 +78,7 @@ export default function ProjectBoardPage() {
   const boardPromptAbortRef = useRef<AbortController | null>(null)
   const [createdMsgIndices, setCreatedMsgIndices] = useState<Set<number>>(new Set())
   const [boardMinimized, setBoardMinimized] = useState(false)
+  const [showBoardCommands, setShowBoardCommands] = useState(false)
   const [settingsName, setSettingsName] = useState('')
   const [settingsPrompt, setSettingsPrompt] = useState('')
   const [settingsSprintDays, setSettingsSprintDays] = useState<number>(3)
@@ -257,10 +259,11 @@ export default function ProjectBoardPage() {
     onSuccess: () => refetchGithub(),
   })
 
-  type StructuredAction = {
-    intent: 'create_tasks' | 'modify_tasks' | 'delete_tasks'
-    tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string }[]
-  }
+  type StructuredAction =
+    | { intent: 'create_tasks'; tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string; actor_id?: string }[] }
+    | { intent: 'modify_tasks'; tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string }[] }
+    | { intent: 'delete_tasks'; tasks: { title: string; description?: string; type?: string; priority?: string; estimated_hours?: number; id?: string }[] }
+    | { intent: 'assign_actor'; task_id: string; actor_id: string; actor_name: string }
 
   function parseStructuredAction(content: string): StructuredAction | null {
     const m = content.match(/```json\s*([\s\S]*?)```/)
@@ -271,6 +274,9 @@ export default function ProjectBoardPage() {
         ['create_tasks', 'modify_tasks', 'delete_tasks'].includes(parsed.intent) &&
         Array.isArray(parsed.tasks)
       ) {
+        return parsed as StructuredAction
+      }
+      if (parsed.intent === 'assign_actor' && parsed.task_id && parsed.actor_id) {
         return parsed as StructuredAction
       }
     } catch { /* invalid JSON — not a structured action */ }
@@ -284,14 +290,20 @@ export default function ProjectBoardPage() {
   })
 
   const modifyTasksFromAI = useMutation({
-    mutationFn: (tasks: StructuredAction['tasks']) =>
+    mutationFn: (tasks: { id?: string; title?: string; description?: string; type?: string; priority?: string; estimated_hours?: number }[]) =>
       api.patch(`/projects/${projectId}/tasks/batch`, { tasks }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
   const deleteTasksFromAI = useMutation({
-    mutationFn: (tasks: StructuredAction['tasks']) =>
+    mutationFn: (tasks: { id?: string }[]) =>
       api.delete(`/projects/${projectId}/tasks/batch`, { data: { tasks } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  const assignFromBoard = useMutation({
+    mutationFn: ({ taskId, actorId }: { taskId: string; actorId: string }) =>
+      api.patch(`/tasks/${taskId}/assign`, { actor_id: actorId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
@@ -362,7 +374,13 @@ export default function ProjectBoardPage() {
       const res = await fetch(`${baseUrl}/projects/${projectId}/prompt/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: msg, history: boardChatHistory }),
+        body: JSON.stringify({
+          prompt: msg,
+          history: boardChatHistory,
+          actors: (project?.actors ?? []).map((a) => ({
+            id: a.id, name: a.name, role: a.role, type: a.type, model: a.model,
+          })),
+        }),
         signal: ctrl.signal,
       })
       const reader = res.body!.getReader()
@@ -1163,6 +1181,32 @@ export default function ProjectBoardPage() {
                 }
 
                 if (action) {
+                  // Handle assign_actor separately — it's not a tasks-array intent
+                  if (action.intent === 'assign_actor') {
+                    const targetTask = (project?.tasks ?? []).find((t) => t.id === action.task_id)
+                    return (
+                      <div key={i} className="bg-gray-950 border border-gray-700 rounded-xl p-3 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-400">Assign actor</p>
+                        <p className="text-sm text-white">
+                          {targetTask?.title ?? action.task_id}
+                          <span className="text-gray-400"> → </span>
+                          {action.actor_name}
+                        </p>
+                        <button
+                          onClick={() => assignFromBoard.mutate(
+                            { taskId: action.task_id, actorId: action.actor_id },
+                            { onSuccess: () => setCreatedMsgIndices((prev) => new Set([...prev, i])) },
+                          )}
+                          disabled={alreadyConfirmed || assignFromBoard.isPending}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
+                          style={alreadyConfirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(59,130,246,0.2)', color: '#93c5fd' }}
+                        >
+                          {alreadyConfirmed ? 'Assigned ✓' : assignFromBoard.isPending ? 'Assigning…' : 'Assign'}
+                        </button>
+                      </div>
+                    )
+                  }
+
                   const isPending =
                     action.intent === 'create_tasks' ? createTasksFromAI.isPending
                     : action.intent === 'modify_tasks' ? modifyTasksFromAI.isPending
@@ -1256,6 +1300,13 @@ export default function ProjectBoardPage() {
 
           {!boardMinimized ? (
             <div className="flex gap-2 items-center px-3 py-2">
+              <button
+                onClick={() => setShowBoardCommands(true)}
+                className="text-gray-500 hover:text-purple-400 transition-colors shrink-0"
+                title="Show available commands"
+              >
+                <HelpCircle size={15} />
+              </button>
               <input
                 type="text"
                 value={boardPrompt}
@@ -1277,6 +1328,14 @@ export default function ProjectBoardPage() {
           )}
         </div>
       </div>
+
+      {showBoardCommands && (
+        <AiCommandsModal
+          context="board"
+          onClose={() => setShowBoardCommands(false)}
+          onCommandClick={(example) => setBoardPrompt(example)}
+        />
+      )}
     </div>
   )
 }

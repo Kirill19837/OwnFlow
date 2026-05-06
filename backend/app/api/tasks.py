@@ -381,7 +381,22 @@ async def create_tasks_for_project(project_id: str, body: dict):
         )
 
     result = db.table("tasks").insert(rows).execute()
-    return {"created": len(rows), "tasks": result.data or []}
+    created = result.data or []
+
+    # Auto-assign actor if provided per task
+    for task_in, task_row in zip(tasks_in, created):
+        actor_id = (task_in.get("actor_id") or "").strip()
+        if actor_id and task_row.get("id"):
+            try:
+                db.table("assignments").insert({
+                    "task_id": task_row["id"],
+                    "actor_id": actor_id,
+                    "assigned_by": "ai",
+                }).execute()
+            except Exception:
+                pass  # don't fail the whole batch if one assignment fails
+
+    return {"created": len(rows), "tasks": created}
 
 
 @project_router.patch("/{project_id}/tasks/batch")

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2 } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2, HelpCircle } from 'lucide-react'
 import type { Task, Actor, Deliverable, TaskInteraction, Assignment, Project } from '../types'
 import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 import { useConfirmation } from '../hooks/useConfirmation'
 import { ConfirmationModal } from './ConfirmationModal'
+import { AiCommandsModal } from './AiCommandsModal'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -92,6 +93,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
   const [promptInput, setPromptInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [confirmedIndices, setConfirmedIndices] = useState<Set<number>>(new Set())
+  const [showTaskCommands, setShowTaskCommands] = useState(false)
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
 
   // Unsaved decisions from the most recent AI message — shown as sticky panel in task window
@@ -899,6 +901,13 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
           {/* Input */}
           <div className="flex gap-2 items-end px-4 pb-4 pt-2 shrink-0">
+            <button
+              onClick={() => setShowTaskCommands(true)}
+              className="text-gray-500 hover:text-purple-400 transition-colors shrink-0 pb-2"
+              title="Show available commands"
+            >
+              <HelpCircle size={15} />
+            </button>
             <textarea
               rows={1}
               value={promptInput}
@@ -925,6 +934,14 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         onConfirm={() => confirmation?.onConfirm()}
         onCancel={() => confirmation?.onCancel()}
       />
+
+      {showTaskCommands && (
+        <AiCommandsModal
+          context="task"
+          onClose={() => setShowTaskCommands(false)}
+          onCommandClick={(example) => { setPromptInput(example); setChatOpen(true) }}
+        />
+      )}
     </div>
   )
 }

@@ -5,6 +5,7 @@ def build_project_board_messages(
     project: dict,
     sprints: list[dict],
     tasks: list[dict],
+    actors: list[dict],
     history: list[dict],
     user_prompt: str,
 ) -> list[dict]:
@@ -19,6 +20,10 @@ def build_project_board_messages(
         )
         for t in (tasks or [])
     ) or "no tasks yet"
+    actors_lines = "\n".join(
+        f'- id:{a["id"]} | {a["name"]} | {a.get("role","") or a.get("type","")} | {"AI" if a.get("type") == "ai" else "Human"}'
+        for a in (actors or [])
+    ) or "none"
 
     return [
         {
@@ -29,19 +34,27 @@ def build_project_board_messages(
                 f"Brief: {project.get('prompt', '')}\n"
                 f"Sprints: {sprint_summary or 'none yet'}\n\n"
                 f"Current tasks:\n{task_lines}\n\n"
+                f"Team actors (use exact IDs when assigning):\n{actors_lines}\n\n"
                 "Answer helpfully and concisely.\n\n"
                 "IMPORTANT - structured output rule:\n"
                 "When the user asks to CREATE, ADD, DELETE, MODIFY, UPDATE, REGENERATE, or ADD DETAILS to tasks, "
                 "respond ONLY with a single fenced JSON block - no prose before or after it.\n\n"
+                "When creating tasks, always include an 'actor_id' if an actor clearly matches the task "
+                "type or role (e.g. a designer for a design task, a backend dev for a code task). "
+                "Use the exact actor id from the list above. Omit actor_id if no actor fits.\n\n"
+                "When the user asks to assign a task to someone, respond ONLY with an assign_actor block.\n\n"
                 "Shapes:\n"
                 "```json\n"
-                '{"intent":"create_tasks","tasks":[{"title":"...","description":"...","type":"feature|bug|chore|spike","priority":"low|medium|high","estimated_hours":2}]}\n'
+                '{"intent":"create_tasks","tasks":[{"title":"...","description":"...","type":"code|design|review|research|qa|devops","priority":"low|medium|high","estimated_hours":2,"actor_id":"<actor id or omit>"}]}\n'
                 "```\n"
                 "```json\n"
                 '{"intent":"modify_tasks","tasks":[{"id":"<existing task id>","title":"...","description":"...","type":"...","priority":"...","estimated_hours":2}]}\n'
                 "```\n"
                 "```json\n"
                 '{"intent":"delete_tasks","tasks":[{"id":"<existing task id>","title":"..."}]}\n'
+                "```\n"
+                "```json\n"
+                '{"intent":"assign_actor","task_id":"<existing task id>","actor_id":"<actor id>","actor_name":"<actor name>"}\n'
                 "```\n"
                 "For 'regenerate', use delete_tasks for old ones and create_tasks for new ones - pick whichever fits.\n"
                 "For all other questions, answer normally using Markdown."
