@@ -132,8 +132,8 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # ── Persist agent logs to ai_logs ─────────────────────────────────────────
     if body.logs:
         project_id = task.get("project_id")
-        # Resolve team log_level threshold (default 1=info)
-        team_log_level = 1
+        # Resolve team log_level threshold (default 0=debug — store everything)
+        team_log_level = 0
         try:
             proj_team_id = None
             proj_resp = db.table("projects").select("team_id").eq("id", task.get("project_id", "")).single().execute()
@@ -142,7 +142,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
             if proj_team_id:
                 team_resp = db.table("teams").select("log_level").eq("id", proj_team_id).single().execute()
                 if team_resp.data:
-                    team_log_level = team_resp.data.get("log_level", 1)
+                    team_log_level = team_resp.data.get("log_level") or 0
         except Exception:
             pass
         for entry in body.logs:

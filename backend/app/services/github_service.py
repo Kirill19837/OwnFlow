@@ -14,6 +14,7 @@ import re
 import httpx
 
 from app.db import get_supabase
+from app.config import get_settings
 
 GITHUB_API = "https://api.github.com"
 
@@ -380,8 +381,7 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
             token, owner, repo, branch,
             title=f"[OwnFlow] {task_title}",
             body=(
-                f"**Task:** {task_title}\n\n"
-                f"**Task ID:** `{task_id}`\n\n"
+                f"**Task:** [{task_title}]({get_settings().frontend_url.rstrip('/')}/projects/{project_id}?task={task_id})\n\n"
                 + (f"_{len(code_files)} file(s) committed_\n\n" if code_files else "")
                 + "---\n\n"
                 + narrative[:3000]

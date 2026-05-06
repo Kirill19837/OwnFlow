@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-06 | `cf8b594` — feat: deep linking for board tasks via ?task= query param
+
+- **ProjectBoardPage.tsx**: `selectedTaskId` is now derived from `?task=<id>` URL query param via `useSearchParams`. Opening a task card sets `?task=<id>`; closing removes it. Navigating directly to `/projects/<projectId>?task=<taskId>` auto-opens the drawer. URL updates use `replace: true` to avoid polluting browser history.
+
+---
+
 ## 2026-05-06 | `507b617` — feat: AI commands help modal for board and task chat inputs
 
 - **AiCommandsModal.tsx**: New modal component listing available commands for both the board AI and task AI contexts. Each command shows an icon, label, clickable example prompt, and description. Clicking an example prefills the chat input.

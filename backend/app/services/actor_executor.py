@@ -485,6 +485,7 @@ async def stream_task_execution(task_id: str, actor_id: str):
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
             "project_id": project["id"],
+            "task_id": task_id,
             "phase": 4,
             "message": f"Actor '{actor.get('name', actor_id)}' streamed task: {task['title']}",
             "level": 1,
