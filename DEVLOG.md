@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-05-06 | `8b57d4c` — feat: post-execution review flow
+
+- **agents.py**: Agent callback now sets `status="review"` + `is_ready=False` + `ai_ready=False` instead of `status="done"`. Tasks require human validation before closure.
+- **projects.py**: `run_ready_tasks` dispatch query now excludes tasks with `status in ["review", "done"]` — executed tasks no longer re-appear as runnable.
+- **types.ts**: Added `agent_dispatched_at?: string` to `Task` interface.
+- **TaskDrawer.tsx**: "AI Executed — awaiting validation" amber badge when task is in review state; "Refine" button hidden once task has been dispatched; "Validate results" amber button sends a canned validation prompt to the AI chat.
+- **ProjectBoardPage.tsx**: `readyCount` now excludes `review`/`done` tasks; new "Validate N Executed" amber button opens the first task awaiting validation in the drawer.
+
+---
+
 ## 2026-05-05 | `c77d6a7` — fix/buttons: SSE fixes, ai_ready flow, actor lazy-fetch, prompt refactor
 
 **Branch:** `fix/buttons`

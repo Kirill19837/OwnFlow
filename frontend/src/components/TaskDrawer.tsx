@@ -210,6 +210,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       .filter((m) => m.kind === 'user' || m.kind === 'assistant')
       .map((m) => ({ role: m.kind as 'user' | 'assistant', content: (m as { kind: string; content: string }).content }))
 
+    // Reset ai_ready so the AI re-evaluates on every new message
     if (task.ai_ready) setAiReady.mutate(false)
 
     setChat((prev) => [...prev, { kind: 'user', content: msg }, { kind: 'thinking' }])
@@ -238,6 +239,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         ...prev.filter((m) => m.kind !== 'thinking'),
         { kind: 'assistant', content: assistantContent },
       ])
+      // Auto-confirm ai_ready if AI included a mark_ready action
+      const actions = parseAllTaskActions(assistantContent)
+      if (actions.some((a) => a.intent === 'mark_ready')) {
+        setAiReady.mutate(true)
+      }
     } catch {
       setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
     }
@@ -710,6 +716,17 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
               }
 
               if (m.kind === 'deliverable') {
+                // Strip ###FILES### block from display; parse file names from it
+                const filesMarker = m.content.indexOf('###FILES###')
+                const narrativeText = filesMarker !== -1 ? m.content.slice(0, filesMarker).trim() : m.content
+                let parsedFiles: { path: string }[] = []
+                if (filesMarker !== -1) {
+                  try {
+                    const afterMarker = m.content.slice(filesMarker + '###FILES###'.length).trim()
+                    const arrStart = afterMarker.indexOf('[')
+                    if (arrStart !== -1) parsedFiles = JSON.parse(afterMarker.slice(arrStart))
+                  } catch { /* ignore malformed FILES block */ }
+                }
                 return (
                   <div key={i} className="bg-gray-900 border border-green-800/40 rounded-xl px-3 py-2">
                     <div className="flex items-center gap-1.5 mb-2">
@@ -718,9 +735,21 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                         Result · {m.actorName}
                       </span>
                     </div>
-                    <div className="text-xs text-gray-300 max-h-96 overflow-y-auto pr-1 prose prose-invert prose-xs max-w-none [&>h1]:text-sm [&>h2]:text-xs [&>h3]:text-xs [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&_strong]:text-white [&>pre]:bg-gray-950 [&>pre]:rounded [&>pre]:p-2 [&>code]:text-green-300">
-                      <ReactMarkdown>{m.content}</ReactMarkdown>
-                    </div>
+                    {narrativeText && (
+                      <div className="text-xs text-gray-300 max-h-96 overflow-y-auto pr-1 prose prose-invert prose-xs max-w-none [&>h1]:text-sm [&>h2]:text-xs [&>h3]:text-xs [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&_strong]:text-white [&>pre]:bg-gray-950 [&>pre]:rounded [&>pre]:p-2 [&>code]:text-green-300">
+                        <ReactMarkdown>{narrativeText}</ReactMarkdown>
+                      </div>
+                    )}
+                    {parsedFiles.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {parsedFiles.map((f, fi) => (
+                          <span key={fi} className="flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded-md font-mono">
+                            <FileText size={10} className="text-green-400 shrink-0" />
+                            {f.path}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )
               }
@@ -826,16 +855,11 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                       if (action.intent === 'mark_ready') {
                         return (
                           <div key={cardKey} className="bg-gray-900 border border-yellow-800/50 rounded-xl p-3 space-y-1.5">
-                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: enough decisions to implement</p>
+                            <p className="text-xs text-yellow-400 font-semibold uppercase tracking-wide flex items-center gap-1"><Sparkles size={11} /> AI: task is ready to implement</p>
                             <p className="text-xs text-gray-300">{action.summary}</p>
-                            <button
-                              onClick={() => setAiReady.mutate(true, { onSuccess: markCardDone })}
-                              disabled={confirmed || setAiReady.isPending}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium"
-                              style={confirmed ? { background: 'rgba(34,197,94,0.15)', color: '#4ade80' } : { background: 'rgba(234,179,8,0.12)', color: '#facc15' }}
-                            >
-                              {confirmed ? <><CheckCircle size={11} /> Marked ready</> : setAiReady.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <><Sparkles size={11} /> Mark as AI ready</>}
-                            </button>
+                            <span className="inline-flex items-center gap-1 text-xs text-green-400">
+                              <CheckCircle size={11} /> Marked AI ready automatically
+                            </span>
                           </div>
                         )
                       }
