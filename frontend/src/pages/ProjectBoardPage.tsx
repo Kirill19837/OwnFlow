@@ -447,7 +447,9 @@ export default function ProjectBoardPage() {
           </span>
           <div className="ml-auto flex items-center gap-2">
             {(() => {
-              const readyCount = (project.tasks ?? []).filter((t) => t.is_ready).length
+              const readyCount = (project.tasks ?? []).filter(
+                (t) => t.is_ready && t.status !== 'done' && t.status !== 'review'
+              ).length
               return readyCount > 0 ? (
                 <button
                   onClick={() => runReadyTasks.mutate()}
@@ -459,6 +461,25 @@ export default function ProjectBoardPage() {
                   Run {readyCount} Ready
                 </button>
               ) : null
+            })()}
+            {(() => {
+              const executedCount = (project.tasks ?? []).filter(
+                (t) => t.status === 'review' && t.agent_dispatched_at
+              ).length
+              if (executedCount === 0) return null
+              const firstExecuted = (project.tasks ?? []).find(
+                (t) => t.status === 'review' && t.agent_dispatched_at
+              )
+              return (
+                <button
+                  onClick={() => firstExecuted && setSelectedTaskId(firstExecuted.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium transition-colors"
+                  title={`${executedCount} task${executedCount !== 1 ? 's' : ''} awaiting validation`}
+                >
+                  <CheckCircle size={13} />
+                  Validate {executedCount} Executed
+                </button>
+              )
             })()}
             {canPlanNextSprint && (
               <button

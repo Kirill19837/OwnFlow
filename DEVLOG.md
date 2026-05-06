@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-05-05 | `c77d6a7` — fix/buttons: SSE fixes, ai_ready flow, actor lazy-fetch, prompt refactor
+
+**Branch:** `fix/buttons`
+
+- **TaskDrawer.tsx — SSE parser hardening**: Fixed `break` only escaping inner `for` loop; outer `while` now exits immediately on `[DONE]`. Added final buffer flush (`decoder.decode()`) to avoid dropping last SSE line when stream ends without trailing newline. Added silent `!res.ok || !res.body` guards before reading streams.
+- **TaskDrawer.tsx — `setAiReady` side-effect fix**: Removed `setAiReady.mutate()` from render path in `mark_ready` action card; replaced with explicit user-action button. `ai_ready` is now set only on explicit user action after AI decision.
+- **TaskDrawer.tsx — `streamPrompt` refactor**: Extracted `readSSE(reader, onPayload)` module-level helper. Merged duplicate `handleRefine`/`handlePrompt` bodies into single `streamPrompt(msg)` function.
+- **actors.py — `extra_env` lazy-fetch**: `update_actor` no longer reads `actors.extra_env` from DB unless at least one incoming value is a masked sentinel (`""` or `"***"`). Avoids unnecessary round-trip on clean updates.
+
 ## 2026-05-04 | `69efd0e` — Decouple actors/tasks APIs, rewrite docs, fix builtin agent GPT file output
 
 - `actors.py`: added `project_router` — moved `POST /projects/{id}/actors` and `POST /projects/{id}/actors/auto-fill` out of `projects.py`

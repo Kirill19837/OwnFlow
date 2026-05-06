@@ -131,6 +131,7 @@ export interface Task {
   github_pr_url?: string
   github_pr_state?: 'open' | 'merged' | 'closed'
   github_pr_number?: number
+  agent_dispatched_at?: string
 }
 
 export interface TaskInteraction {

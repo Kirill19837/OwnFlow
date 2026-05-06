@@ -112,12 +112,13 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     except Exception as exc:
         raise HTTPException(500, f"Failed to save deliverable: {exc}") from exc
 
-    # ── Atomically consume the token + mark done ──────────────────────────────
-    # Only reached when the deliverable row exists. UPDATE WHERE token=? ensures
-    # only the first concurrent caller wins; duplicates get 409.
+    # ── Atomically consume the token + move to review ──────────────────────────
+    # Moves the task to 'review' so a human can validate the result before
+    # closing it as done. Clears is_ready and ai_ready so the task is no longer
+    # eligible for re-dispatch via run-ready.
     consumed = (
         db.table("tasks")
-        .update({"status": "done", "agent_callback_token": None})
+        .update({"status": "review", "agent_callback_token": None, "is_ready": False, "ai_ready": False})
         .eq("id", body.task_id)
         .eq("agent_callback_token", provided_token)
         .execute()

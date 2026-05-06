@@ -470,9 +470,14 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
           {/* Ready status + actions */}
           <div className="flex items-center gap-2 flex-wrap">
             {assignedActor?.type === 'ai' ? (
-              // AI actor: two stages — AI ready → user approves
+              // AI actor: three stages — collecting → AI ready → approved → executed (review)
               <>
-                {!task.is_ready ? (
+                {task.status === 'review' && task.agent_dispatched_at ? (
+                  // Post-execution: waiting for human validation
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-900/30 border border-amber-700/50 px-2.5 py-1 rounded-full">
+                    <CheckCircle2 size={11} /> AI Executed — awaiting validation
+                  </span>
+                ) : !task.is_ready ? (
                   <>
                     {task.ai_ready ? (
                       // Stage 1 done: AI thinks it's ready, waiting for user approval
@@ -593,7 +598,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
           {/* Start Work */}
           <div className="flex items-center gap-2 flex-wrap">
-            {!task.is_ready && assignedActor && chat.length === 0 && (
+            {!task.is_ready && assignedActor && chat.length === 0 && !task.agent_dispatched_at && (
                 <button
                     onClick={handleRefine}
                     disabled={isStreaming}
@@ -603,6 +608,17 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                   {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
                   Refine
                 </button>
+            )}
+            {task.status === 'review' && task.agent_dispatched_at && (
+              <button
+                onClick={() => { setChatOpen(true); streamPrompt('Please validate the execution of this task. Review the deliverables and tell me: was the task implemented correctly? Are there any issues or gaps that need rework?') }}
+                disabled={isStreaming}
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-amber-900/40 border border-amber-700/50 text-amber-400 hover:bg-amber-800/50 transition-colors disabled:opacity-50"
+                title="Ask AI to validate execution results"
+              >
+                {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                Validate results
+              </button>
             )}
             <button
               onClick={() => {

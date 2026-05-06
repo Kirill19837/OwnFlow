@@ -544,12 +544,13 @@ async def run_ready_tasks(project_id: str, background_tasks: BackgroundTasks):
     if not sprint_ids:
         return {"queued": 0}
 
-    # Find ready tasks with assigned AI actors
+    # Find ready tasks with assigned AI actors — exclude executed or completed tasks
     tasks_resp = (
         db.table("tasks")
         .select("id, title, assignments(actor_id, actors(type))")
         .in_("sprint_id", sprint_ids)
         .eq("is_ready", True)
+        .not_.in_("status", ["review", "done"])
         .execute()
     )
     tasks = tasks_resp.data or []
