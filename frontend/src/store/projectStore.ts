@@ -20,7 +20,12 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       if (!state.currentProject) return state
       const tasks = state.currentProject.tasks ?? []
       const idx = tasks.findIndex((t) => t.id === task.id)
-      const updated = idx >= 0 ? tasks.map((t) => (t.id === task.id ? task : t)) : [...tasks, task]
+      // Real-time row events don't include joined data (assignments, actors).
+      // Preserve existing assignments when the incoming payload omits them.
+      const merged = idx >= 0
+        ? { ...tasks[idx], ...task, assignments: task.assignments ?? tasks[idx].assignments }
+        : task
+      const updated = idx >= 0 ? tasks.map((t) => (t.id === task.id ? merged : t)) : [...tasks, task]
       return { currentProject: { ...state.currentProject, tasks: updated } }
     }),
   upsertAssignment: (assignment) =>

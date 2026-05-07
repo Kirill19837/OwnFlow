@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-06 | `6545d25` — fix: in-process streamed tasks move to review, not done
+
+- **actor_executor.py** `stream_task_execution`: task status after stream completion changed from `"done"` to `"review"`, consistent with the Docker agent callback path.
+
+---
+
 ## 2026-05-06 | `2c8357b` — fix: rich ai_logs for in-process stream execution
 
 - **actor_executor.py** `stream_task_execution`: replaced single end-of-run log with a `_log()` helper that writes directly to `ai_logs` throughout the stream. New entries: starting (DEBUG), API key check (DEBUG), calling AI provider (INFO), AI responded with elapsed time (INFO), deliverable saved (INFO), GitHub PR result (INFO/ERROR), stream failure (ERROR).
