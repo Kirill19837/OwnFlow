@@ -424,6 +424,19 @@ async def stream_task_execution(task_id: str, actor_id: str):
     )
     project = project_resp.data
 
+    def _log(msg: str, level: int = 1) -> None:
+        try:
+            db.table("ai_logs").insert({
+                "id": str(uuid.uuid4()),
+                "project_id": project["id"],
+                "task_id": task_id,
+                "phase": 4,
+                "message": msg,
+                "level": level,
+            }).execute()
+        except Exception:
+            pass
+
     # ── External webhook actor: dispatch and return a single status event ───────
     if actor.get("webhook_url"):
         result = await _dispatch_external_agent(task, actor, project, db)
@@ -448,6 +461,10 @@ async def stream_task_execution(task_id: str, actor_id: str):
     else:
         api_key = company.get("openai_api_key") or settings.openai_api_key
 
+    actor_name = actor.get("name", actor_id)
+    _log(f"Starting in-process stream: actor='{actor_name}' model={model} task='{task['title']}'", level=0)
+    _log(f"API key present={bool(api_key)} company_id={company_id}", level=0)
+
     messages = [
         {"role": "system", "content": EXECUTOR_SYSTEM},
         {
@@ -461,14 +478,22 @@ async def stream_task_execution(task_id: str, actor_id: str):
         },
     ]
 
+    _log(f"Calling AI provider (model={model})…", level=1)
+    t0 = datetime.now(timezone.utc)
     provider = get_provider(model, api_key=api_key)
 
     full_content = []
-    async for chunk in provider.stream(messages):
-        full_content.append(chunk)
-        yield chunk
+    try:
+        async for chunk in provider.stream(messages):
+            full_content.append(chunk)
+            yield chunk
+    except Exception as exc:
+        _log(f"AI provider stream failed: {type(exc).__name__}: {exc}", level=3)
+        raise
 
     final_content = "".join(full_content)
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    _log(f"AI responded in {elapsed:.1f}s — {len(final_content)} chars", level=1)
 
     # Persist full prompt + response
     try:
@@ -481,14 +506,6 @@ async def stream_task_execution(task_id: str, actor_id: str):
             "model": model,
             "messages": messages,
             "response": final_content,
-        }).execute()
-        db.table("ai_logs").insert({
-            "id": str(uuid.uuid4()),
-            "project_id": project["id"],
-            "task_id": task_id,
-            "phase": 4,
-            "message": f"Actor '{actor.get('name', actor_id)}' streamed task: {task['title']}",
-            "level": 1,
         }).execute()
     except Exception:
         pass
@@ -504,9 +521,14 @@ async def stream_task_execution(task_id: str, actor_id: str):
     }
     db.table("deliverables").insert(row).execute()
     db.table("tasks").update({"status": "done"}).eq("id", task_id).execute()
+    _log("Deliverable saved — task marked done", level=1)
 
     # Create GitHub PR if connected
     try:
-        await create_pr_for_task(task_id, task["title"], final_content)
-    except Exception:
-        pass
+        pr_url = await create_pr_for_task(task_id, task["title"], final_content)
+        if pr_url:
+            _log(f"GitHub PR created: {pr_url}", level=1)
+        else:
+            _log("GitHub PR skipped (no connection or PR creation failed)", level=0)
+    except Exception as exc:
+        _log(f"GitHub PR error: {type(exc).__name__}: {exc}", level=3)

@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-05-06 | `6ce60f4` — fix: task deep link in PR body, DEBUG logs in ai_logs, task_id on stream log
+
+- **github_service.py**: PR body `**Task:**` line is now a markdown link — `[task_title](frontend_url/projects/<projectId>?task=<taskId>)`. Removed separate Task ID line.
+- **agents/builtin/main.py**: Built-in agent's `create_pr` body updated the same way (task title as clickable link).
+- **agents.py**: `team_log_level` default changed from `1` (INFO) to `0` (DEBUG) so all agent logs are stored unless a team explicitly sets a higher threshold. Fallback for null `log_level` DB value also fixed (`or 0`).
+- **actor_executor.py**: `stream_task_execution` log entry now includes `task_id` so the streamed-task log is properly linked in the AI Logs view.
+
+---
+
 ## 2026-05-06 | `cf8b594` — feat: deep linking for board tasks via ?task= query param
 
 - **ProjectBoardPage.tsx**: `selectedTaskId` is now derived from `?task=<id>` URL query param via `useSearchParams`. Opening a task card sets `?task=<id>`; closing removes it. Navigating directly to `/projects/<projectId>?task=<taskId>` auto-opens the drawer. URL updates use `replace: true` to avoid polluting browser history.
