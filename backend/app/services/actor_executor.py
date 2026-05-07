@@ -520,8 +520,8 @@ async def stream_task_execution(task_id: str, actor_id: str):
         "created_at": datetime.utcnow().isoformat(),
     }
     db.table("deliverables").insert(row).execute()
-    db.table("tasks").update({"status": "done"}).eq("id", task_id).execute()
-    _log("Deliverable saved — task marked done", level=1)
+    db.table("tasks").update({"status": "review"}).eq("id", task_id).execute()
+    _log("Deliverable saved — task moved to review", level=1)
 
     # Create GitHub PR if connected
     try:

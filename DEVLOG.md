@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-06 | `2c8357b` — fix: rich ai_logs for in-process stream execution
+
+- **actor_executor.py** `stream_task_execution`: replaced single end-of-run log with a `_log()` helper that writes directly to `ai_logs` throughout the stream. New entries: starting (DEBUG), API key check (DEBUG), calling AI provider (INFO), AI responded with elapsed time (INFO), deliverable saved (INFO), GitHub PR result (INFO/ERROR), stream failure (ERROR).
+
+---
+
 ## 2026-05-06 | `6ce60f4` — fix: task deep link in PR body, DEBUG logs in ai_logs, task_id on stream log
 
 - **github_service.py**: PR body `**Task:**` line is now a markdown link — `[task_title](frontend_url/projects/<projectId>?task=<taskId>)`. Removed separate Task ID line.
