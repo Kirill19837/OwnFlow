@@ -40,7 +40,7 @@ print(
     f"[figma-agent] DEBUG startup: "
     f"OPENAI_API_KEY present={bool(OPENAI_API_KEY)} "
     f"ANTHROPIC_API_KEY present={bool(ANTHROPIC_API_KEY)} "
-    f"FIGMA_TOKEN present={bool(FIGMA_TOKEN)} len={len(FIGMA_TOKEN)} repr_prefix={FIGMA_TOKEN[:16]!r} "
+    f"FIGMA_TOKEN present={bool(FIGMA_TOKEN)} "
     f"FIGMA_FILE_KEY present={bool(FIGMA_FILE_KEY)} value={FIGMA_FILE_KEY!r} "
     f"HTTP_PROXY={bool(HTTP_PROXY)} HTTPS_PROXY={bool(HTTPS_PROXY)}",
     flush=True,
@@ -148,12 +148,14 @@ Must be valid JSON. Must be the very last thing in your response.
 # ── HTTP client ───────────────────────────────────────────────────────────────
 
 def _get_httpx_kwargs() -> dict:
+    proxies = {}
     kwargs = {}
     if HTTPS_PROXY:
-        kwargs["https_proxy"] = HTTPS_PROXY
+        proxies["https://"] = HTTPS_PROXY
     if HTTP_PROXY:
-        kwargs["http_proxy"] = HTTP_PROXY
-    if HTTPS_PROXY or HTTP_PROXY:
+        proxies["http://"] = HTTP_PROXY
+    if proxies:
+        kwargs["proxies"] = proxies
         print(f"[figma-agent] DEBUG http: proxy configured https={bool(HTTPS_PROXY)} http={bool(HTTP_PROXY)}", flush=True)
     return kwargs
 
@@ -407,20 +409,8 @@ def _try_parse_json_array(text: str) -> list[dict] | None:
     stripped = text.strip()
     if not stripped.startswith("["):
         return None
-    bracket_count = 0
-    json_end = -1
-    for i, char in enumerate(stripped):
-        if char == "[":
-            bracket_count += 1
-        elif char == "]":
-            bracket_count -= 1
-            if bracket_count == 0:
-                json_end = i + 1
-                break
-    if json_end < 0:
-        return None
     try:
-        result = json.loads(stripped[:json_end])
+        result, _ = json.JSONDecoder().raw_decode(stripped)
         if isinstance(result, list):
             return result
     except json.JSONDecodeError:
@@ -560,6 +550,68 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+# ── Callback delivery (with retries) ──────────────────────────────────────────
+
+_CALLBACK_MAX_ATTEMPTS = 5          # скільки спроб
+_CALLBACK_BACKOFF_BASE  = 2         # секунд: 2, 4, 8, 16 …
+
+
+async def _deliver_callback(
+        url: str,
+        token: str,
+        body: dict,
+        log_fn,
+) -> None:
+
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, _CALLBACK_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
+                resp = await client.post(
+                    url,
+                    json=body,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+            if resp.status_code < 400:
+                log_fn(
+                    f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})",
+                    level="DEBUG",
+                )
+                return
+
+            if resp.status_code < 500:
+                raise RuntimeError(
+                    f"Callback rejected with HTTP {resp.status_code}: {resp.text[:400]}"
+                )
+
+            last_exc = RuntimeError(
+                f"Callback HTTP {resp.status_code}: {resp.text[:400]}"
+            )
+
+        except RuntimeError:
+            raise
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+
+        wait = _CALLBACK_BACKOFF_BASE ** (attempt - 1)   # 1, 2, 4, 8, 16 с
+        log_fn(
+            f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed "
+            f"({last_exc}) — retry in {wait}s",
+            level="WARNING",
+        )
+        if attempt < _CALLBACK_MAX_ATTEMPTS:
+            await asyncio.sleep(wait)
+
+    raise RuntimeError(
+        f"Callback delivery failed after {_CALLBACK_MAX_ATTEMPTS} attempts: {last_exc}"
+    )
+
+
 async def main() -> None:
     task_info = payload["task"]
     project_info = payload["project"]
@@ -688,8 +740,7 @@ async def main() -> None:
             )
         else:
             log(
-                f"Skipping Figma write — auth failed earlier "
-                f"(token prefix={FIGMA_TOKEN[:12]!r}…)",
+                "Skipping Figma write — auth failed earlier (FIGMA_TOKEN present)",
                 level="WARNING",
             )
     elif figma_file_key and not FIGMA_TOKEN:
@@ -727,39 +778,12 @@ async def main() -> None:
     }
 
     log(f"Sending callback to {callback_url}")
-    async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
-        try:
-            cb_resp = await client.post(
-                callback_url,
-                json=callback_body,
-                headers={
-                    "Authorization": f"Bearer {callback_token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            log(f"Callback response status={cb_resp.status_code}", level="DEBUG")
-            if cb_resp.status_code >= 400:
-                log(
-                    f"Callback HTTP error {cb_resp.status_code}: {cb_resp.text[:500]}",
-                    level="ERROR",
-                )
-                log(
-                    "Task execution completed successfully, but callback delivery failed. "
-                    "Deliverable may need manual review.",
-                    level="WARNING",
-                )
-            else:
-                log("Callback delivered successfully")
-        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-            log(
-                f"Callback delivery failed ({type(exc).__name__}): {str(exc)[:300]}",
-                level="ERROR",
-            )
-            log(
-                "Task execution completed successfully, but callback could not be delivered. "
-                "Deliverable may need manual review.",
-                level="WARNING",
-            )
+    try:
+        await _deliver_callback(callback_url, callback_token, callback_body, log)
+        log("Callback delivered successfully")
+    except RuntimeError as exc:
+        log(f"Callback delivery permanently failed: {exc}", level="ERROR")
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

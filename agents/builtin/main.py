@@ -10,15 +10,19 @@ Flow
 3. Parse any ###FILES### block from the AI response.
 4. If files were produced and a GitHub token is present, create a branch,
    commit the files, and open a PR.
-5. POST the deliverable back to OwnFlow via callback_url:
+5. POST the deliverable back to OwnFlow via callback_url with retries:
    - If a PR was created: ``files`` is omitted, ``pr_url`` is set.
    - If no PR was created: ``files`` is included so the OwnFlow callback
      handler can attempt PR creation server-side.
+   - Retries up to CALLBACK_MAX_ATTEMPTS times with exponential backoff.
+   - Exits non-zero if all attempts fail so the runner can mark the task failed.
 
 Environment variables:
-  PAYLOAD             — JSON dispatch payload from OwnFlow (required)
-  OPENAI_API_KEY      — required when actor.model starts with "gpt"
-  ANTHROPIC_API_KEY   — required when actor.model starts with "claude"
+  PAYLOAD                — JSON dispatch payload from OwnFlow (required)
+  OPENAI_API_KEY         — required when actor.model starts with "gpt"
+  ANTHROPIC_API_KEY      — required when actor.model starts with "claude"
+  CALLBACK_MAX_ATTEMPTS  — total delivery attempts, default 4
+  CALLBACK_BACKOFF_BASE  — seconds for first retry wait, default 2.0
 """
 from __future__ import annotations
 
@@ -49,6 +53,10 @@ print(f"[builtin-agent] DEBUG startup: OPENAI_API_KEY present={bool(os.environ.g
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+# Callback retry config — tunable via env vars for testing / staging environments
+MAX_CALLBACK_ATTEMPTS: int = 4
+CALLBACK_BACKOFF_BASE: float = 2.0
 
 MODEL: str = payload.get("model", "gpt-4o")
 ACTOR: dict = payload.get("actor") or {}
@@ -251,7 +259,7 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
 
         # Create branch
         create_ref_resp = await client.post(f"{api}/git/refs", headers=headers,
-                          json={"ref": f"refs/heads/{branch}", "sha": base_sha})
+                                            json={"ref": f"refs/heads/{branch}", "sha": base_sha})
         create_ref_ok = create_ref_resp.status_code in (200, 201, 422)  # 422 = branch exists
         print(f"[builtin-agent] DEBUG github: branch create status={create_ref_resp.status_code}", flush=True)
         if not create_ref_ok:
@@ -263,7 +271,7 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
             blob = await client.post(f"{api}/git/blobs", headers=headers,
                                      json={"content": base64.b64encode(
                                          f["content"].encode()).decode(),
-                                         "encoding": "base64"})
+                                           "encoding": "base64"})
             blob.raise_for_status()
             tree_items.append({
                 "path": f["path"], "mode": "100644",
@@ -297,6 +305,73 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
         pr_url_result = pr_resp.json()["html_url"]
         print(f"[builtin-agent] DEBUG github: PR created url={pr_url_result!r}", flush=True)
         return pr_url_result
+
+
+# ── Callback delivery with retries ────────────────────────────────────────────
+
+async def deliver_callback(
+        callback_url: str,
+        callback_token: str,
+        body: dict,
+        log,  # callable(msg, level, phase)
+) -> None:
+    """POST *body* to *callback_url*, retrying with exponential backoff.
+
+    Raises ``RuntimeError`` after ``CALLBACK_MAX_ATTEMPTS`` failed attempts so
+    the process can exit non-zero and the runner can mark the task failed.
+
+    Retry policy
+    ------------
+    - Attempt 1: immediate
+    - Attempt N (N > 1): wait ``CALLBACK_BACKOFF_BASE * 2 ** (N-2)`` seconds
+      (i.e. 2 s, 4 s, 8 s … for base=2 and max_attempts=4)
+    - 4xx responses that are *not* 429 are not retried — they indicate a
+      permanent error (bad token, unknown task_id, etc.) and retrying would
+      just repeat the failure.
+    """
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, CALLBACK_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            wait = CALLBACK_BACKOFF_BASE * (2 ** (attempt - 2))
+            log(f"Callback attempt {attempt}/{CALLBACK_MAX_ATTEMPTS} — waiting {wait:.1f}s before retry", level="WARNING")
+            await asyncio.sleep(wait)
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    callback_url,
+                    json=body,
+                    headers={
+                        "Authorization": f"Bearer {callback_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+            log(f"Callback attempt {attempt} — status={resp.status_code}", level="DEBUG")
+
+            if resp.status_code < 400:
+                log("Callback delivered successfully")
+                return  # ← success
+
+            # Permanent client error (e.g. 401, 403, 404) — no point retrying.
+            if resp.status_code != 429 and 400 <= resp.status_code < 500:
+                error_detail = resp.text[:500]
+                raise RuntimeError(
+                    f"Callback permanently rejected (HTTP {resp.status_code}): {error_detail}"
+                )
+
+            # Transient: 429 or 5xx — record and loop.
+            last_exc = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            log(f"Callback attempt {attempt} failed ({type(exc).__name__}): {exc}", level="WARNING")
+
+    # All attempts exhausted.
+    raise RuntimeError(
+        f"Callback delivery failed after {CALLBACK_MAX_ATTEMPTS} attempts. "
+        f"Last error: {last_exc}"
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -392,44 +467,15 @@ async def main() -> None:
     }
 
     log(f"callback_body keys={list(callback_body.keys())} content_length={len(content)} log_count={len(logs)} files_in_body={len(callback_body['files'] or [])}", level="DEBUG")
-    log(f"Sending callback to {callback_url}")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            cb_resp = await client.post(
-                callback_url,
-                json=callback_body,
-                headers={
-                    "Authorization": f"Bearer {callback_token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            log(f"Callback response status={cb_resp.status_code}", level="DEBUG")
-            if cb_resp.status_code >= 400:
-                error_detail = cb_resp.text[:500]
-                log(
-                    f"Callback HTTP error {cb_resp.status_code}: {error_detail}",
-                    level="ERROR",
-                )
-                # Don't raise — task is complete, callback delivery failure is not fatal
-                log(
-                    f"Note: Task execution completed successfully, but callback delivery failed. "
-                    f"Deliverable may need manual review.",
-                    level="WARNING",
-                )
-            else:
-                log("Callback delivered successfully")
-        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-            log(
-                f"Callback delivery failed ({type(exc).__name__}): {str(exc)[:300]}",
-                level="ERROR",
-            )
-            # Don't raise — task is complete, network/delivery issues are not fatal
-            log(
-                f"Note: Task execution completed successfully, but callback could not be delivered. "
-                f"Deliverable may need manual review.",
-                level="WARNING",
-            )
+    log(f"Sending callback to {callback_url} (max_attempts={CALLBACK_MAX_ATTEMPTS}, backoff_base={CALLBACK_BACKOFF_BASE}s)")
+
+    # Raises RuntimeError — and therefore exits non-zero — if all attempts fail.
+    await deliver_callback(callback_url, callback_token, callback_body, log)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as exc:
+        print(f"[builtin-agent] FATAL: {type(exc).__name__}: {exc}", flush=True)
+        sys.exit(1)

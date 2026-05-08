@@ -74,11 +74,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
             .single()
             .execute()
         )
-    except Exception as exc:
-        # .single() raises if no rows found; handle gracefully
-        raise HTTPException(404, f"Task not found or DB error: {str(exc)}") from exc
-
-    if not task_resp.data:
+    except Exception:
         raise HTTPException(404, "Task not found.")
 
     task = task_resp.data
