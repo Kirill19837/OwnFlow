@@ -78,6 +78,8 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         raise HTTPException(404, "Task not found.")
 
     task = task_resp.data
+    if not task:
+        raise HTTPException(404, "Task not found.")
     stored_token = task.get("agent_callback_token")
 
     # Constant-time comparison to prevent timing attacks
