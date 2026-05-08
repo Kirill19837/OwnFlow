@@ -404,12 +404,31 @@ async def main() -> None:
                 },
             )
             log(f"Callback response status={cb_resp.status_code}", level="DEBUG")
-            cb_resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            log(f"Callback HTTP error {exc.response.status_code}: {exc.response.text[:300]}", level="ERROR")
-            raise
-
-    log("Callback OK — task done")
+            if cb_resp.status_code >= 400:
+                error_detail = cb_resp.text[:500]
+                log(
+                    f"Callback HTTP error {cb_resp.status_code}: {error_detail}",
+                    level="ERROR",
+                )
+                # Don't raise — task is complete, callback delivery failure is not fatal
+                log(
+                    f"Note: Task execution completed successfully, but callback delivery failed. "
+                    f"Deliverable may need manual review.",
+                    level="WARNING",
+                )
+            else:
+                log("Callback delivered successfully")
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            log(
+                f"Callback delivery failed ({type(exc).__name__}): {str(exc)[:300]}",
+                level="ERROR",
+            )
+            # Don't raise — task is complete, network/delivery issues are not fatal
+            log(
+                f"Note: Task execution completed successfully, but callback could not be delivered. "
+                f"Deliverable may need manual review.",
+                level="WARNING",
+            )
 
 
 if __name__ == "__main__":

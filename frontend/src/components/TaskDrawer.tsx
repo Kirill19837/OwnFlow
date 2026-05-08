@@ -618,15 +618,26 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 </button>
             )}
             {task.status === 'review' && task.agent_dispatched_at && (
-              <button
-                onClick={() => { setChatOpen(true); streamPrompt('Please validate the execution of this task. Review the deliverables and tell me: was the task implemented correctly? Are there any issues or gaps that need rework?') }}
-                disabled={isStreaming}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-amber-900/40 border border-amber-700/50 text-amber-400 hover:bg-amber-800/50 transition-colors disabled:opacity-50"
-                title="Ask AI to validate execution results"
-              >
-                {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                Validate results
-              </button>
+              <>
+                <button
+                  onClick={() => { setChatOpen(true); streamPrompt('Please validate the execution of this task. Review the deliverables and tell me: was the task implemented correctly? Are there any issues or gaps that need rework?') }}
+                  disabled={isStreaming}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-amber-900/40 border border-amber-700/50 text-amber-400 hover:bg-amber-800/50 transition-colors disabled:opacity-50"
+                  title="Ask AI to validate execution results"
+                >
+                  {isStreaming ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  Validate results
+                </button>
+                <button
+                  onClick={() => { updateStatus.mutate('in_progress', { onSuccess: () => handleExecute() }) }}
+                  disabled={isStreaming || updateStatus.isPending}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium bg-orange-900/40 border border-orange-700/50 text-orange-400 hover:bg-orange-800/50 transition-colors disabled:opacity-50"
+                  title="Restart task execution"
+                >
+                  {(isStreaming || updateStatus.isPending) ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  Restart Execution
+                </button>
+              </>
             )}
             <button
               onClick={() => {

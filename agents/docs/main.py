@@ -301,13 +301,41 @@ async def main() -> None:
 
     log(f"POSTing result to callback url={callback_url!r}", phase="task_execution")
     async with httpx.AsyncClient(timeout=15.0) as client:
-        cb_resp = await client.post(
-            callback_url,
-            headers={"Authorization": f"Bearer {callback_token}"},
-            json=payload_out,
-        )
-        cb_resp.raise_for_status()
-    log("Callback delivered successfully")
+        try:
+            cb_resp = await client.post(
+                callback_url,
+                headers={"Authorization": f"Bearer {callback_token}"},
+                json=payload_out,
+            )
+            if cb_resp.status_code >= 400:
+                error_detail = cb_resp.text[:500]
+                log(
+                    f"Callback HTTP error {cb_resp.status_code}: {error_detail}",
+                    level="ERROR",
+                    phase="task_execution",
+                )
+                # Don't raise — task is complete, callback delivery failure is not fatal
+                log(
+                    f"Note: Task execution completed successfully, but callback delivery failed. "
+                    f"Deliverable may need manual review.",
+                    level="WARNING",
+                    phase="task_execution",
+                )
+            else:
+                log("Callback delivered successfully", phase="task_execution")
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            log(
+                f"Callback delivery failed ({type(exc).__name__}): {str(exc)[:300]}",
+                level="ERROR",
+                phase="task_execution",
+            )
+            # Don't raise — task is complete, network/delivery issues are not fatal
+            log(
+                f"Note: Task execution completed successfully, but callback could not be delivered. "
+                f"Deliverable may need manual review.",
+                level="WARNING",
+                phase="task_execution",
+            )
 
 
 if __name__ == "__main__":
