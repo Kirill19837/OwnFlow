@@ -10,6 +10,8 @@ Flow
 3. Parse any ###FILES### block from the AI response.
 4. If files were produced and a GitHub token is present, create a branch and open a PR.
 5. POST the deliverable back to OwnFlow via callback_url.
+   Retries up to MAX_CALLBACK_ATTEMPTS times with exponential backoff.
+   Exits non-zero if all attempts fail so the runner can surface / retry the task.
 
 Environment variables:
   PAYLOAD             — JSON dispatch payload from OwnFlow (required)
@@ -55,6 +57,12 @@ print(
 MODEL: str = payload.get("model", "gpt-4o")
 ACTOR: dict = payload.get("actor") or {}
 ACTOR_ROLE: str = ACTOR.get("role") or "Business Analyst"
+
+# Callback retry configuration.
+# Total worst-case wait before giving up: 2 + 4 + 8 + 16 = 30 s, well inside any
+# reasonable task timeout while still surviving transient 5xx / network blips.
+MAX_CALLBACK_ATTEMPTS: int = 4
+CALLBACK_BACKOFF_BASE: float = 2.0  # seconds; delay = base ** attempt_number
 
 SYSTEM_PROMPT = f"""\
 You are acting as: **{ACTOR_ROLE}**
@@ -222,6 +230,68 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
         return pr_resp.json()["html_url"]
 
 
+# ── Callback delivery with retries ────────────────────────────────────────────
+
+async def deliver_callback(
+        callback_url: str,
+        callback_token: str,
+        payload_out: dict,
+        log,  # callable(msg, level, phase)
+) -> None:
+    """POST payload_out to callback_url.
+
+    Retries up to MAX_CALLBACK_ATTEMPTS times with exponential backoff.
+    Raises RuntimeError if every attempt fails so the caller can exit non-zero.
+    """
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, MAX_CALLBACK_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    callback_url,
+                    headers={"Authorization": f"Bearer {callback_token}"},
+                    json=payload_out,
+                )
+                # Treat 4xx as non-retryable (bad payload / auth); 5xx as retryable.
+                if 400 <= resp.status_code < 500:
+                    raise RuntimeError(
+                        f"Callback rejected with {resp.status_code} (non-retryable): "
+                        f"{resp.text[:300]}"
+                    )
+                resp.raise_for_status()  # surfaces 5xx as httpx.HTTPStatusError
+                log("Callback delivered successfully", phase="task_execution")
+                return
+
+        except RuntimeError:
+            # Non-retryable — propagate immediately without further attempts.
+            raise
+
+        except (httpx.HTTPStatusError, httpx.RequestError, Exception) as exc:
+            last_exc = exc
+            if attempt < MAX_CALLBACK_ATTEMPTS:
+                delay = CALLBACK_BACKOFF_BASE ** attempt
+                log(
+                    f"Callback attempt {attempt}/{MAX_CALLBACK_ATTEMPTS} failed "
+                    f"({type(exc).__name__}: {str(exc)[:200]}); "
+                    f"retrying in {delay:.0f}s",
+                    level="WARNING",
+                    phase="task_execution",
+                )
+                await asyncio.sleep(delay)
+            else:
+                log(
+                    f"Callback attempt {attempt}/{MAX_CALLBACK_ATTEMPTS} failed "
+                    f"({type(exc).__name__}: {str(exc)[:200]}); no more retries",
+                    level="ERROR",
+                    phase="task_execution",
+                )
+
+    raise RuntimeError(
+        f"Callback delivery failed after {MAX_CALLBACK_ATTEMPTS} attempts: {last_exc}"
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
@@ -258,13 +328,16 @@ async def main() -> None:
         result = await call_ai(prompt)
     except Exception as exc:
         log(f"AI call failed: {exc}", level="ERROR", phase="task_execution")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.post(
-                callback_url,
-                headers={"Authorization": f"Bearer {callback_token}"},
-                json={"task_id": task_id, "content": f"Agent error: {exc}", "logs": logs},
+        # Best-effort error callback — failures here are surfaced by the non-zero exit.
+        try:
+            await deliver_callback(
+                callback_url, callback_token,
+                {"task_id": task_id, "content": f"Agent error: {exc}", "logs": logs},
+                log,
             )
-        return
+        except Exception:
+            pass
+        sys.exit(1)
 
     log(f"AI response received length={len(result)}", phase="task_execution")
 
@@ -300,42 +373,11 @@ async def main() -> None:
         payload_out["pr_url"] = pr_url
 
     log(f"POSTing result to callback url={callback_url!r}", phase="task_execution")
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        try:
-            cb_resp = await client.post(
-                callback_url,
-                headers={"Authorization": f"Bearer {callback_token}"},
-                json=payload_out,
-            )
-            if cb_resp.status_code >= 400:
-                error_detail = cb_resp.text[:500]
-                log(
-                    f"Callback HTTP error {cb_resp.status_code}: {error_detail}",
-                    level="ERROR",
-                    phase="task_execution",
-                )
-                # Don't raise — task is complete, callback delivery failure is not fatal
-                log(
-                    f"Note: Task execution completed successfully, but callback delivery failed. "
-                    f"Deliverable may need manual review.",
-                    level="WARNING",
-                    phase="task_execution",
-                )
-            else:
-                log("Callback delivered successfully", phase="task_execution")
-        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-            log(
-                f"Callback delivery failed ({type(exc).__name__}): {str(exc)[:300]}",
-                level="ERROR",
-                phase="task_execution",
-            )
-            # Don't raise — task is complete, network/delivery issues are not fatal
-            log(
-                f"Note: Task execution completed successfully, but callback could not be delivered. "
-                f"Deliverable may need manual review.",
-                level="WARNING",
-                phase="task_execution",
-            )
+    try:
+        await deliver_callback(callback_url, callback_token, payload_out, log)
+    except Exception as exc:
+        log(str(exc), level="ERROR", phase="task_execution")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

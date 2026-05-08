@@ -243,7 +243,7 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         "agent_callback_token": callback_token,
         "agent_dispatched_at": now,
     }).eq("id", task["id"]).execute()
-    print(f"[dispatch] task update: data={update_resp.data} count={update_resp.count}", flush=True)
+    print(f"[dispatch] task update: count={update_resp.count}", flush=True)
 
     db.table("ai_logs").insert({
         "id": str(uuid.uuid4()),
@@ -271,25 +271,21 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
     # Create Figma file for design tasks
     figma_file_key = None
     if task.get("type") == "design":
-        figma_token = None
-        extra_env = actor.get("extra_env") or {}
-        # FIX: Parse JSON string if extra_env is stored as string in DB
-        if isinstance(extra_env, str):
+        extra_env_data = actor.get("extra_env") or {}
+        if isinstance(extra_env_data, str):
             try:
-                extra_env = json.loads(extra_env)
+                extra_env_data = json.loads(extra_env_data)
             except json.JSONDecodeError:
-                extra_env = {}
-        if isinstance(extra_env, dict):
-            figma_token = extra_env.get("FIGMA_TOKEN")
-        if figma_token:
-            figma_file_key = await _create_figma_file_for_task(task, actor, figma_token)
+                extra_env_data = {}
+        if isinstance(extra_env_data, dict):
+            figma_file_key = extra_env_data.get("FIGMA_FILE_KEY")
             if figma_file_key:
                 db.table("ai_logs").insert({
                     "id": str(uuid.uuid4()),
                     "project_id": project["id"],
                     "task_id": task["id"],
                     "phase": 3,
-                    "message": f"Created Figma file: https://www.figma.com/file/{figma_file_key}",
+                    "message": f"Figma file_key resolved from actor config: {figma_file_key}",
                     "level": 1,
                 }).execute()
 
@@ -476,14 +472,18 @@ async def stream_task_execution(task_id: str, actor_id: str):
     # ── External webhook actor: dispatch and return a single status event ───────
     if actor.get("webhook_url"):
         result = await _dispatch_external_agent(task, actor, project, db)
-        yield json.dumps(result)
+        if isinstance(result, dict):
+            message = result.get("message")
+            yield message if isinstance(message, str) and message else json.dumps(result, ensure_ascii=False)
+        else:
+            yield str(result)
         return
 
     # ── Docker agent dispatch ────────────────────────────────────────────────
     has_docker_image = actor.get("docker_image") or (actor.get("role") or "").strip().lower() in ROLE_IMAGE_MAP
     if has_docker_image:
         result = await _dispatch_docker_agent(task, actor, project, db)
-        yield json.dumps({"type": "log", "message": f"Docker agent dispatched: {result}"})
+        yield f"Docker agent dispatched: {result}"
         return
 
     # ── In-process streaming: resolve company-level AI keys ────────────────────
@@ -575,17 +575,3 @@ async def stream_task_execution(task_id: str, actor_id: str):
             _log("GitHub PR skipped (no connection or PR creation failed)", level=0)
     except Exception as exc:
         _log(f"GitHub PR error: {type(exc).__name__}: {exc}", level=3)
-
-
-# ── Figma file creation ──────────────────────────────────────────────────────
-
-async def _create_figma_file_for_task(task: dict, actor: dict, figma_token: str) -> str | None:
-    """Create a new file in Figma for the task and return file_key.
-
-    Returns file_key on success, None on failure.
-    """
-    if not figma_token or task.get("type") != "design":
-        return None
-
-    # Figma API does not support file creation via API, so always return None
-    return None

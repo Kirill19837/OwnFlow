@@ -33,8 +33,7 @@ _AI_NAMES = [
     "Cleo", "Finn", "Mira", "Denis", "Skye", "Theo", "Wren", "Zion",
 ]
 
-
-def _get_default_docker_image_for_role(role: str) -> str:
+def _get_default_docker_image_for_role(role: str) -> str | None:
     """Resolve default docker image for a given role (case-insensitive lookup)."""
     if not role:
         return None
