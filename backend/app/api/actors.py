@@ -21,10 +21,25 @@ _AUTO_FILL_ACTORS = [
     ("QA Automation Lead",  "ai"),
 ]
 
+# Role-based default docker image dispatch
+# Maps role names (case-insensitive) to their dedicated agent container
+_ROLE_TO_DOCKER_IMAGE = {
+    "ui/ux designer": "ownflow-figma-agent:latest",
+    "designer": "ownflow-figma-agent:latest",
+}
+
 _AI_NAMES = [
     "Aria", "Nova", "Orion", "Sage", "Atlas", "Echo", "Lyra", "Zara",
     "Cleo", "Finn", "Mira", "Denis", "Skye", "Theo", "Wren", "Zion",
 ]
+
+
+def _get_default_docker_image_for_role(role: str) -> str:
+    """Resolve default docker image for a given role (case-insensitive lookup)."""
+    if not role:
+        return None
+    role_lower = role.strip().lower()
+    return _ROLE_TO_DOCKER_IMAGE.get(role_lower)
 
 
 def _mask_actor(actor: dict) -> dict:
@@ -49,7 +64,7 @@ def get_actor(actor_id: str):
 @router.patch("/{actor_id}")
 def update_actor(actor_id: str, body: dict, _caller_id: str = Depends(current_user_id)):
     db = get_supabase()
-    
+
     # Verify that the actor belongs to a project/team the user has access to.
     # This prevents cross-tenant leakage when fetching existing extra_env values.
     actor_resp = db.table("actors").select("project_id").eq("id", actor_id).single().execute()
@@ -64,7 +79,7 @@ def update_actor(actor_id: str, body: dict, _caller_id: str = Depends(current_us
             member_resp = db.table("team_members").select("user_id").eq("team_id", team_id).eq("user_id", _caller_id).single().execute()
             if not member_resp.data:
                 raise HTTPException(403, "You do not have access to this actor")
-    
+
     allowed_fields = {
         "name",
         "role",
@@ -206,6 +221,13 @@ def add_actor(project_id: str, body: ActorCreate):
             row["docker_image"] = body.docker_image
         if body.extra_env:
             row["extra_env"] = body.extra_env
+
+    # Auto-assign docker image based on role if not explicitly provided
+    if "docker_image" not in row or not row["docker_image"]:
+        default_image = _get_default_docker_image_for_role(body.role)
+        if default_image:
+            row["docker_image"] = default_image
+
     db.table("actors").insert(row).execute()
     return _mask_actor(row)
 
@@ -236,7 +258,7 @@ def auto_fill_actors(project_id: str, body: dict):
     for role, atype in _AUTO_FILL_ACTORS:
         if role.strip().lower() in human_roles:
             continue  # human already covers this role
-        rows.append({
+        actor_row = {
             "id": str(uuid.uuid4()),
             "project_id": project_id,
             "name": name_pool[name_idx % len(name_pool)],
@@ -244,7 +266,12 @@ def auto_fill_actors(project_id: str, body: dict):
             "role": role,
             "model": ai_model,
             "capabilities": [],
-        })
+        }
+        # Auto-assign docker image based on role
+        default_image = _get_default_docker_image_for_role(role)
+        if default_image:
+            actor_row["docker_image"] = default_image
+        rows.append(actor_row)
         name_idx += 1
     db.table("actors").insert(rows).execute()
     return {"created": len(rows), "actors": [_mask_actor(r) for r in rows]}

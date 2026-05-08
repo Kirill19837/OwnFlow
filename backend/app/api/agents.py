@@ -66,13 +66,18 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
 
     db = get_supabase()
 
-    task_resp = (
-        db.table("tasks")
-        .select("*, assignments(actor_id)")
-        .eq("id", body.task_id)
-        .single()
-        .execute()
-    )
+    try:
+        task_resp = (
+            db.table("tasks")
+            .select("*, assignments(actor_id)")
+            .eq("id", body.task_id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        # .single() raises if no rows found; handle gracefully
+        raise HTTPException(404, f"Task not found or DB error: {str(exc)}") from exc
+
     if not task_resp.data:
         raise HTTPException(404, "Task not found.")
 
@@ -110,7 +115,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     try:
         db.table("deliverables").insert(deliverable_row).execute()
     except Exception as exc:
-        raise HTTPException(500, f"Failed to save deliverable: {exc}") from exc
+        raise HTTPException(500, f"Failed to save deliverable: {str(exc)}") from exc
 
     # ── Atomically consume the token + move to review ──────────────────────────
     # Moves the task to 'review' so a human can validate the result before

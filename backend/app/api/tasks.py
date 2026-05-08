@@ -18,7 +18,7 @@ import json
 router = APIRouter()
 project_router = APIRouter()
 
-_TASK_SECRET_FIELDS = {"agent_callback_token", "agent_dispatched_at"}
+_TASK_SECRET_FIELDS = {"agent_callback_token"}
 
 _ACTOR_SECRET_FIELDS = {"agent_api_key"}
 
