@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-06 | `7f8b04f` — fix: preserve task assignments on realtime upsert
+
+- **projectStore.ts** `upsertTask`: merges incoming real-time task payloads onto existing task data, preserving joined fields (`assignments`) that Supabase omits from raw change events. Fixes task appearing unassigned immediately after "Approve & Start" until a manual refresh.
+
+---
+
 ## 2026-05-06 | `6545d25` — fix: in-process streamed tasks move to review, not done
 
 - **actor_executor.py** `stream_task_execution`: task status after stream completion changed from `"done"` to `"review"`, consistent with the Docker agent callback path.
@@ -1085,3 +1091,12 @@ Commit: 42ad2e9
 
 ## 2026-05-04 — Merge feature/kind-agents → main (1157a21)
 - Full feature/kind-agents branch merged: kind agents, security hardening, masked env fix, execution map UI
+## 2026-05-12 — Add form navigation fix + grid selection improvements
+
+- Fixed `DataSurfacePage` to show add form (not grid listing) when URL ends with `/add`
+- Separated `enableRowSelection` (always true) from `enableMultiSelect` (checkbox column, only for group commands)
+- Fixed DataGridBody memo re-render bug for row selection visual state
+- Removed spurious snackbar message on add command
+
+Commit: 87a4f0eddee15985a07b73e84bfc46564c208d81
+

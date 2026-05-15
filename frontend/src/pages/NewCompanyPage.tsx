@@ -24,8 +24,8 @@ const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', sub: 'OpenAI · Best overall' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini', sub: 'OpenAI · Fast & cheap' },
   { value: 'o3-mini', label: 'o3-mini', sub: 'OpenAI · Reasoning' },
-  { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', sub: 'Anthropic · Top quality' },
-  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', sub: 'Anthropic · Ultra-fast' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sub: 'Anthropic · Top quality' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', sub: 'Anthropic · Ultra-fast' },
 ]
 
 const PERKS = [

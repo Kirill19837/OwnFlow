@@ -7,7 +7,7 @@ from typing import List, Optional
 
 
 class AnthropicProvider(AIProvider):
-    def __init__(self, model: str = "claude-3-5-sonnet-20241022", api_key: Optional[str] = None):
+    def __init__(self, model: str = "claude-sonnet-4-6", api_key: Optional[str] = None):
         self.model = model
         self._client = sdk.AsyncAnthropic(api_key=api_key or get_settings().anthropic_api_key)
 

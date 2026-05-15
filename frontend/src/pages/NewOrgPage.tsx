@@ -12,8 +12,8 @@ const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o (OpenAI)' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini (OpenAI)' },
   { value: 'o3-mini', label: 'o3-mini (OpenAI)' },
-  { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet (Anthropic)' },
-  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku (Anthropic)' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Anthropic)' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (Anthropic)' },
 ]
 
 export default function NewOrgPage() {

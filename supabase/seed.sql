@@ -42,7 +42,7 @@ values
     'bbbbbbbb-0000-0000-0000-000000000001',
     'Claude Designer',
     'ai',
-    'claude-3-5-sonnet-20241022',
+    'claude-sonnet-4-6',
     array['design','content']
   ),
   (

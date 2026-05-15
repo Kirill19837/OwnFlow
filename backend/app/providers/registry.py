@@ -5,6 +5,9 @@ from app.providers.base import AIProvider
 
 _OPENAI_MODELS = {"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-mini", "o3-mini"}
 _ANTHROPIC_MODELS = {
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    # legacy aliases (still route to Anthropic provider)
     "claude-3-5-sonnet-20241022",
     "claude-3-5-haiku-20241022",
     "claude-3-opus-20240229",
