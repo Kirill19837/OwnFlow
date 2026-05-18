@@ -480,8 +480,10 @@ async def stream_task_execution(task_id: str, actor_id: str):
         return
 
     # ── Docker agent dispatch ────────────────────────────────────────────────
-    has_docker_image = actor.get("docker_image") or (actor.get("role") or "").strip().lower() in ROLE_IMAGE_MAP
-    if has_docker_image:
+    # Only dispatch to Docker if the actor has an explicit docker_image set.
+    # Actors with a model configured (e.g. claude-haiku-4-5) should run
+    # in-process so the user gets real-time streaming.
+    if actor.get("docker_image"):
         result = await _dispatch_docker_agent(task, actor, project, db)
         yield f"Docker agent dispatched: {result}"
         return

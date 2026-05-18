@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-05-18 | `ebe9d37` — feat: project memory vector search + memory-aware assistants + UI feedback
+
+- Migration 020: pgvector extension, `embedding vector(1536)` column on `memory_chunks`, `match_memory_chunks` RPC with IVFFLAT index.
+- Embedding service (`text-embedding-3-small`) auto-embeds on chunk create/update.
+- Vector similarity search in both task refinement and kanban board prompt streams (with importance-based fallback).
+- Memory-aware system prompts: `task_assistant` and `project_board` now include RELEVANT PROJECT MEMORY and ACTIVE DECISIONS sections.
+- SSE `memory_event` frames emitted before LLM content in both streams; frontend renders "Memory consulted" cards (Brain icon, chunk/decision titles).
+- Toast notifications on memory chunk create/update from task detail saves.
+- `sync-embeddings` backfill endpoint (`POST /memory/sync-embeddings`).
+- Stronger gate check in refinement: AI must check memory before asking user, auto-capture known facts from memory.
+- Prose after action cards now rendered with `ReactMarkdown` (was plain text).
+- Fix: `tags` return type `jsonb` in `match_memory_chunks` RPC.
+
 ## 2026-05-18 | `2ba80f5` — feat: task memory sync + one-question refinement + always-on refine button
 
 - Added `POST /projects/{id}/memory/sync-tasks` endpoint that backfills `memory_chunks` from existing tasks' `task_details` (idempotent per `task_id`).
