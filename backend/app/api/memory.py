@@ -251,6 +251,66 @@ def get_latest_context_pack(project_id: str, task_id: str):
     return result.data[0]
 
 
+# ── Task Memory Backfill ──────────────────────────────────────────────────────
+
+@router.post("/{project_id}/memory/sync-tasks")
+def sync_tasks_memory(project_id: str):
+    """Backfill memory_chunks from existing tasks with non-empty task_details."""
+    from datetime import datetime, timezone
+    db = get_supabase()
+    tasks = (
+        db.table("tasks")
+        .select("id,title,task_details")
+        .eq("project_id", project_id)
+        .execute()
+        .data
+        or []
+    )
+    created = 0
+    updated = 0
+    skipped = 0
+    for t in tasks:
+        details = t.get("task_details") or {}
+        if not isinstance(details, dict) or not details:
+            skipped += 1
+            continue
+        task_id = t["id"]
+        title = t.get("title") or "Untitled task"
+        details_lines = "\n".join(f"- {k}: {v}" for k, v in details.items())
+        content = f"Task: {title}\n\nRefinement decisions:\n{details_lines}"
+        summary = f"Refined task '{title}' with {len(details)} captured decisions."
+        existing = (
+            db.table("memory_chunks")
+            .select("id")
+            .eq("project_id", project_id)
+            .eq("source_type", "business-rules")
+            .eq("source_id", task_id)
+            .execute()
+        )
+        if existing.data:
+            db.table("memory_chunks").update({
+                "title": f"Task refinement: {title}",
+                "content": content,
+                "summary": summary,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", existing.data[0]["id"]).execute()
+            updated += 1
+        else:
+            db.table("memory_chunks").insert({
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "source_type": "business-rules",
+                "source_id": task_id,
+                "title": f"Task refinement: {title}",
+                "content": content,
+                "summary": summary,
+                "tags": ["task-refinement"],
+                "importance": 6,
+            }).execute()
+            created += 1
+    return {"created": created, "updated": updated, "skipped": skipped, "total_tasks": len(tasks)}
+
+
 # ── GitHub Memory Sync (MVP2) ─────────────────────────────────────────────────
 
 @router.post("/{project_id}/memory/sync-github")

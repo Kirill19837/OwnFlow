@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-05-18 | `c8b1735` — feat: project memory architecture (MVP1+MVP2) + task assistant improvements
+
+- Added Supabase migration 019: `memory_chunks`, `decisions`, `context_packs` tables with RLS and service-role policies.
+- Added full backend CRUD API (`memory.py`) for memory chunks, decisions, context packs, and GitHub PR sync.
+- Added `list_merged_prs` helper to `github_service.py`.
+- Added Pydantic models (`MemoryChunkCreate`, `MemoryChunkUpdate`, `DecisionCreate`, `DecisionUpdate`) to `models.py`.
+- Auto-saves task refinement decisions to `memory_chunks` (source_type: business-rules) on detail save and on `ai_ready` flag.
+- Injects project memory and active architectural decisions into task assistant system prompt for context-aware refinement.
+- Fixed Claude `mark_ready` emission: positive condition — emit in the same response when output_format + core technical decisions are known, no open questions block.
+- Added `ProjectMemoryPage` with 3 tabs: Memory (CRUD chunks by source type, importance dots), Decisions (lifecycle with quick-status), GitHub (sync merged PRs).
+- Added Brain icon nav button on `ProjectBoardPage` linking to `/projects/:id/memory`.
+- Registered memory router in `main.py`.
+
 ## 2026-05-18 | `476d5b5` — UX: fix markdown preview, remove default AI PM, guard auto-fill, fix JSON fence in orchestrator
 
 - Fixed markdown preview in `NewProjectPage` — replaced broken `prose` Tailwind classes (requires uninstalled `@tailwindcss/typography`) with explicit per-element class mappings on `ReactMarkdown` `components` prop.

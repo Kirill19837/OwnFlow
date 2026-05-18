@@ -122,6 +122,16 @@ async def update_task_details(task_id: str, body: dict):
     details = body.get("details") or {}
     if not isinstance(details, dict):
         raise HTTPException(400, "details must be an object")
+    # Filter hallucinated meta-keys that some models invent instead of real task facts
+    _FORBIDDEN_DETAIL_KEYS = {
+        "task_memory_persisted", "all_refinements_saved", "execution_ready", "timestamp",
+        "memory_saved", "refinement_complete", "persisted", "saved", "ready",
+    }
+    details = {k: v for k, v in details.items() if k not in _FORBIDDEN_DETAIL_KEYS}
+    if not details:
+        # Nothing real to save — return current state without writing
+        existing = db.table("tasks").select("id,task_details").eq("id", task_id).single().execute()
+        return {"task_id": task_id, "task_details": (existing.data or {}).get("task_details") or {}}
     existing = db.table("tasks").select("id,title,description,task_details,project_id").eq("id", task_id).single().execute()
     task_row = existing.data or {}
     current = task_row.get("task_details") or {}

@@ -606,7 +606,7 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
           {/* Start Work */}
           <div className="flex items-center gap-2 flex-wrap">
-            {!task.is_ready && assignedActor && chat.length === 0 && !task.agent_dispatched_at && (
+            {!task.ai_ready && assignedActor && !task.agent_dispatched_at && (
                 <button
                     onClick={handleRefine}
                     disabled={isStreaming}

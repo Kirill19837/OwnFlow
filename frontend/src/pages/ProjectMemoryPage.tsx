@@ -351,6 +351,19 @@ function MemoryTab({ projectId }: { projectId: string }) {
     onError: () => toast.error('Failed to delete memory chunk'),
   })
 
+  const syncTasksMutation = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/memory/sync-tasks`),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['memory-chunks', projectId] })
+      const { created, updated, skipped } = res.data as { created: number; updated: number; skipped: number }
+      toast.success(`Synced tasks — created ${created}, updated ${updated}, skipped ${skipped}`)
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(msg || 'Task sync failed')
+    },
+  })
+
   function handleCreate(data: ChunkFormData) {
     createMutation.mutate({
       source_type: data.source_type,
@@ -393,7 +406,16 @@ function MemoryTab({ projectId }: { projectId: string }) {
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => syncTasksMutation.mutate()}
+            disabled={syncTasksMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors disabled:opacity-40"
+            title="Backfill memory chunks from existing task refinement details"
+          >
+            <RefreshCw size={13} className={syncTasksMutation.isPending ? 'animate-spin' : ''} />
+            Sync tasks
+          </button>
           <button
             onClick={() => setAddingType('product')}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm text-white transition-colors"
