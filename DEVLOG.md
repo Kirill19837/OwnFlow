@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-05-15 | `4a6e4af` — chore: update Claude model names to v4, remove opus from MVP
+
+- Replaced deprecated Claude 3.5 model IDs (`claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`, `claude-3-opus-20240229`) with current Claude 4 names (`claude-sonnet-4-6`, `claude-haiku-4-5`) across backend and all frontend dropdowns.
+- `claude-opus-4-7` excluded from MVP model lists (reserved for Pro tier).
+- Added `supabase/migrations/018_update_claude_model_names.sql` to migrate existing actor/team rows in the DB.
+
+---
+
 ## 2026-05-06 | `7f8b04f` — fix: preserve task assignments on realtime upsert
 
 - **projectStore.ts** `upsertTask`: merges incoming real-time task payloads onto existing task data, preserving joined fields (`assignments`) that Supabase omits from raw change events. Fixes task appearing unassigned immediately after "Approve & Start" until a manual refresh.

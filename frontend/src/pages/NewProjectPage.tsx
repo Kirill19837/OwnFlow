@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
@@ -61,7 +62,6 @@ export default function NewProjectPage() {
   const [prompt, setPrompt] = useState('')
   const [aiModel, setAiModel] = useState(activeTeam?.default_ai_model ?? 'gpt-4o')
   const [sprintDays, setSprintDays] = useState(3)
-  const defaultActorModel = activeTeam?.default_ai_model ?? 'gpt-4o'
 
   // Fetch team members to use as human actor options
   const { data: teamData, isLoading: teamMembersLoading } = useQuery({
@@ -102,15 +102,13 @@ export default function NewProjectPage() {
     if (seededRef.current || !session?.user.id) return
     seededRef.current = true
     _usedNames = []
-    const pm = skills.find((s) => s.name === 'AI Project Manager')
     // Creator is always the first human actor, linked to their user account
     const myMember = teamMembers.find((m) => m.user_id === session?.user.id)
     const myName = myMember?.full_name || session?.user.user_metadata?.full_name || session?.user.email || 'You'
     setActors(orderActors([
-      { role: pm?.name ?? 'AI Project Manager', name: pickAIName(), type: 'ai',    model: defaultActorModel, characteristics: pm?.description ?? '' },
       { role: 'Project Lead', name: myName, type: 'human', model: '', characteristics: '', user_id: session?.user.id },
     ]))
-  }, [skills, defaultActorModel, session?.user.id, session?.user.email, session?.user.user_metadata?.full_name, teamMembers])
+  }, [session?.user.id, session?.user.email, session?.user.user_metadata?.full_name, teamMembers])
   // seededRef.current guard ensures this only runs once; full deps listed for exhaustive-deps rule
 
   const [showRolePicker, setShowRolePicker] = useState(false)
@@ -118,6 +116,7 @@ export default function NewProjectPage() {
   const [planning, setPlanningState] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [assistantRequest, setAssistantRequest] = useState('')
+  const [promptPreview, setPromptPreview] = useState(false)
   const [assistantSuggestion, setAssistantSuggestion] = useState<{ name: string; prompt: string; notes?: string; questions?: string[] } | null>(null)
   const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([])
   const esRef = useRef<EventSource | null>(null)
@@ -215,7 +214,7 @@ export default function NewProjectPage() {
           role: roleName,
           name: pickAIName(),
           type: 'ai' as const,
-          model: defaultActorModel,
+          model: aiModel,
           characteristics: skill.description ?? '',
           user_id: undefined,
         }]
@@ -228,7 +227,7 @@ export default function NewProjectPage() {
     const type = typeOverride ?? (skill.actor_type === 'both' ? 'ai' : skill.actor_type as 'human' | 'ai')
     setActors((prev) => [
       ...orderActors(prev),
-      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? defaultActorModel : '', characteristics: skill.description ?? '', user_id: undefined },
+      { role: skill.name, name: type === 'ai' ? pickAIName() : '', type, model: type === 'ai' ? aiModel : '', characteristics: skill.description ?? '', user_id: undefined },
     ])
   }
 
@@ -258,34 +257,6 @@ export default function NewProjectPage() {
       </p>
 
       <div className="space-y-6">
-        {/* Project name */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Project name</label>
-          <input
-            type="text"
-            required
-            placeholder="e.g. E-commerce checkout revamp"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-        </div>
-
-        {/* Prompt */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Project description / prompt
-          </label>
-          <textarea
-            required
-            rows={7}
-            placeholder="Describe the product, goals, tech stack, constraints, and any specific requirements. Be as detailed as you want — the AI will use this to generate the full task breakdown."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-          />
-        </div>
-
         {/* AI assistant */}
         <div className="bg-gray-900/70 border border-purple-900/60 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -384,6 +355,98 @@ export default function NewProjectPage() {
           )}
         </div>
 
+        {/* AI Model override */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1">AI model for this project</label>
+          <p className="text-xs text-gray-500 mb-2">
+            Team default: <span className="text-purple-400">{activeTeam?.default_ai_model ?? 'gpt-4o'}</span>. Override below if needed.
+          </p>
+          <select
+            value={aiModel}
+            onChange={(e) => setAiModel(e.target.value)}
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            {AI_MODELS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label} ({m.provider})</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Project name */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Project name</label>
+          <input
+            type="text"
+            required
+            placeholder="e.g. E-commerce checkout revamp"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+        </div>
+
+        {/* Prompt */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-300">
+              Project description / prompt
+            </label>
+            <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+              <button
+                type="button"
+                onClick={() => setPromptPreview(false)}
+                className={`px-2.5 py-1 transition-colors ${
+                  !promptPreview ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setPromptPreview(true)}
+                disabled={!prompt.trim()}
+                className={`px-2.5 py-1 transition-colors ${
+                  promptPreview ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300 disabled:opacity-40'
+                }`}
+              >
+                Preview
+              </button>
+            </div>
+          </div>
+          {promptPreview ? (
+            <div className="min-h-[168px] w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm overflow-auto">
+              <ReactMarkdown
+                components={{
+                  h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-4 mb-2">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-semibold text-white mt-3 mb-1.5">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-semibold text-gray-200 mt-2 mb-1">{children}</h3>,
+                  p: ({ children }) => <p className="text-gray-300 mb-2 leading-relaxed">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc list-inside text-gray-300 mb-2 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside text-gray-300 mb-2 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="text-gray-300">{children}</li>,
+                  code: ({ children, className }) => className
+                    ? <pre className="bg-gray-800 rounded p-3 my-2 overflow-x-auto text-xs text-green-300 font-mono"><code>{children}</code></pre>
+                    : <code className="bg-gray-800 text-green-300 text-xs font-mono px-1 py-0.5 rounded">{children}</code>,
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-purple-600 pl-3 my-2 text-gray-400 italic">{children}</blockquote>,
+                  strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-gray-300">{children}</em>,
+                  hr: () => <hr className="border-gray-700 my-3" />,
+                  a: ({ href, children }) => <a href={href} className="text-purple-400 underline hover:text-purple-300">{children}</a>,
+                }}
+              >{prompt}</ReactMarkdown>
+            </div>
+          ) : (
+            <textarea
+              required
+              rows={7}
+              placeholder="Describe the product, goals, tech stack, constraints, and any specific requirements. Be as detailed as you want — the AI will use this to generate the full task breakdown. Markdown is supported."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none font-mono"
+            />
+          )}
+        </div>
+
         {/* Actors */}
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -399,7 +462,9 @@ export default function NewProjectPage() {
               <button
                 type="button"
                 onClick={autoFill}
-                className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 transition-colors"
+                disabled={!name.trim() || !prompt.trim()}
+                title={!name.trim() || !prompt.trim() ? 'Add a project title and description first' : undefined}
+                className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Zap size={11} /> Auto-fill
               </button>
@@ -512,7 +577,7 @@ export default function NewProjectPage() {
                   <div className="flex rounded overflow-hidden border border-gray-700 text-xs shrink-0">
                     <button
                       type="button"
-                      onClick={() => updateActor(i, { type: 'ai', model: defaultActorModel, name: actor.name || pickAIName(), user_id: undefined })}
+                      onClick={() => updateActor(i, { type: 'ai', model: aiModel, name: actor.name || pickAIName(), user_id: undefined })}
                       className={`flex items-center gap-0.5 px-2 py-0.5 transition-colors ${
                         actor.type === 'ai' ? 'bg-purple-900 text-purple-300' : 'text-gray-500 hover:text-gray-300'
                       }`}
@@ -630,23 +695,6 @@ export default function NewProjectPage() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* AI Model override */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">AI model for this project</label>
-          <p className="text-xs text-gray-500 mb-2">
-            Team default: <span className="text-purple-400">{activeTeam?.default_ai_model ?? 'gpt-4o'}</span>. Override below if needed.
-          </p>
-          <select
-            value={aiModel}
-            onChange={(e) => setAiModel(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-          >
-            {AI_MODELS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label} ({m.provider})</option>
-            ))}
-          </select>
         </div>
 
         {/* Sprint length */}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import List, Optional
 from app.models import TaskDraft, SprintTheme
@@ -27,6 +28,7 @@ Return a JSON object with:
 When assigning actor_role, prefer human actors over AI actors for the same role when both exist.
 The roadmap should cover the full project in 3-6 sprints. Sprint 1 tasks must fit within 24 hours of total effort and focus on the foundation/setup goals from the roadmap.
 Order sprint1_tasks so dependencies always appear before dependents.
+Return ONLY valid raw JSON — do not wrap in markdown code fences or add any text before or after the JSON object.
 """
 
 NEXT_SPRINT_SYSTEM = """You are an expert technical project manager continuing a project plan.
@@ -46,7 +48,17 @@ When assigning actor_role, prefer human actors over AI actors for the same role 
 Tasks must align with the sprint's theme and goal from the roadmap.
 Total estimated hours should not exceed 24 hours.
 Order tasks so dependencies always appear before dependents.
+Return ONLY valid raw JSON — do not wrap in markdown code fences or add any text before or after the JSON object.
 """
+
+
+def _strip_code_fence(raw: str) -> str:
+    """Strip markdown code fences that Claude sometimes wraps JSON in."""
+    stripped = raw.strip()
+    match = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", stripped)
+    if match:
+        return match.group(1)
+    return stripped
 
 
 def _persist_ai_message(project_id: str, phase: str, model: str, messages: list, response: str) -> None:
@@ -87,7 +99,7 @@ async def plan_sprint_one(
     if project_id:
         _persist_ai_message(project_id, "planning_sprint1", model, messages, raw)
 
-    data = json.loads(raw)
+    data = json.loads(_strip_code_fence(raw))
     roadmap_raw = data.get("roadmap") or []
     tasks_raw = data.get("sprint1_tasks") or data.get("tasks") or []
 
@@ -180,7 +192,7 @@ async def generate_next_sprint(
     raw = await provider.complete(messages, response_format={"type": "json_object"})
     _persist_ai_message(project_id, f"planning_sprint{sprint_number}", model, messages, raw)
 
-    data = json.loads(raw)
+    data = json.loads(_strip_code_fence(raw))
     tasks_raw = data.get("tasks") or []
     return [TaskDraft(**t) for t in tasks_raw]
 
