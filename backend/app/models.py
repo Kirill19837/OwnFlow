@@ -138,3 +138,55 @@ class Deliverable(BaseModel):
     content: str
     tool_calls_log: Optional[List] = None
     created_at: datetime
+
+
+# ── Project Memory ────────────────────────────────────────
+MEMORY_SOURCE_TYPES = Literal[
+    "product", "architecture", "coding-standards", "business-rules",
+    "code_file", "pull_request", "commit",
+]
+
+
+class MemoryChunkCreate(BaseModel):
+    source_type: MEMORY_SOURCE_TYPES
+    source_id: Optional[str] = None
+    title: str
+    content: str
+    summary: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    importance: int = Field(default=5, ge=1, le=10)
+
+
+class MemoryChunkUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    summary: Optional[str] = None
+    tags: Optional[List[str]] = None
+    importance: Optional[int] = Field(default=None, ge=1, le=10)
+
+
+# ── Decisions ─────────────────────────────────────────────
+DECISION_STATUS = Literal["active", "superseded", "rejected", "draft"]
+
+
+class DecisionCreate(BaseModel):
+    title: str
+    status: DECISION_STATUS = "active"
+    context: Optional[str] = None
+    decision: str
+    reason: Optional[str] = None
+    consequences: Optional[str] = None
+    related_task_ids: List[str] = Field(default_factory=list)
+
+
+class DecisionUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[DECISION_STATUS] = None
+    context: Optional[str] = None
+    decision: Optional[str] = None
+    reason: Optional[str] = None
+    consequences: Optional[str] = None
+    related_task_ids: Optional[List[str]] = None
+    superseded_by: Optional[str] = None
+
+

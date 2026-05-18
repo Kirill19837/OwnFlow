@@ -37,7 +37,7 @@ function resolveActorImageSource(actor: { webhook_url?: string; docker_image?: s
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
 import { AiCommandsModal } from '../components/AiCommandsModal'
-import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap, HelpCircle } from 'lucide-react'
+import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap, HelpCircle, Brain } from 'lucide-react'
 import { format } from 'date-fns'
 
 const AI_MODELS = [
@@ -525,6 +525,13 @@ export default function ProjectBoardPage() {
               title="Project activity"
             >
               <Activity size={16} />
+            </button>
+            <button
+              onClick={() => navigate(`/projects/${projectId}/memory`)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-gray-800 transition-colors"
+              title="Project memory"
+            >
+              <Brain size={16} />
             </button>
             <button
               onClick={() => setShowSettings((v) => !v)}

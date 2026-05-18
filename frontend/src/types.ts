@@ -189,3 +189,54 @@ export interface Deliverable {
   tool_calls_log?: unknown[]
   created_at: string
 }
+
+// ── Project Memory ────────────────────────────────────────────────────────────
+
+export type MemorySourceType =
+  | 'product'
+  | 'architecture'
+  | 'coding-standards'
+  | 'business-rules'
+  | 'code_file'
+  | 'pull_request'
+  | 'commit'
+
+export interface MemoryChunk {
+  id: string
+  project_id: string
+  source_type: MemorySourceType
+  source_id?: string | null
+  title: string
+  content: string
+  summary?: string | null
+  tags: string[]
+  importance: number
+  created_at: string
+  updated_at: string
+}
+
+export type DecisionStatus = 'active' | 'superseded' | 'rejected' | 'draft'
+
+export interface Decision {
+  id: string
+  project_id: string
+  title: string
+  status: DecisionStatus
+  context?: string | null
+  decision: string
+  reason?: string | null
+  consequences?: string | null
+  related_task_ids: string[]
+  superseded_by?: string | null
+  created_at: string
+}
+
+export interface ContextPack {
+  id: string
+  project_id: string
+  task_id?: string | null
+  content: string
+  included_chunk_ids: string[]
+  token_count: number
+  created_at: string
+}

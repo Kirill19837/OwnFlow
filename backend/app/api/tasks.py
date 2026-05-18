@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import TaskAssign
@@ -121,14 +122,66 @@ async def update_task_details(task_id: str, body: dict):
     details = body.get("details") or {}
     if not isinstance(details, dict):
         raise HTTPException(400, "details must be an object")
-    existing = db.table("tasks").select("title,description,task_details").eq("id", task_id).single().execute()
+    existing = db.table("tasks").select("id,title,description,task_details,project_id").eq("id", task_id).single().execute()
     task_row = existing.data or {}
     current = task_row.get("task_details") or {}
     merged = {**current, **details}
     db.table("tasks").update({"task_details": merged}).eq("id", task_id).execute()
     # Auto-evaluate readiness after every save
     await _auto_check_ready(db, task_id, task_row.get("title", ""), task_row.get("description", ""), merged)
+    # Persist decisions into project memory so future tasks can see them
+    _upsert_task_memory_chunk(db, task_row, merged)
     return {"task_id": task_id, "task_details": merged}
+
+
+def _upsert_task_memory_chunk(db, task_row: dict, task_details: dict, importance: int = 6) -> None:
+    """Create or update a memory chunk for this task's refinement decisions.
+
+    Uses source_type='business-rules' and source_id=task_id so it can be upserted
+    idempotently — one chunk per task, updated every time details change.
+    """
+    task_id = task_row.get("id")
+    project_id = task_row.get("project_id")
+    if not task_id or not project_id or not task_details:
+        return
+    try:
+        title = task_row.get("title") or "Untitled task"
+        details_lines = "\n".join(f"- {k}: {v}" for k, v in task_details.items())
+        content = f"Task: {title}\n\nRefinement decisions:\n{details_lines}"
+        summary = f"Refined task '{title}' with {len(task_details)} captured decisions."
+
+        existing = (
+            db.table("memory_chunks")
+            .select("id")
+            .eq("project_id", project_id)
+            .eq("source_type", "business-rules")
+            .eq("source_id", task_id)
+            .execute()
+        )
+        if existing.data:
+            db.table("memory_chunks").update({
+                "title": f"Task refinement: {title}",
+                "content": content,
+                "summary": summary,
+                "importance": importance,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", existing.data[0]["id"]).execute()
+        else:
+            db.table("memory_chunks").insert({
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "source_type": "business-rules",
+                "source_id": task_id,
+                "title": f"Task refinement: {title}",
+                "content": content,
+                "summary": summary,
+                "tags": ["task-refinement"],
+                "importance": importance,
+            }).execute()
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[memory] upsert failed task={task_row.get('id')} project={task_row.get('project_id')}: {exc}")
 
 
 async def _auto_check_ready(db, task_id: str, title: str, description: str, task_details: dict):
@@ -165,6 +218,10 @@ def set_task_ai_ready(task_id: str, body: dict):
     db = get_supabase()
     ai_ready = bool(body.get("ai_ready", True))
     db.table("tasks").update({"ai_ready": ai_ready}).eq("id", task_id).execute()
+    # On mark-ready, ensure latest decisions are reflected in project memory
+    if ai_ready:
+        task_row = db.table("tasks").select("id,title,description,task_details,project_id").eq("id", task_id).single().execute().data or {}
+        _upsert_task_memory_chunk(db, task_row, task_row.get("task_details") or {}, importance=7)
     return {"task_id": task_id, "ai_ready": ai_ready}
 
 
@@ -294,6 +351,32 @@ async def prompt_task_stream(task_id: str, body: dict):
 
     history = body.get("history") or []
 
+    # Load project memory chunks (highest importance first, cap at 15)
+    memory_chunks: list[dict] = []
+    active_decisions: list[dict] = []
+    try:
+        memory_chunks = (
+            db.table("memory_chunks")
+            .select("source_type,title,content,summary,importance")
+            .eq("project_id", task["project_id"])
+            .order("importance", desc=True)
+            .limit(15)
+            .execute()
+            .data
+            or []
+        )
+        active_decisions = (
+            db.table("decisions")
+            .select("title,decision,reason,status")
+            .eq("project_id", task["project_id"])
+            .eq("status", "active")
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        pass
+
     task_details = task.get("task_details") or {}
     messages = build_task_assistant_messages(
         task=task,
@@ -303,6 +386,8 @@ async def prompt_task_stream(task_id: str, body: dict):
         assigned_actor_name=assigned_actor_name,
         task_details=task_details,
         user_prompt=user_prompt,
+        memory_chunks=memory_chunks,
+        active_decisions=active_decisions,
     )
 
     # Persist user message

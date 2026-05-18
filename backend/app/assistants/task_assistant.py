@@ -26,6 +26,8 @@ def build_task_assistant_messages(
     assigned_actor_name: str,
     task_details: dict,
     user_prompt: str,
+    memory_chunks: list[dict] | None = None,
+    active_decisions: list[dict] | None = None,
 ) -> list[dict]:
     """Build chat messages for task assistant."""
     actors_lines = "\n".join(
@@ -40,6 +42,20 @@ def build_task_assistant_messages(
         if task_details else "  (none captured yet)"
     )
 
+    # Build memory section
+    memory_section = ""
+    if memory_chunks:
+        lines = []
+        for c in memory_chunks:
+            excerpt = c.get("summary") or (c.get("content") or "")[:400]
+            lines.append(f"  [{c['source_type']}] {c['title']}: {excerpt}")
+        memory_section = "Project memory (use this as context for refinement):\n" + "\n".join(lines) + "\n\n"
+
+    decisions_section = ""
+    if active_decisions:
+        lines = [f"  - {d['title']}: {d['decision']}" for d in active_decisions]
+        decisions_section = "Active architectural decisions:\n" + "\n".join(lines) + "\n\n"
+
     return [
         {
             "role": "system",
@@ -47,6 +63,8 @@ def build_task_assistant_messages(
                 f"You are {assigned_actor_name}, an AI agent working on a software project.\n"
                 f"Project: {project.get('name', '')}\n"
                 f"Project brief: {project.get('prompt', '')}\n\n"
+                f"{memory_section}"
+                f"{decisions_section}"
                 "Current task:\n"
                 f"  Title: {task['title']}\n"
                 f"  Description: {task.get('description') or '(empty)'}\n"
@@ -107,16 +125,18 @@ def build_task_assistant_messages(
                 "  Be specific - ask one thing per question. Do not ask about things already "
                 "  captured in 'Decisions & details already captured'.\n\n"
                 "STEP 4 - When the user answers a question.\n"
-                "  Immediately emit update_details for the answered fact(s), then check if any "
-                "  questions remain. If none remain, also emit mark_ready.\n\n"
-                "mark_ready means: YOU (the AI) are confident the task has enough decisions to be\n"
-                "implemented AND you have emitted an update_details block with all of them.\n"
-                "It is a signal to the user to SAVE the decision cards — only once saved will the\n"
-                "system automatically confirm the task as ready. It does NOT set ready by itself.\n"
-                "Emit mark_ready only when you have all the information you need AND have emitted\n"
-                "the corresponding update_details block in the same response.\n"
-                "Do NOT emit mark_ready without a preceding update_details block.\n"
-                "Do NOT emit mark_ready until ALL questions are answered.\n"
+                "  a) Emit update_details immediately with every newly answered fact.\n"
+                "  b) After emitting update_details, ask yourself: 'Are there any open questions\n"
+                "     left that a developer absolutely needs before starting?' If NO → also emit\n"
+                "     mark_ready in the SAME response. Do NOT wait for the next turn.\n"
+                "  c) 'No open questions' means: output_format is captured AND the core technical\n"
+                "     decisions (tech stack, approach, acceptance criteria) are known. Minor nice-\n"
+                "     to-haves that a developer can decide on their own do NOT block mark_ready.\n\n"
+                "mark_ready means: you are confident a developer can START without asking more\n"
+                "questions. Emit it as soon as that condition is met — even if every possible\n"
+                "detail has not been spelled out. A task ready to implement does NOT need to be\n"
+                "100% specified; it needs to be 'good enough to start'.\n"
+                "Always pair mark_ready with a preceding update_details block in the same reply.\n"
                 "Do NOT repeat questions already answered in the captured details.\n"
                 "------------------------------------\n\n"
                 "CONSOLIDATION PROTOCOL\n"
@@ -125,8 +145,9 @@ def build_task_assistant_messages(
                 "  1. Scan the ENTIRE conversation history for every decision, fact, or technical choice mentioned.\n"
                 "  2. Emit ONE update_details block with ALL new facts not already in 'Decisions & details already captured'.\n"
                 "  3. Do NOT emit update_description - NEVER touch title or description during consolidation.\n"
-                "  4. After saving, assess: do you now have everything needed to implement this task?\n"
-                "     If YES -> also emit mark_ready. If NO -> list what is still missing.\n"
+                "  4. After saving, assess: can a developer START this task without asking\n"
+                "     more questions? If YES → emit mark_ready immediately. If NO → list exactly\n"
+                "     what is still missing (keep it short — only blockers, not nice-to-haves).\n"
                 "------------------------------------\n\n"
                 "STRUCTURED ACTIONS (respond with ONLY a fenced JSON block - no prose before/after):\n\n"
                 "```json\n"

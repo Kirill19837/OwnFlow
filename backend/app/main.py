@@ -4,7 +4,7 @@ import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.api import projects, tasks, actors, teams, github, companies, auth, skills, agents, ai_logs
+from app.api import projects, tasks, actors, teams, github, companies, auth, skills, agents, ai_logs, memory
 
 settings = get_settings()
 
@@ -37,6 +37,7 @@ app.include_router(github.router, prefix="/github", tags=["github"])
 app.include_router(skills.router, prefix="/skills", tags=["skills"])
 app.include_router(agents.router, prefix="/agents", tags=["agents"])
 app.include_router(ai_logs.router, prefix="/projects", tags=["ai-logs"])
+app.include_router(memory.router, prefix="/projects", tags=["memory"])
 
 
 @app.get("/health")

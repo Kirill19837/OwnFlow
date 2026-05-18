@@ -401,3 +401,29 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
         return None
 
     return None
+
+
+
+# ─── Memory sync helpers ──────────────────────────────────────────────────────
+
+async def list_merged_prs(token: str, owner: str, repo: str, limit: int = 20) -> list[dict]:
+    """Return recently merged PRs for memory sync."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
+            headers=_auth(token),
+            params={"state": "closed", "sort": "updated", "direction": "desc", "per_page": limit},
+        )
+        if resp.status_code != 200:
+            return []
+        return [
+            {
+                "number": pr["number"],
+                "title": pr["title"],
+                "body": pr.get("body") or "",
+                "merged_by": (pr.get("merged_by") or {}).get("login", ""),
+                "merged_at": pr.get("merged_at"),
+            }
+            for pr in resp.json()
+            if pr.get("merged_at")
+        ]

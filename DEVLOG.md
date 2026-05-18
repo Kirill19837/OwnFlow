@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-05-18 | `476d5b5` — UX: fix markdown preview, remove default AI PM, guard auto-fill, fix JSON fence in orchestrator
+
+- Fixed markdown preview in `NewProjectPage` — replaced broken `prose` Tailwind classes (requires uninstalled `@tailwindcss/typography`) with explicit per-element class mappings on `ReactMarkdown` `components` prop.
+- Removed AI Project Manager from default actors on project creation; page now starts with only the human Project Lead.
+- Auto-fill button is disabled (with tooltip) when project title or description is empty.
+- Fixed `ai_orchestrator.py`: added `_strip_code_fence()` helper and updated both `json.loads` calls to strip markdown code fences before parsing; added system-prompt instruction to return raw JSON.
+
 ## 2026-05-15 | `4a6e4af` — chore: update Claude model names to v4, remove opus from MVP
 
 - Replaced deprecated Claude 3.5 model IDs (`claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`, `claude-3-opus-20240229`) with current Claude 4 names (`claude-sonnet-4-6`, `claude-haiku-4-5`) across backend and all frontend dropdowns.

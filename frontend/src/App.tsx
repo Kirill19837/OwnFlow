@@ -15,6 +15,7 @@ import ProfilePage from './pages/ProfilePage'
 import CompanySettingsPage from './pages/CompanySettingsPage'
 import AgentsPage from './pages/AgentsPage'
 import AiLogsPage from './pages/AiLogsPage'
+import ProjectMemoryPage from './pages/ProjectMemoryPage'
 
 import InvitePage from './pages/InvitePage'
 
@@ -37,6 +38,7 @@ export default function App() {
                 <Route path="/new" element={<NewProjectPage />} />
                 <Route path="/projects/:projectId" element={<ProjectBoardPage />} />
                 <Route path="/projects/:projectId/activity" element={<ProjectActivityPage />} />
+                <Route path="/projects/:projectId/memory" element={<ProjectMemoryPage />} />
                 <Route path="/teams/new" element={<NewOrgPage />} />
                 <Route path="/teams/:teamId/settings" element={<OrgSettingsPage />} />
                 <Route path="/company/settings" element={<CompanySettingsPage />} />
