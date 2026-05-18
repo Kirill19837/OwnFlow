@@ -12,6 +12,7 @@ from app.models import (
     MemoryChunkCreate,
     MemoryChunkUpdate,
 )
+from app.services.embeddings import embed_memory_chunk
 
 router = APIRouter()
 
@@ -34,8 +35,9 @@ def list_memory_chunks(project_id: str, source_type: str = ""):
 
 
 @router.post("/{project_id}/memory", status_code=201)
-def create_memory_chunk(project_id: str, body: MemoryChunkCreate):
+async def create_memory_chunk(project_id: str, body: MemoryChunkCreate):
     db = get_supabase()
+    embedding = await embed_memory_chunk(body.title, body.content, body.summary)
     row = {
         "id": str(uuid.uuid4()),
         "project_id": project_id,
@@ -46,17 +48,18 @@ def create_memory_chunk(project_id: str, body: MemoryChunkCreate):
         "summary": body.summary,
         "tags": body.tags,
         "importance": body.importance,
+        "embedding": embedding,
     }
     result = db.table("memory_chunks").insert(row).execute()
     return result.data[0]
 
 
 @router.patch("/{project_id}/memory/{chunk_id}")
-def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkUpdate):
+async def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkUpdate):
     db = get_supabase()
     chunk = (
         db.table("memory_chunks")
-        .select("id")
+        .select("id,title,content,summary")
         .eq("id", chunk_id)
         .eq("project_id", project_id)
         .execute()
@@ -66,6 +69,14 @@ def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkUpdate)
     update = body.model_dump(exclude_none=True)
     if not update:
         raise HTTPException(400, "No fields to update")
+    # Re-embed if title/content/summary changed
+    if any(k in update for k in ("title", "content", "summary")):
+        current = chunk.data[0]
+        update["embedding"] = await embed_memory_chunk(
+            update.get("title", current.get("title")),
+            update.get("content", current.get("content")),
+            update.get("summary", current.get("summary")),
+        )
     result = (
         db.table("memory_chunks").update(update).eq("id", chunk_id).execute()
     )
@@ -254,7 +265,7 @@ def get_latest_context_pack(project_id: str, task_id: str):
 # ── Task Memory Backfill ──────────────────────────────────────────────────────
 
 @router.post("/{project_id}/memory/sync-tasks")
-def sync_tasks_memory(project_id: str):
+async def sync_tasks_memory(project_id: str):
     """Backfill memory_chunks from existing tasks with non-empty task_details."""
     from datetime import datetime, timezone
     db = get_supabase()
@@ -279,6 +290,8 @@ def sync_tasks_memory(project_id: str):
         details_lines = "\n".join(f"- {k}: {v}" for k, v in details.items())
         content = f"Task: {title}\n\nRefinement decisions:\n{details_lines}"
         summary = f"Refined task '{title}' with {len(details)} captured decisions."
+        chunk_title = f"Task refinement: {title}"
+        embedding = await embed_memory_chunk(chunk_title, content, summary)
         existing = (
             db.table("memory_chunks")
             .select("id")
@@ -289,9 +302,10 @@ def sync_tasks_memory(project_id: str):
         )
         if existing.data:
             db.table("memory_chunks").update({
-                "title": f"Task refinement: {title}",
+                "title": chunk_title,
                 "content": content,
                 "summary": summary,
+                "embedding": embedding,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", existing.data[0]["id"]).execute()
             updated += 1
@@ -301,14 +315,45 @@ def sync_tasks_memory(project_id: str):
                 "project_id": project_id,
                 "source_type": "business-rules",
                 "source_id": task_id,
-                "title": f"Task refinement: {title}",
+                "title": chunk_title,
                 "content": content,
                 "summary": summary,
                 "tags": ["task-refinement"],
                 "importance": 6,
+                "embedding": embedding,
             }).execute()
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped, "total_tasks": len(tasks)}
+
+
+# ── Embedding Backfill ────────────────────────────────────────────────────────
+
+@router.post("/{project_id}/memory/sync-embeddings")
+async def sync_memory_embeddings(project_id: str):
+    """Generate missing embeddings for chunks that don't have one yet."""
+    db = get_supabase()
+    chunks = (
+        db.table("memory_chunks")
+        .select("id,title,content,summary,embedding")
+        .eq("project_id", project_id)
+        .execute()
+        .data
+        or []
+    )
+    updated = 0
+    skipped = 0
+    failed = 0
+    for c in chunks:
+        if c.get("embedding"):
+            skipped += 1
+            continue
+        emb = await embed_memory_chunk(c.get("title"), c.get("content"), c.get("summary"))
+        if emb is None:
+            failed += 1
+            continue
+        db.table("memory_chunks").update({"embedding": emb}).eq("id", c["id"]).execute()
+        updated += 1
+    return {"updated": updated, "skipped": skipped, "failed": failed, "total": len(chunks)}
 
 
 # ── GitHub Memory Sync (MVP2) ─────────────────────────────────────────────────

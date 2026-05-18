@@ -8,6 +8,8 @@ def build_project_board_messages(
     actors: list[dict],
     history: list[dict],
     user_prompt: str,
+    memory_chunks: list[dict] | None = None,
+    active_decisions: list[dict] | None = None,
 ) -> list[dict]:
     """Build chat messages for project-board (kanban) assistant."""
     sprint_summary = ", ".join(
@@ -25,6 +27,34 @@ def build_project_board_messages(
         for a in (actors or [])
     ) or "none"
 
+    # Render memory + decisions so the assistant uses established facts and avoids
+    # re-asking the user about things already captured.
+    memory_section = ""
+    if memory_chunks:
+        lines = []
+        for c in memory_chunks[:8]:
+            title = c.get("title") or "(untitled)"
+            summary = c.get("summary") or ""
+            excerpt = (c.get("content") or "")[:600]
+            lines.append(f"- [{c.get('source_type','memory')}] {title}\n  {summary}\n  {excerpt}")
+        memory_section = (
+            "\nRELEVANT PROJECT MEMORY (vector-matched to user's question) — established facts. "
+            "TREAT AS ALREADY DECIDED. Never re-ask the user about anything stated here:\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+
+    decisions_section = ""
+    if active_decisions:
+        dlines = [
+            f"- {d.get('title','(untitled)')}: {d.get('decision','')}"
+            + (f" — {d.get('reason')}" if d.get("reason") else "")
+            for d in active_decisions[:10]
+        ]
+        decisions_section = (
+            "\nACTIVE PROJECT DECISIONS (binding):\n" + "\n".join(dlines) + "\n"
+        )
+
     return [
         {
             "role": "system",
@@ -34,8 +64,11 @@ def build_project_board_messages(
                 f"Brief: {project.get('prompt', '')}\n"
                 f"Sprints: {sprint_summary or 'none yet'}\n\n"
                 f"Current tasks:\n{task_lines}\n\n"
-                f"Team actors (use exact IDs when assigning):\n{actors_lines}\n\n"
-                "Answer helpfully and concisely.\n\n"
+                f"Team actors (use exact IDs when assigning):\n{actors_lines}\n"
+                f"{memory_section}{decisions_section}\n"
+                "Answer helpfully and concisely. Use the RELEVANT PROJECT MEMORY and "
+                "ACTIVE PROJECT DECISIONS above as ground truth — do not contradict them "
+                "and do not re-ask the user about facts already captured there.\n\n"
                 "IMPORTANT - structured output rule:\n"
                 "When the user asks to CREATE, ADD, DELETE, MODIFY, UPDATE, REGENERATE, or ADD DETAILS to tasks, "
                 "respond ONLY with a single fenced JSON block - no prose before or after it.\n\n"

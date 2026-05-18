@@ -75,7 +75,10 @@ export default function ProjectBoardPage() {
   // Board-level prompt
   const [boardPrompt, setBoardPrompt] = useState('')
   const [boardPromptStreaming, setBoardPromptStreaming] = useState(false)
-  const [boardChatHistory, setBoardChatHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  type BoardChatMsg =
+    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'memory'; titles: string[]; decisions: string[] }
+  const [boardChatHistory, setBoardChatHistory] = useState<BoardChatMsg[]>([])
   const [showBoardChat, setShowBoardChat] = useState(false)
   const boardChatBottomRef = useRef<HTMLDivElement | null>(null)
   const boardPromptAbortRef = useRef<AbortController | null>(null)
@@ -365,7 +368,7 @@ export default function ProjectBoardPage() {
     setBoardPromptStreaming(true)
 
     const userMsg: { role: 'user' | 'assistant'; content: string } = { role: 'user', content: msg }
-    const newHistory = [...boardChatHistory, userMsg]
+    const newHistory: BoardChatMsg[] = [...boardChatHistory, userMsg]
     // Start with empty content — we buffer silently and only show when done
     setBoardChatHistory([...newHistory, { role: 'assistant', content: '' }])
 
@@ -379,7 +382,7 @@ export default function ProjectBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: msg,
-          history: boardChatHistory,
+          history: boardChatHistory.filter((m): m is { role: 'user' | 'assistant'; content: string } => m.role === 'user' || m.role === 'assistant'),
           actors: (project?.actors ?? []).map((a) => ({
             id: a.id, name: a.name, role: a.role, type: a.type, model: a.model,
           })),
@@ -389,6 +392,7 @@ export default function ProjectBoardPage() {
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let assistantContent = ''
+      let memoryEvent: { titles: string[]; decisions: string[] } | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -398,14 +402,31 @@ export default function ProjectBoardPage() {
           const payload = line.slice(5).trim()
           if (payload === '[DONE]') break
           try {
-            const { content } = JSON.parse(payload)
-            assistantContent += content
-            // Don't update state mid-stream — reveal only when done
+            const obj = JSON.parse(payload)
+            if (obj.type === 'memory_event') {
+              memoryEvent = { titles: obj.titles || [], decisions: obj.decisions || [] }
+              // Reveal memory card immediately while assistant is still streaming
+              setBoardChatHistory([
+                ...newHistory,
+                { role: 'memory', titles: memoryEvent.titles, decisions: memoryEvent.decisions },
+                { role: 'assistant', content: '' },
+              ])
+              continue
+            }
+            if (typeof obj.content === 'string') {
+              assistantContent += obj.content
+              // Don't update state mid-stream — reveal only when done
+            }
           } catch { /* malformed SSE chunk — skip */ }
         }
       }
-      // Reveal final content all at once
-      setBoardChatHistory([...newHistory, { role: 'assistant', content: assistantContent }])
+      // Reveal final content all at once (preserve memory entry if present)
+      const finalHistory: BoardChatMsg[] = [...newHistory]
+      if (memoryEvent) {
+        finalHistory.push({ role: 'memory', titles: memoryEvent.titles, decisions: memoryEvent.decisions })
+      }
+      finalHistory.push({ role: 'assistant', content: assistantContent })
+      setBoardChatHistory(finalHistory)
     } catch { /* stream error — silently stop */ }
 
     setBoardPromptStreaming(false)
@@ -1177,6 +1198,35 @@ export default function ProjectBoardPage() {
           {!boardMinimized && showBoardChat && boardChatHistory.length > 0 && (
             <div className="border-b border-gray-800 p-3 max-h-64 overflow-y-auto space-y-2">
               {boardChatHistory.map((m, i) => {
+                if (m.role === 'memory') {
+                  const hasAny = m.titles.length > 0 || m.decisions.length > 0
+                  return (
+                    <div key={i} className="bg-blue-950/40 border border-blue-800/40 rounded-xl px-3 py-2">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Brain size={11} className="text-blue-400" />
+                        <span className="text-xs text-blue-400 font-medium uppercase tracking-wide">
+                          Memory consulted
+                        </span>
+                        <span className="text-[10px] text-gray-500 ml-auto">
+                          {m.titles.length} chunk{m.titles.length === 1 ? '' : 's'}
+                          {m.decisions.length > 0 ? `, ${m.decisions.length} decision${m.decisions.length === 1 ? '' : 's'}` : ''}
+                        </span>
+                      </div>
+                      {hasAny ? (
+                        <ul className="text-[11px] text-gray-400 space-y-0.5">
+                          {m.titles.map((t, j) => (
+                            <li key={`t-${j}`} className="truncate">• {t}</li>
+                          ))}
+                          {m.decisions.map((d, j) => (
+                            <li key={`d-${j}`} className="truncate">◆ {d}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-[11px] text-gray-500 italic">No prior memory found for this question.</p>
+                      )}
+                    </div>
+                  )
+                }
                 const isThinking = boardPromptStreaming && i === boardChatHistory.length - 1 && m.role === 'assistant'
                 const action = m.role === 'assistant' && !isThinking && m.content ? parseStructuredAction(m.content) : null
                 const alreadyConfirmed = createdMsgIndices.has(i)

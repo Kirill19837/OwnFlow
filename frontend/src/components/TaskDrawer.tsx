@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
-import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2, HelpCircle } from 'lucide-react'
+import { X, Play, Loader2, Zap, Send, Bot, CheckCircle, UserCheck, MessageSquare, FileText, Sparkles, ChevronDown, CheckCircle2, ListChecks, Activity, GitPullRequest, Trash2, HelpCircle, Brain } from 'lucide-react'
+import toast from 'react-hot-toast'
 import type { Task, Actor, Deliverable, TaskInteraction, Assignment, Project } from '../types'
 import api from '../lib/api'
 import { parseAllTaskActions, stripActionBlocks } from '../lib/taskActions'
@@ -73,6 +74,7 @@ type ChatMsg =
   | { kind: 'assistant'; content: string }
   | { kind: 'plan'; content: string }
   | { kind: 'deliverable'; content: string; actorName: string }
+  | { kind: 'memory'; titles: string[]; decisions: string[] }
   | { kind: 'thinking' }
 
 interface Props {
@@ -184,7 +186,17 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
   const updateDetails = useMutation({
     mutationFn: (details: Record<string, string>) => api.patch(`/tasks/${task.id}/details`, { details }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['project'] }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['project'] })
+      const memory = (res.data as { memory?: { action?: string; title?: string } } | undefined)?.memory
+      if (memory?.action === 'created') {
+        toast.success(`Memory chunk created: ${memory.title}`)
+      } else if (memory?.action === 'updated') {
+        toast.success(`Memory chunk updated: ${memory.title}`)
+      } else if (memory?.action === 'failed') {
+        toast.error('Memory chunk save failed')
+      }
+    },
   })
 
   const markReady = useMutation({
@@ -233,8 +245,20 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       let assistantContent = ''
       await readSSE(res.body!.getReader(), (payload) => {
         try {
-          const { content } = JSON.parse(payload)
-          assistantContent += content
+          const obj = JSON.parse(payload)
+          if (obj.type === 'memory_event') {
+            setChat((prev) => {
+              // Insert memory message just before the trailing 'thinking' bubble
+              const withoutThinking = prev.filter((m) => m.kind !== 'thinking')
+              return [
+                ...withoutThinking,
+                { kind: 'memory', titles: obj.titles || [], decisions: obj.decisions || [] },
+                { kind: 'thinking' },
+              ]
+            })
+            return
+          }
+          if (typeof obj.content === 'string') assistantContent += obj.content
         } catch { /* malformed SSE chunk — skip */ }
       })
       setChat((prev) => [
@@ -716,6 +740,36 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 )
               }
 
+              if (m.kind === 'memory') {
+                const hasAny = m.titles.length > 0 || m.decisions.length > 0
+                return (
+                  <div key={i} className="bg-blue-950/40 border border-blue-800/40 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Brain size={11} className="text-blue-400" />
+                      <span className="text-xs text-blue-400 font-medium uppercase tracking-wide">
+                        Memory consulted
+                      </span>
+                      <span className="text-[10px] text-gray-500 ml-auto">
+                        {m.titles.length} chunk{m.titles.length === 1 ? '' : 's'}
+                        {m.decisions.length > 0 ? `, ${m.decisions.length} decision${m.decisions.length === 1 ? '' : 's'}` : ''}
+                      </span>
+                    </div>
+                    {hasAny ? (
+                      <ul className="text-[11px] text-gray-400 space-y-0.5">
+                        {m.titles.map((t, j) => (
+                          <li key={`t-${j}`} className="truncate">• {t}</li>
+                        ))}
+                        {m.decisions.map((d, j) => (
+                          <li key={`d-${j}`} className="truncate">◆ {d}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[11px] text-gray-500 italic">No prior memory found for this question.</p>
+                    )}
+                  </div>
+                )
+              }
+
               if (m.kind === 'plan') {
                 return (
                   <div key={i} className="bg-purple-950/40 border border-purple-800/50 rounded-xl px-3 py-2">
@@ -892,8 +946,8 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                       return null
                     })}
                     {prose && (
-                      <div className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 whitespace-pre-wrap">
-                        {prose}
+                      <div className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-300 prose prose-invert prose-sm max-w-none [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&_strong]:text-white">
+                        <ReactMarkdown>{prose}</ReactMarkdown>
                       </div>
                     )}
                   </div>

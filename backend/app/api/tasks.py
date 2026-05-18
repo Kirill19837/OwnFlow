@@ -140,25 +140,31 @@ async def update_task_details(task_id: str, body: dict):
     # Auto-evaluate readiness after every save
     await _auto_check_ready(db, task_id, task_row.get("title", ""), task_row.get("description", ""), merged)
     # Persist decisions into project memory so future tasks can see them
-    _upsert_task_memory_chunk(db, task_row, merged)
-    return {"task_id": task_id, "task_details": merged}
+    memory_result = await _upsert_task_memory_chunk(db, task_row, merged)
+    return {"task_id": task_id, "task_details": merged, "memory": memory_result}
 
 
-def _upsert_task_memory_chunk(db, task_row: dict, task_details: dict, importance: int = 6) -> None:
+async def _upsert_task_memory_chunk(db, task_row: dict, task_details: dict, importance: int = 6) -> dict:
     """Create or update a memory chunk for this task's refinement decisions.
+
+    Returns {"action": "created"|"updated"|"skipped", "title": ...} so callers can
+    surface a UI message.
 
     Uses source_type='business-rules' and source_id=task_id so it can be upserted
     idempotently — one chunk per task, updated every time details change.
     """
+    from app.services.embeddings import embed_memory_chunk
     task_id = task_row.get("id")
     project_id = task_row.get("project_id")
     if not task_id or not project_id or not task_details:
-        return
+        return {"action": "skipped"}
     try:
         title = task_row.get("title") or "Untitled task"
         details_lines = "\n".join(f"- {k}: {v}" for k, v in task_details.items())
         content = f"Task: {title}\n\nRefinement decisions:\n{details_lines}"
         summary = f"Refined task '{title}' with {len(task_details)} captured decisions."
+        chunk_title = f"Task refinement: {title}"
+        embedding = await embed_memory_chunk(chunk_title, content, summary)
 
         existing = (
             db.table("memory_chunks")
@@ -170,28 +176,33 @@ def _upsert_task_memory_chunk(db, task_row: dict, task_details: dict, importance
         )
         if existing.data:
             db.table("memory_chunks").update({
-                "title": f"Task refinement: {title}",
+                "title": chunk_title,
                 "content": content,
                 "summary": summary,
                 "importance": importance,
+                "embedding": embedding,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", existing.data[0]["id"]).execute()
+            return {"action": "updated", "title": chunk_title}
         else:
             db.table("memory_chunks").insert({
                 "id": str(uuid.uuid4()),
                 "project_id": project_id,
                 "source_type": "business-rules",
                 "source_id": task_id,
-                "title": f"Task refinement: {title}",
+                "title": chunk_title,
                 "content": content,
                 "summary": summary,
                 "tags": ["task-refinement"],
                 "importance": importance,
+                "embedding": embedding,
             }).execute()
+            return {"action": "created", "title": chunk_title}
     except Exception as exc:
         import traceback
         traceback.print_exc()
         print(f"[memory] upsert failed task={task_row.get('id')} project={task_row.get('project_id')}: {exc}")
+        return {"action": "failed", "error": str(exc)}
 
 
 async def _auto_check_ready(db, task_id: str, title: str, description: str, task_details: dict):
@@ -223,7 +234,7 @@ async def _auto_check_ready(db, task_id: str, title: str, description: str, task
 
 
 @router.patch("/{task_id}/ai-ready")
-def set_task_ai_ready(task_id: str, body: dict):
+async def set_task_ai_ready(task_id: str, body: dict):
     """Set ai_ready flag (AI-decided stage)."""
     db = get_supabase()
     ai_ready = bool(body.get("ai_ready", True))
@@ -231,7 +242,7 @@ def set_task_ai_ready(task_id: str, body: dict):
     # On mark-ready, ensure latest decisions are reflected in project memory
     if ai_ready:
         task_row = db.table("tasks").select("id,title,description,task_details,project_id").eq("id", task_id).single().execute().data or {}
-        _upsert_task_memory_chunk(db, task_row, task_row.get("task_details") or {}, importance=7)
+        await _upsert_task_memory_chunk(db, task_row, task_row.get("task_details") or {}, importance=7)
     return {"task_id": task_id, "ai_ready": ai_ready}
 
 
@@ -361,20 +372,40 @@ async def prompt_task_stream(task_id: str, body: dict):
 
     history = body.get("history") or []
 
-    # Load project memory chunks (highest importance first, cap at 15)
+    # Load project memory chunks via vector similarity search.
+    # Query = task title + description + current user prompt — this surfaces
+    # only chunks relevant to what the user is currently asking about.
     memory_chunks: list[dict] = []
     active_decisions: list[dict] = []
     try:
-        memory_chunks = (
-            db.table("memory_chunks")
-            .select("source_type,title,content,summary,importance")
-            .eq("project_id", task["project_id"])
-            .order("importance", desc=True)
-            .limit(15)
-            .execute()
-            .data
-            or []
+        from app.services.embeddings import generate_embedding
+        query_text = "\n".join(
+            p for p in (task.get("title"), task.get("description"), user_prompt) if p
         )
+        query_embedding = await generate_embedding(query_text)
+        if query_embedding is not None:
+            rpc_resp = db.rpc(
+                "match_memory_chunks",
+                {
+                    "p_project_id": task["project_id"],
+                    "p_query_embedding": query_embedding,
+                    "p_match_threshold": 0.3,
+                    "p_match_count": 8,
+                },
+            ).execute()
+            memory_chunks = rpc_resp.data or []
+        if not memory_chunks:
+            # Fallback to top-importance chunks (e.g. embeddings not yet generated)
+            memory_chunks = (
+                db.table("memory_chunks")
+                .select("source_type,title,content,summary,importance")
+                .eq("project_id", task["project_id"])
+                .order("importance", desc=True)
+                .limit(8)
+                .execute()
+                .data
+                or []
+            )
         active_decisions = (
             db.table("decisions")
             .select("title,decision,reason,status")
@@ -384,8 +415,10 @@ async def prompt_task_stream(task_id: str, body: dict):
             .data
             or []
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[memory-search] failed: {exc}")
 
     task_details = task.get("task_details") or {}
     messages = build_task_assistant_messages(
@@ -412,7 +445,23 @@ async def prompt_task_stream(task_id: str, body: dict):
 
     provider = get_provider(model)
 
+    # Build memory event for SSE so the UI can show what was queried.
+    memory_titles = [c.get("title") for c in memory_chunks if c.get("title")]
+    decision_titles = [d.get("title") for d in active_decisions if d.get("title")]
+
     async def event_stream():
+        # First event: tell client what memory was consulted for this turn.
+        yield (
+            "data: "
+            + json.dumps({
+                "type": "memory_event",
+                "action": "queried",
+                "count": len(memory_titles),
+                "titles": memory_titles[:8],
+                "decisions": decision_titles[:5],
+            })
+            + "\n\n"
+        )
         full_response = []
         async for chunk in provider.stream(messages):
             full_response.append(chunk)

@@ -42,19 +42,34 @@ def build_task_assistant_messages(
         if task_details else "  (none captured yet)"
     )
 
-    # Build memory section
+    # Build memory section from the top-K relevant chunks (already filtered by
+    # vector similarity in the calling endpoint).
     memory_section = ""
     if memory_chunks:
         lines = []
         for c in memory_chunks:
-            excerpt = c.get("summary") or (c.get("content") or "")[:400]
-            lines.append(f"  [{c['source_type']}] {c['title']}: {excerpt}")
-        memory_section = "Project memory (use this as context for refinement):\n" + "\n".join(lines) + "\n\n"
+            content = (c.get("content") or "").strip()
+            if len(content) <= 600:
+                body = content or (c.get("summary") or "")
+            else:
+                body = (c.get("summary") or "") + "\n" + content[:600]
+            lines.append(f"  [{c['source_type']}] {c['title']}:\n    {body}")
+        memory_section = (
+            "RELEVANT PROJECT MEMORY (vector-matched to current task) — established facts. "
+            "TREAT AS ALREADY DECIDED. Never re-ask the user about anything stated here; "
+            "capture it via update_details and continue:\n"
+            + "\n".join(lines)
+            + "\n\n"
+        )
 
     decisions_section = ""
     if active_decisions:
         lines = [f"  - {d['title']}: {d['decision']}" for d in active_decisions]
-        decisions_section = "Active architectural decisions:\n" + "\n".join(lines) + "\n\n"
+        decisions_section = (
+            "ACTIVE ARCHITECTURAL DECISIONS — treat as final, do NOT re-ask:\n"
+            + "\n".join(lines)
+            + "\n\n"
+        )
 
     return [
         {
@@ -112,12 +127,25 @@ def build_task_assistant_messages(
                 "  this task does.\n\n"
                 "STEP 2 - Capture known structured decisions.\n"
                 "  Emit one update_details action for every fact you can already infer from the "
-                "  description, project context, or prior conversation. "
+                "  description, project context, RELEVANT PROJECT MEMORY, ACTIVE ARCHITECTURAL\n"
+                "  DECISIONS, or prior conversation. Scan memory carefully — if memory says the\n"
+                "  project uses React, capture tech_stack='React' immediately. If memory says\n"
+                "  the API style is REST, capture api_style='REST'. Do NOT ask the user about\n"
+                "  anything that memory already answers.\n"
                 "  ALWAYS capture 'output_format' first (see examples above), then include other\n"
                 "  typical keys: tech_stack, database, auth_method, api_style, framework, "
                 "  deployment_target, testing_approach, performance_requirements.\n"
                 "  IMPORTANT: never emit a key that was already captured (shown above).\n\n"
                 "STEP 3 - Ask ONE question at a time.\n"
+                "  GATE CHECK: Before asking ANY question, FIRST check:\n"
+                "    a) 'RELEVANT PROJECT MEMORY' section above\n"
+                "    b) 'ACTIVE ARCHITECTURAL DECISIONS' section above\n"
+                "    c) 'Decisions & details already captured' section above\n"
+                "  If the answer appears in ANY of those three sources, you MUST:\n"
+                "    → Emit update_details with the value from memory\n"
+                "    → Skip to the next question in priority order\n"
+                "    → Do NOT ask the user to confirm a fact from memory\n"
+                "  Only ask the user if none of the three sources answer the question.\n"
                 "  Identify ALL remaining open questions, but ask ONLY THE SINGLE most important\n"
                 "  one in this turn. Priority order:\n"
                 "    1. output_format (if not yet captured)\n"

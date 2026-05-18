@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-05-18 | `2ba80f5` — feat: task memory sync + one-question refinement + always-on refine button
+
+- Added `POST /projects/{id}/memory/sync-tasks` endpoint that backfills `memory_chunks` from existing tasks' `task_details` (idempotent per `task_id`).
+- Added "Sync tasks" button on `ProjectMemoryPage` Memory tab.
+- Filtered hallucinated meta-keys (`task_memory_persisted`, `all_refinements_saved`, `execution_ready`, `timestamp`, etc.) from `update_task_details` before persisting.
+- Task assistant prompt: forbid meta-keys, clarified memory persistence is automatic.
+- Task assistant prompt: ask ONE highest-priority question per turn (priority order: `output_format` → tech_stack → architecture → testing → nice-to-haves) instead of a numbered question dump.
+- `TaskDrawer`: show **Refine** button whenever `task.ai_ready` is false (was previously hidden after the first chat message).
+
 ## 2026-05-18 | `c8b1735` — feat: project memory architecture (MVP1+MVP2) + task assistant improvements
 
 - Added Supabase migration 019: `memory_chunks`, `decisions`, `context_packs` tables with RLS and service-role policies.
