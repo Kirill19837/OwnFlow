@@ -388,6 +388,18 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
             "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": f"image not found: {image}"}
+    except docker.errors.DockerException as exc:
+        # Catch all Docker-level errors (daemon not running, socket unavailable, etc.)
+        error_msg = f"Docker unavailable or error: {str(exc)}"
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "task_id": task["id"],
+            "phase": 3,
+            "message": error_msg,
+            "level": 3,
+        }).execute()
+        return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": error_msg}
     except docker.errors.APIError as exc:
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),

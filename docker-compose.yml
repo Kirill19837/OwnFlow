@@ -1,4 +1,14 @@
 services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
   backend:
     build: ./backend
     ports:
@@ -7,15 +17,19 @@ services:
       - ./backend/.env
     volumes:
       - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - docker-socket-proxy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_URL: ${VITE_API_URL}
     ports:
-      - "5173:5173"
+      - "5173:80"
     env_file:
       - ./frontend/.env
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev -- --host 0.0.0.0

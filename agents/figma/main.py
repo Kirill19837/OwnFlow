@@ -8,7 +8,6 @@ import base64
 import json
 import os
 import re
-import socket
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -31,8 +30,6 @@ except json.JSONDecodeError as _e:
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-FIGMA_TOKEN = os.environ.get("FIGMA_TOKEN", "").strip()
-FIGMA_FILE_KEY = os.environ.get("FIGMA_FILE_KEY", "").strip()
 HTTP_PROXY = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
 HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
 
@@ -40,24 +37,27 @@ print(
     f"[figma-agent] DEBUG startup: "
     f"OPENAI_API_KEY present={bool(OPENAI_API_KEY)} "
     f"ANTHROPIC_API_KEY present={bool(ANTHROPIC_API_KEY)} "
-    f"FIGMA_TOKEN present={bool(FIGMA_TOKEN)} "
-    f"FIGMA_FILE_KEY present={bool(FIGMA_FILE_KEY)} value={FIGMA_FILE_KEY!r} "
     f"HTTP_PROXY={bool(HTTP_PROXY)} HTTPS_PROXY={bool(HTTPS_PROXY)}",
     flush=True,
 )
 
-try:
-    socket.getaddrinfo("api.figma.com", 443)
-    print("[figma-agent] DEBUG network: api.figma.com resolvable ✓", flush=True)
-except Exception as _dns_err:
-    print(f"[figma-agent] ERROR network: api.figma.com NOT resolvable: {_dns_err}", flush=True)
 
-# Try to detect outgoing IP for diagnostics
+
+def _get_httpx_kwargs() -> dict:
+    """Build httpx client kwargs (proxy support)."""
+    kwargs = {}
+    if HTTP_PROXY:
+        kwargs["http2"] = True
+        kwargs["proxies"] = {"http://": HTTP_PROXY, "https://": HTTPS_PROXY or HTTP_PROXY}
+    elif HTTPS_PROXY:
+        kwargs["http2"] = True
+        kwargs["proxies"] = {"https://": HTTPS_PROXY}
+    return kwargs
+
+
 async def _detect_outgoing_ip() -> str:
-    """Detect the outgoing IP that will be seen by Figma."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Use a public IP detection service
+        async with httpx.AsyncClient(timeout=5.0, **_get_httpx_kwargs()) as client:
             resp = await client.get("https://api.ipify.org?format=json")
             if resp.status_code == 200:
                 return resp.json().get("ip", "unknown")
@@ -70,291 +70,61 @@ ACTOR: dict = payload.get("actor") or {}
 ACTOR_ROLE: str = ACTOR.get("role") or "UI/UX Designer"
 ACTOR_CAPABILITIES: list = ACTOR.get("capabilities") or []
 
-def _get_figma_headers() -> dict:
-    """Create fresh Figma headers for each request."""
-    return {
-        "X-Figma-Token": FIGMA_TOKEN,
-        "Content-Type": "application/json"
-    }
+
 
 SYSTEM_PROMPT = f"""\
-You are acting as: **{ACTOR_ROLE}**
-You specialise in UI/UX design, design systems, component specifications, and design-to-code translation.
-You will be given a task with its description and project context.
-Produce a high-quality design deliverable appropriate to the task.
+YOUR RESPONSE MUST BE EXACTLY THIS FORMAT AND NOTHING ELSE:
 
-If design context from Figma is provided, reference it to ensure consistency with existing designs.
+```javascript
+async function createDesign() {{
+  // figma code here
+}}
+createDesign().catch(e => console.error(e));
+```
 
-## Output types by task
-- UI component spec → detailed spec with layout, spacing, colours, states, accessibility notes
-- Design-to-code → production-ready CSS/Tailwind + React/HTML component
-- Design system → tokens, component library spec, usage guidelines
-- UX research / audit → structured findings with recommendations
-- Wireframe description → detailed layout spec (text-based wireframe)
+ABSOLUTE REQUIREMENTS (this is a contract):
+- Your ENTIRE response is ONLY what's between and including the ``` markers
+- Line 1 must be: ```javascript
+- Last line must be: ```
+- ZERO characters before the first ```javascript
+- ZERO characters after the final ```
+- ZERO explanations, descriptions, comments outside the code block
+- ZERO markdown formatting outside the code block
+- ZERO newlines before the first ``` or after the last ```
 
-## CRITICAL: File output format — REQUIRED for every task
-Your response MUST END with a ###FILES### section. This is NOT optional.
+What the code MUST do:
+- Create Figma design elements using the Figma Plugin SDK
+- Use figma.createFrame(), figma.createText(), figma.createComponent(), etc.
+- Set colors, typography, sizing, constraints using Figma API
+- Handle "design system", "colors", "typography", "wireframes" as CODE that creates them
 
-Format:
-###FILES###
-[
-  {{"path": "docs/design/your-file-name.md", "content": "...file content..."}},
-  {{"path": "src/components/Component.tsx", "content": "...file content..."}}
-]
+Examples of correct format:
+```javascript
+async function createDesign() {{
+  const page = figma.currentPage;
+  const frame = figma.createFrame();
+  frame.x = 0; frame.y = 0; frame.width = 100; frame.height = 100;
+}}
+createDesign().catch(e => console.error(e));
+```
 
-Rules:
-- The ###FILES### block MUST be a raw JSON array — do NOT wrap it in markdown code fences (no ```json).
-- Every file's content must be a complete string (no truncation)
-- Path conventions:
-  * React components          → src/components/<ComponentName>.tsx
-  * CSS / Tailwind styles     → src/styles/<name>.css
-  * Design specs / docs       → docs/design/<kebab-case-title>.md
-  * Design tokens             → src/design-tokens.ts (or .json)
-  * UX research               → docs/research/<kebab-case-title>.md
+Examples of WRONG format (DO NOT DO):
+- "Here's the design code: ```javascript ... ```" ← NO! This has text before
+- "```javascript ... ``` Hope this helps!" ← NO! This has text after
+- "```javascript ... ```\n\nAlternatively, you could..." ← NO! Text after code
+- "Design System Overview\n\n```javascript ... ```" ← NO! Text before code
 
-CRITICAL REMINDERS:
-1. Write your full design/content FIRST in the response
-2. Then add the ###FILES### block LAST (as the very final thing)
-3. Output the JSON array DIRECTLY after ###FILES### — no backticks, no ```json wrapper
-4. The JSON must be valid and parseable (close all brackets)
-5. If the task involves a single deliverable, create at least one file
-6. Never end your response without the ###FILES### section
-
-Example of correct format:
----
-# Design Spec
-
-[Your full spec content here]
-
-###FILES###
-[{{"path": "docs/design/my-spec.md", "content": "# Design Spec\\n\\n[full content]"}}]
----
+YOUR RESPONSE STARTS NOW. RESPOND WITH ONLY THE CODE BLOCK. NOTHING ELSE.
 """
 
-FILES_REMINDER = """
-
----
-FINAL INSTRUCTION: You MUST append a ###FILES### block at the END of your response.
-Format exactly as shown — NO markdown code fences around the JSON:
-
-###FILES###
-[{"path": "docs/design/...", "content": "..."}]
-
-IMPORTANT: Do NOT write ```json before the array. The [ must appear directly after ###FILES###.
-Must be valid JSON. Must be the very last thing in your response.
-"""
+FILES_REMINDER = ""
 
 
-# ── HTTP client ───────────────────────────────────────────────────────────────
-
-def _get_httpx_kwargs() -> dict:
-    proxies = {}
-    kwargs = {}
-    if HTTPS_PROXY:
-        proxies["https://"] = HTTPS_PROXY
-    if HTTP_PROXY:
-        proxies["http://"] = HTTP_PROXY
-    if proxies:
-        kwargs["proxies"] = proxies
-        print(f"[figma-agent] DEBUG http: proxy configured https={bool(HTTPS_PROXY)} http={bool(HTTP_PROXY)}", flush=True)
-    return kwargs
 
 
-async def _figma_request_with_retry(method: str, url: str, max_retries: int = 3, headers: dict | None = None, **kwargs) -> httpx.Response:
-    """Make a Figma API request with retry logic."""
-    if headers is None:
-        headers = _get_figma_headers()
-    else:
-        # Merge provided headers with Figma auth headers
-        merged = _get_figma_headers()
-        merged.update(headers)
-        headers = merged
-
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=20.0, **_get_httpx_kwargs()) as client:
-                if method.upper() == "GET":
-                    resp = await client.get(url, headers=headers, **kwargs)
-                elif method.upper() == "POST":
-                    resp = await client.post(url, headers=headers, **kwargs)
-                else:
-                    resp = await client.request(method, url, headers=headers, **kwargs)
-
-                if resp.status_code in (403, 429) or resp.status_code >= 500:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        print(
-                            f"[figma-agent] WARNING figma: HTTP {resp.status_code} — "
-                            f"retry {attempt + 1}/{max_retries} after {wait_time}s",
-                            flush=True,
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
-                return resp
-
-        except (httpx.TimeoutException, httpx.ConnectError) as exc:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                print(
-                    f"[figma-agent] WARNING figma: {type(exc).__name__} — "
-                    f"retry {attempt + 1}/{max_retries} after {wait_time}s",
-                    flush=True,
-                )
-                await asyncio.sleep(wait_time)
-                continue
-            raise
-
-    async with httpx.AsyncClient(timeout=20.0, **_get_httpx_kwargs()) as client:
-        if method.upper() == "GET":
-            return await client.get(url, headers=headers, **kwargs)
-        elif method.upper() == "POST":
-            return await client.post(url, headers=headers, **kwargs)
-        else:
-            return await client.request(method, url, headers=headers, **kwargs)
 
 
-# ── Figma API ─────────────────────────────────────────────────────────────────
 
-async def create_figma_test_file(task_id: str) -> tuple[bool, str]:
-    if not FIGMA_TOKEN:
-        return False, "FIGMA_TOKEN not configured"
-
-    print(f"[figma-agent] DEBUG figma: verifying token via /v1/me", flush=True)
-    try:
-        resp = await _figma_request_with_retry(
-            "GET",
-            "https://api.figma.com/v1/me",
-            max_retries=3,
-        )
-        print(
-            f"[figma-agent] DEBUG figma /v1/me: status={resp.status_code} "
-            f"body={resp.text[:500]!r}",
-            flush=True,
-        )
-        resp.raise_for_status()
-        user_data = resp.json()
-        user_id = user_data.get("id")
-        user_name = user_data.get("handle", "Unknown")
-        email = user_data.get("email", "")
-        print(
-            f"[figma-agent] DEBUG figma: authenticated as user={user_name!r} "
-            f"id={user_id!r} email={email!r}",
-            flush=True,
-        )
-        return True, f"Figma connection verified for user: {user_name} (id={user_id})"
-
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:800]
-        status = exc.response.status_code
-        headers = dict(exc.response.headers)
-
-        # Diagnose CloudFront blocks
-        is_cloudfront_block = (
-            status == 403 and
-            ("<!DOCTYPE" in body or "ERROR:" in body or "Request blocked" in body)
-        )
-
-        if is_cloudfront_block:
-            print(
-                f"[figma-agent] ERROR figma: CloudFront CDN block detected\n"
-                f"  Status: {status}\n"
-                f"  Response headers: {headers}\n"
-                f"  Error message: {body[:300]}",
-                flush=True
-            )
-            return False, (
-                f"Figma blocked by CloudFront CDN (HTTP {status}). "
-                f"Your server IP may be in Figma's IP blocklist. "
-                f"Contact Figma support or use a VPN. "
-                f"Details: {body[:200]}"
-            )
-
-        print(f"[figma-agent] ERROR figma: /v1/me HTTP {status}: {body}", flush=True)
-        return False, f"Figma HTTP {status}: {body}"
-
-    except Exception as exc:
-        print(f"[figma-agent] ERROR figma: /v1/me request failed: {exc}", flush=True)
-        return False, f"Figma connection failed: {exc}"
-
-
-# ── Figma write ───────────────────────────────────────────────────────────────
-
-async def create_figma_frame_with_content(
-        file_key: str, page_name: str, frame_name: str, description: str
-) -> tuple[bool, str]:
-    if not FIGMA_TOKEN or not file_key:
-        return False, "FIGMA_TOKEN or file_key not set"
-
-    print(f"[figma-agent] DEBUG figma: adding comment to file={file_key!r}", flush=True)
-    try:
-        async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
-            comment_resp = await client.post(
-                f"https://api.figma.com/v1/files/{file_key}/comments",
-                headers=_get_figma_headers(),
-                json={
-                    "message": f"🤖 AI Design Spec: {frame_name}\n\n{description[:2000]}",
-                    "client_meta": {"x": 0, "y": 0},
-                },
-            )
-            print(
-                f"[figma-agent] DEBUG figma comment POST: "
-                f"status={comment_resp.status_code} body={comment_resp.text[:400]!r}",
-                flush=True,
-            )
-            comment_resp.raise_for_status()
-            comment_id = comment_resp.json().get("id", "?")
-            file_url = f"https://www.figma.com/file/{file_key}"
-            print(f"[figma-agent] DEBUG figma: comment created id={comment_id!r}", flush=True)
-            return True, f"Added design spec comment to Figma file: {file_url}"
-
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:400]
-        print(f"[figma-agent] ERROR figma: comment POST HTTP {exc.response.status_code}: {body}", flush=True)
-        return False, f"Figma comment failed (HTTP {exc.response.status_code}): {body}"
-
-    except Exception as exc:
-        print(f"[figma-agent] ERROR figma: comment POST exception: {exc}", flush=True)
-        return False, f"Figma comment failed: {exc}"
-
-
-# ── Figma context ─────────────────────────────────────────────────────────────
-
-async def fetch_figma_context(file_key: str) -> str:
-    if not FIGMA_TOKEN or not file_key:
-        return ""
-    print(f"[figma-agent] DEBUG figma: fetching file key={file_key!r}", flush=True)
-    try:
-        resp = await _figma_request_with_retry(
-            "GET",
-            f"https://api.figma.com/v1/files/{file_key}",
-            max_retries=2,
-        )
-        print(f"[figma-agent] DEBUG figma file fetch: status={resp.status_code}", flush=True)
-        resp.raise_for_status()
-        data = resp.json()
-        doc = data.get("document", {})
-        name = data.get("name", file_key)
-        pages = [c.get("name") for c in doc.get("children", []) if c.get("name")]
-        print(f"[figma-agent] DEBUG figma: file={name!r} pages={pages}", flush=True)
-        return (
-            f"\n\n## Figma Design Context\n"
-            f"File: {name}\n"
-            f"Pages: {', '.join(pages) if pages else 'unknown'}\n"
-            f"(Use this context to ensure design consistency with existing work.)\n"
-        )
-    except httpx.HTTPStatusError as exc:
-        print(
-            f"[figma-agent] WARNING figma: context fetch HTTP {exc.response.status_code}: "
-            f"{exc.response.text[:300]}",
-            flush=True,
-        )
-        return ""
-    except Exception as exc:
-        print(f"[figma-agent] WARNING figma: context fetch failed: {exc}", flush=True)
-        return ""
-
-
-# ── AI providers ──────────────────────────────────────────────────────────────
 
 async def call_ai(prompt: str) -> str:
     if MODEL.startswith("claude"):
@@ -375,7 +145,8 @@ async def _call_openai(prompt: str) -> str:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                "max_tokens": 8192,
+                "max_tokens": 4096,
+                "temperature": 0,
             },
         )
         resp.raise_for_status()
@@ -394,7 +165,8 @@ async def _call_anthropic(prompt: str) -> str:
             },
             json={
                 "model": MODEL,
-                "max_tokens": 8192,
+                "max_tokens": 4096,
+                "temperature": 0,
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": prompt}],
             },
@@ -402,8 +174,6 @@ async def _call_anthropic(prompt: str) -> str:
         resp.raise_for_status()
         return resp.json()["content"][0]["text"]
 
-
-# ── File parsing ──────────────────────────────────────────────────────────────
 
 def _try_parse_json_array(text: str) -> list[dict] | None:
     stripped = text.strip()
@@ -418,38 +188,88 @@ def _try_parse_json_array(text: str) -> list[dict] | None:
     return None
 
 
+def _extract_js_block(text: str) -> str | None:
+    """Витягує перший ```javascript ... ``` блок з тексту."""
+    # Try ```javascript ... ```
+    js_pattern = re.compile(r"```javascript\s*(.*?)\s*```", re.DOTALL)
+    js_match = js_pattern.search(text)
+    if js_match:
+        code = js_match.group(1).strip()
+        if code and ("figma." in code or "async function" in code or "createDesign" in code):
+            return code
+
+    # Try ``` ... ``` (generic code block with figma code)
+    generic_pattern = re.compile(r"```\s*((?:async\s+)?function\s+\w+[\s\S]*?)\s*```", re.DOTALL)
+    generic_match = generic_pattern.search(text)
+    if generic_match:
+        code = generic_match.group(1).strip()
+        if "figma." in code or "function create" in code.lower():
+            return code
+
+    # Try to find ANY code block with figma references
+    code_pattern = re.compile(r"```(?:javascript|js)?\s*\n([\s\S]*?)\n```", re.DOTALL)
+    for match in code_pattern.finditer(text):
+        code = match.group(1).strip()
+        if "figma." in code:
+            return code
+
+    # Last resort: look for code that contains figma. references even without markers
+    figma_code_pattern = re.compile(r"((?:const|let|var|async)[\s\S]*?figma\.[\s\S]*?}[\s\S]*?(?:figma\.currentPage|createDesign))", re.DOTALL)
+    figma_match = figma_code_pattern.search(text)
+    if figma_match:
+        code = figma_match.group(1).strip()
+        if len(code) > 50:  # Must be substantial code
+            return code
+
+    return None
+
+
 def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
-    # Strategy 1: look for ###FILES### marker
+    slug = re.sub(r"[^a-z0-9]+", "-", task_title.lower()).strip("-")
+
+    # Log response type for debugging
+    starts_with_code = text.strip().startswith("```")
+    has_js_marker = "```javascript" in text or "```js" in text
+    has_figma_code = "figma." in text and "async function" in text
+    log_fn(f"[parse-check] starts_with_code={starts_with_code} has_js={has_js_marker} has_figma={has_figma_code}", level="DEBUG")
+
+    # Strategy 1: Extract JS code block FIRST (most reliable)
+    js_code = _extract_js_block(text)
+    if js_code:
+        fallback_path = f"designs/{slug}.js"
+        log_fn(f"[js-extract PRIMARY] Found JS block ({len(js_code)} chars), saving as: {fallback_path}")
+        return [{"path": fallback_path, "content": js_code}]
+
+    # If no code found but text starts with description, log this explicitly
+    if text.strip() and not (starts_with_code and has_js_marker):
+        log_fn(f"[CRITICAL] AI violated format requirements: response is prose/markdown, not JavaScript code", level="WARNING")
+        # Extract first 100 chars to see what went wrong
+        first_part = text[:100].replace("\n", " ")
+        log_fn(f"[CRITICAL] Response starts with: {first_part}...", level="DEBUG")
+
+    # Strategy 2: ###FILES### marker
     files_start = text.find("###FILES###")
     if files_start != -1:
         marker_end = files_start + len("###FILES###")
         remainder = text[marker_end:].strip()
         remainder = re.sub(r"^```(?:json)?\s*", "", remainder).strip()
-
         parsed = _try_parse_json_array(remainder)
         if parsed is not None:
             log_fn(f"[###FILES###] Parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}")
             return parsed
         else:
-            log_fn(f"###FILES### found but JSON failed to parse — remainder: {remainder[:200]!r}", level="WARNING")
+            log_fn(f"###FILES### found but JSON failed to parse — trying JS extraction", level="WARNING")
 
-    # Strategy 2: JSON array inside a markdown code block
-    code_block_pattern = re.compile(
-        r"```(?:json)?\s*(\[\s*\{.*?\}\s*\])\s*```",
-        re.DOTALL,
-    )
+    # Strategy 3: JSON array inside a markdown code block
+    code_block_pattern = re.compile(r"```(?:json)?\s*(\[\s*\{.*?\}\s*\])\s*```", re.DOTALL)
     for match in code_block_pattern.finditer(text):
         candidate = match.group(1).strip()
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
-            log_fn(
-                f"[code-block fallback] Found JSON array inside markdown block — "
-                f"parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}",
-                level="WARNING",
-            )
+            log_fn(f"[code-block fallback] Parsed {len(parsed)} file(s)", level="WARNING")
             return parsed
 
-    # Strategy 3: JSON array at the end of the response (no marker, no code block)
+    # Strategy 4: JSON array at end of response
     last_bracket = text.rfind("[{")
     if last_bracket != -1:
         candidate = text[last_bracket:].strip()
@@ -458,27 +278,21 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
             candidate = candidate[:close + 1]
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
-            log_fn(
-                f"[tail-scan fallback] Found JSON array at response tail — "
-                f"parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}",
-                level="WARNING",
-            )
+            log_fn(f"[tail-scan fallback] Parsed {len(parsed)} file(s)", level="WARNING")
             return parsed
 
-    # Strategy 4: save entire response as a markdown file
-    tail = text[-400:].replace("\n", "↵")
-    log_fn(f"###FILES### missing — response tail: {tail!r}", level="WARNING")
+    # Strategy 5: No valid JS found—FAIL with clear error
+    log_fn(f"[CRITICAL-FAILURE] AI response does not contain valid JavaScript code", level="ERROR")
+    log_fn(f"[CRITICAL-FAILURE] Full response will be stored as-is for human review", level="ERROR")
+    log_fn(f"[CRITICAL-FAILURE] Response starts with: {text[:200].replace(chr(10), ' ')}", level="DEBUG")
+    log_fn(f"[CRITICAL-FAILURE] This indicates the AI model violated the Figma output format requirements", level="ERROR")
 
-    slug = re.sub(r"[^a-z0-9]+", "-", task_title.lower()).strip("-")
-    fallback_path = f"docs/design/{slug}.md"
-    log_fn(f"Saving full response as fallback file: {fallback_path}", level="WARNING")
-    return [{"path": fallback_path, "content": text}]
+    # Return empty files list and let the raw response go into deliverable.content for human review
+    # Do NOT save it as markdown—the human can see what went wrong in the UI
+    return []
 
 
-# ── GitHub PR ─────────────────────────────────────────────────────────────────
-
-async def create_pr(token: str, repo: str, task_id: str, task_title: str,
-                    files: list[dict]) -> Optional[str]:
+async def create_pr(token: str, repo: str, task_id: str, task_title: str, files: list[dict]) -> Optional[str]:
     branch = f"ownflow/design-{task_id[:8]}-{uuid.uuid4().hex[:6]}"
     api = f"https://api.github.com/repos/{repo}"
     headers = {
@@ -513,9 +327,7 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
                 json={"content": base64.b64encode(f["content"].encode()).decode(), "encoding": "base64"},
             )
             blob.raise_for_status()
-            tree_items.append({
-                "path": f["path"], "mode": "100644", "type": "blob", "sha": blob.json()["sha"]
-            })
+            tree_items.append({"path": f["path"], "mode": "100644", "type": "blob", "sha": blob.json()["sha"]})
 
         tree_resp = await client.post(
             f"{api}/git/trees", headers=headers,
@@ -531,9 +343,7 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
         commit_resp.raise_for_status()
         commit_sha = commit_resp.json()["sha"]
 
-        await client.patch(
-            f"{api}/git/refs/heads/{branch}", headers=headers, json={"sha": commit_sha}
-        )
+        await client.patch(f"{api}/git/refs/heads/{branch}", headers=headers, json={"sha": commit_sha})
 
         pr_resp = await client.post(
             f"{api}/pulls", headers=headers,
@@ -548,21 +358,11 @@ async def create_pr(token: str, repo: str, task_id: str, task_title: str,
         return pr_resp.json()["html_url"]
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-# ── Callback delivery (with retries) ──────────────────────────────────────────
-
-_CALLBACK_MAX_ATTEMPTS = 5          # скільки спроб
-_CALLBACK_BACKOFF_BASE  = 2         # секунд: 2, 4, 8, 16 …
+_CALLBACK_MAX_ATTEMPTS = 5
+_CALLBACK_BACKOFF_BASE  = 2
 
 
-async def _deliver_callback(
-        url: str,
-        token: str,
-        body: dict,
-        log_fn,
-) -> None:
-
+async def _deliver_callback(url: str, token: str, body: dict, log_fn) -> None:
     last_exc: BaseException | None = None
 
     for attempt in range(1, _CALLBACK_MAX_ATTEMPTS + 1):
@@ -571,52 +371,35 @@ async def _deliver_callback(
                 resp = await client.post(
                     url,
                     json=body,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                 )
 
             if resp.status_code < 400:
-                log_fn(
-                    f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})",
-                    level="DEBUG",
-                )
+                log_fn(f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})", level="DEBUG")
                 return
 
             if resp.status_code < 500:
-                raise RuntimeError(
-                    f"Callback rejected with HTTP {resp.status_code}: {resp.text[:400]}"
-                )
+                raise RuntimeError(f"Callback rejected with HTTP {resp.status_code}: {resp.text[:400]}")
 
-            last_exc = RuntimeError(
-                f"Callback HTTP {resp.status_code}: {resp.text[:400]}"
-            )
+            last_exc = RuntimeError(f"Callback HTTP {resp.status_code}: {resp.text[:400]}")
 
         except RuntimeError:
             raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             last_exc = exc
 
-        wait = _CALLBACK_BACKOFF_BASE ** (attempt - 1)   # 1, 2, 4, 8, 16 с
-        log_fn(
-            f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed "
-            f"({last_exc}) — retry in {wait}s",
-            level="WARNING",
-        )
+        wait = _CALLBACK_BACKOFF_BASE ** (attempt - 1)
+        log_fn(f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed ({last_exc}) — retry in {wait}s", level="WARNING")
         if attempt < _CALLBACK_MAX_ATTEMPTS:
             await asyncio.sleep(wait)
 
-    raise RuntimeError(
-        f"Callback delivery failed after {_CALLBACK_MAX_ATTEMPTS} attempts: {last_exc}"
-    )
+    raise RuntimeError(f"Callback delivery failed after {_CALLBACK_MAX_ATTEMPTS} attempts: {last_exc}")
 
 
 async def main() -> None:
     task_info = payload["task"]
     project_info = payload["project"]
     github_info = payload.get("github") or {}
-    figma_info = payload.get("figma") or {}
     callback_url: str = payload["callback_url"]
     callback_token: str = payload["callback_token"]
     task_id: str = payload["task_id"]
@@ -638,70 +421,24 @@ async def main() -> None:
         })
 
     log(f"task={task_id!r} role={ACTOR_ROLE!r} model={MODEL}")
-    log(f"FIGMA_TOKEN present={bool(FIGMA_TOKEN)} len={len(FIGMA_TOKEN)}", level="DEBUG", phase="planning")
 
-    # ── Diagnose network conditions ────────────────────────────────────────────
     outgoing_ip = await _detect_outgoing_ip()
-    log(f"Outgoing IP (seen by Figma): {outgoing_ip}", level="DEBUG", phase="planning")
+    log(f"Outgoing IP: {outgoing_ip}", level="DEBUG", phase="planning")
 
-    # ── Figma connection test ──────────────────────────────────────────────────
-    figma_test_success = False
-    figma_blocked_by_network = False
-
-    if FIGMA_TOKEN:
-        log("Testing Figma API connection...", phase="planning")
-        figma_test_success, figma_test_message = await create_figma_test_file(task_id)
-        if figma_test_success:
-            log(f"✓ Figma connection verified: {figma_test_message}", phase="planning")
-        else:
-            if "CloudFront" in figma_test_message or "Request blocked" in figma_test_message:
-                figma_blocked_by_network = True
-                log(
-                    f"✗ Figma blocked by CDN (server IP {outgoing_ip} is likely in Figma's blocklist). "
-                    f"Design spec will be saved locally.\n"
-                    f"  To resolve: Contact Figma support with this IP: {outgoing_ip}\n"
-                    f"  Or: Use a VPN/proxy to change your IP\n"
-                    f"  Details: {figma_test_message}",
-                    level="WARNING", phase="planning",
-                )
-            else:
-                log(f"✗ Figma connection failed: {figma_test_message}", level="ERROR", phase="planning")
-            log("Continuing task execution despite Figma auth failure", level="WARNING", phase="planning")
-    else:
-        log("FIGMA_TOKEN not set — skipping Figma operations", level="WARNING", phase="planning")
-
-    # ── Resolve Figma file key ─────────────────────────────────────────────────
-    figma_file_key = FIGMA_FILE_KEY or figma_info.get("file_key") or ""
-    log(
-        f"figma_file_key resolved={figma_file_key!r} "
-        f"(from env={bool(FIGMA_FILE_KEY)} / payload={bool(figma_info.get('file_key'))})",
-        level="DEBUG", phase="planning",
-    )
-
-    figma_context = ""
-    if FIGMA_TOKEN and figma_file_key and figma_test_success:
-        figma_context = await fetch_figma_context(figma_file_key)
-        if figma_context:
-            log(f"Fetched Figma context for file key={figma_file_key!r}", phase="planning")
-
-    # ── Build prompt ───────────────────────────────────────────────────────────
     prompt = (
-        f"Project: {project_info['name']}\n"
-        f"Project brief: {project_info.get('brief', '')}\n"
-        f"{figma_context}\n"
-        f"Task title: {task_info['title']}\n"
-        f"Task description: {task_info.get('description', '')}\n"
-        f"Task type: {task_info.get('type', 'design')}  |  "
-        f"Priority: {task_info.get('priority', 'medium')}\n"
+        "TASK FOR FIGMA SCRIPTER:\n"
+        f"{task_info['title']}\n"
+        f"{task_info.get('description', '')}\n"
     )
     if ACTOR_ROLE:
-        prompt += f"\nYour assigned role for this task: {ACTOR_ROLE}\n"
+        prompt += f"\nYour assigned role: {ACTOR_ROLE}\n"
 
     prompt += FILES_REMINDER
 
     log(f"prompt_length={len(prompt)} chars", level="DEBUG", phase="planning")
+    log(f"system_prompt_length={len(SYSTEM_PROMPT)} chars", level="DEBUG", phase="planning")
+    log(f"Using model: {MODEL}", level="DEBUG", phase="planning")
 
-    # ── AI call ────────────────────────────────────────────────────────────────
     log(f"Calling AI provider (model={MODEL})...")
     t0 = datetime.now(timezone.utc)
     try:
@@ -715,38 +452,9 @@ async def main() -> None:
     tail_preview = content[-400:].replace("\n", "↵") if len(content) > 400 else content.replace("\n", "↵")
     log(f"AI response tail (last 400 chars): {tail_preview!r}", level="DEBUG")
 
-    # ── Parse files ────────────────────────────────────────────────────────────
     files = parse_files_with_fallback(content, task_info["title"], log)
     log(f"Parsed {len(files)} file(s) from response")
 
-    # ── Write to Figma ─────────────────────────────────────────────────────────
-    figma_write_result = ""
-    if figma_file_key and FIGMA_TOKEN:
-        if figma_test_success:
-            log(f"Attempting to write design to Figma file={figma_file_key!r}")
-            figma_success, figma_msg = await create_figma_frame_with_content(
-                figma_file_key, "Designs", task_info["title"], content,
-            )
-            if figma_success:
-                log(f"✓ Figma write: {figma_msg}")
-                figma_write_result = f"\n**Figma:** {figma_msg}"
-            else:
-                log(f"✗ Figma write failed: {figma_msg}", level="ERROR")
-        elif figma_blocked_by_network:
-            log(
-                "Skipping Figma write — server blocked by Figma CloudFront CDN. "
-                "Design saved to output files.",
-                level="WARNING",
-            )
-        else:
-            log(
-                "Skipping Figma write — auth failed earlier (FIGMA_TOKEN present)",
-                level="WARNING",
-            )
-    elif figma_file_key and not FIGMA_TOKEN:
-        log("figma_file_key provided but FIGMA_TOKEN missing — skipping Figma write", level="WARNING")
-
-    # ── GitHub PR ──────────────────────────────────────────────────────────────
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")
     gh_token = github_info.get("token")
@@ -764,14 +472,11 @@ async def main() -> None:
 
     if pr_url:
         content += f"\n\n**GitHub PR:** {pr_url}"
-    if figma_write_result:
-        content += figma_write_result
 
-    # ── Callback ───────────────────────────────────────────────────────────────
     callback_body = {
         "task_id": task_id,
         "content": content,
-        "files": files if (files and not pr_url) else None,
+        "files": files,
         "logs": logs,
         "prompt": prompt,
         "model": MODEL,
