@@ -54,17 +54,6 @@ def _get_httpx_kwargs() -> dict:
         kwargs["proxies"] = {"https://": HTTPS_PROXY}
     return kwargs
 
-
-async def _detect_outgoing_ip() -> str:
-    try:
-        async with httpx.AsyncClient(timeout=5.0, **_get_httpx_kwargs()) as client:
-            resp = await client.get("https://api.ipify.org?format=json")
-            if resp.status_code == 200:
-                return resp.json().get("ip", "unknown")
-    except Exception:
-        pass
-    return "unknown"
-
 MODEL: str = payload.get("model", "gpt-4o")
 ACTOR: dict = payload.get("actor") or {}
 ACTOR_ROLE: str = ACTOR.get("role") or "UI/UX Designer"
@@ -190,7 +179,8 @@ def _try_parse_json_array(text: str) -> list[dict] | None:
 
 def _extract_js_block(text: str) -> str | None:
     """Витягує перший ```javascript ... ``` блок з тексту."""
-    # Try ```javascript ... ```
+
+    # Strategy 1: Properly closed ```javascript ... ```
     js_pattern = re.compile(r"```javascript\s*(.*?)\s*```", re.DOTALL)
     js_match = js_pattern.search(text)
     if js_match:
@@ -198,7 +188,25 @@ def _extract_js_block(text: str) -> str | None:
         if code and ("figma." in code or "async function" in code or "createDesign" in code):
             return code
 
-    # Try ``` ... ``` (generic code block with figma code)
+    # Strategy 2: INCOMPLETE code block - look for ```javascript...EOF (no closing marker)
+    # This handles truncated responses
+    incomplete_pattern = re.compile(r"```javascript\s*(async function[\s\S]+?)(?:```|$)", re.DOTALL)
+    incomplete_match = incomplete_pattern.search(text)
+    if incomplete_match:
+        code = incomplete_match.group(1).strip()
+        if code and "figma." in code:
+            # Keep as much code as possible - only remove truly broken lines
+            lines = code.split("\n")
+            # Only remove last line if it's a tiny fragment (< 10 chars)
+            if lines[-1].strip() and len(lines[-1].strip()) < 10 and "." in lines[-1]:
+                # Likely incomplete property, remove it
+                if len(lines) > 1:
+                    lines = lines[:-1]
+            code = "\n".join(lines).strip()
+            if len(code) > 100:  # Must be substantial code
+                return code
+
+    # Strategy 3: Generic code block
     generic_pattern = re.compile(r"```\s*((?:async\s+)?function\s+\w+[\s\S]*?)\s*```", re.DOTALL)
     generic_match = generic_pattern.search(text)
     if generic_match:
@@ -206,19 +214,19 @@ def _extract_js_block(text: str) -> str | None:
         if "figma." in code or "function create" in code.lower():
             return code
 
-    # Try to find ANY code block with figma references
+    # Strategy 4: Any code block with figma references
     code_pattern = re.compile(r"```(?:javascript|js)?\s*\n([\s\S]*?)\n```", re.DOTALL)
     for match in code_pattern.finditer(text):
         code = match.group(1).strip()
         if "figma." in code:
             return code
 
-    # Last resort: look for code that contains figma. references even without markers
-    figma_code_pattern = re.compile(r"((?:const|let|var|async)[\s\S]*?figma\.[\s\S]*?}[\s\S]*?(?:figma\.currentPage|createDesign))", re.DOTALL)
+    # Strategy 5: Last resort - look for code without markers but with figma references
+    figma_code_pattern = re.compile(r"(async\s+function\s+createDesign\s*\(\s*\)\s*\{[\s\S]*?figma\.[\s\S]{50,})", re.DOTALL)
     figma_match = figma_code_pattern.search(text)
     if figma_match:
         code = figma_match.group(1).strip()
-        if len(code) > 50:  # Must be substantial code
+        if len(code) > 100:
             return code
 
     return None
@@ -231,21 +239,23 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
     starts_with_code = text.strip().startswith("```")
     has_js_marker = "```javascript" in text or "```js" in text
     has_figma_code = "figma." in text and "async function" in text
-    log_fn(f"[parse-check] starts_with_code={starts_with_code} has_js={has_js_marker} has_figma={has_figma_code}", level="DEBUG")
+    response_len = len(text)
+    log_fn(f"[parse-check] starts_with_code={starts_with_code} has_js={has_js_marker} has_figma={has_figma_code} response_len={response_len}", level="DEBUG")
 
     # Strategy 1: Extract JS code block FIRST (most reliable)
     js_code = _extract_js_block(text)
     if js_code:
         fallback_path = f"designs/{slug}.js"
-        log_fn(f"[js-extract PRIMARY] Found JS block ({len(js_code)} chars), saving as: {fallback_path}")
+        code_lines = js_code.count("\n") + 1
+        log_fn(f"[js-extract PRIMARY] Found JS block ({len(js_code)} chars, {code_lines} lines), saving as: {fallback_path}", level="INFO")
         return [{"path": fallback_path, "content": js_code}]
 
     # If no code found but text starts with description, log this explicitly
     if text.strip() and not (starts_with_code and has_js_marker):
-        log_fn(f"[CRITICAL] AI violated format requirements: response is prose/markdown, not JavaScript code", level="WARNING")
+        log_fn(f"[WARNING] AI response does not match expected JavaScript format", level="WARNING")
         # Extract first 100 chars to see what went wrong
         first_part = text[:100].replace("\n", " ")
-        log_fn(f"[CRITICAL] Response starts with: {first_part}...", level="DEBUG")
+        log_fn(f"[WARNING] Response starts with: {first_part}...", level="DEBUG")
 
     # Strategy 2: ###FILES### marker
     files_start = text.find("###FILES###")
@@ -255,10 +265,10 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         remainder = re.sub(r"^```(?:json)?\s*", "", remainder).strip()
         parsed = _try_parse_json_array(remainder)
         if parsed is not None:
-            log_fn(f"[###FILES###] Parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}")
+            log_fn(f"[###FILES###] Parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}", level="DEBUG")
             return parsed
         else:
-            log_fn(f"###FILES### found but JSON failed to parse — trying JS extraction", level="WARNING")
+            log_fn(f"[DEBUG] ###FILES### marker found but JSON parse failed", level="DEBUG")
 
     # Strategy 3: JSON array inside a markdown code block
     code_block_pattern = re.compile(r"```(?:json)?\s*(\[\s*\{.*?\}\s*\])\s*```", re.DOTALL)
@@ -266,7 +276,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         candidate = match.group(1).strip()
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
-            log_fn(f"[code-block fallback] Parsed {len(parsed)} file(s)", level="WARNING")
+            log_fn(f"[DEBUG] Parsed JSON from code block: {len(parsed)} file(s)", level="DEBUG")
             return parsed
 
     # Strategy 4: JSON array at end of response
@@ -278,17 +288,12 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
             candidate = candidate[:close + 1]
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
-            log_fn(f"[tail-scan fallback] Parsed {len(parsed)} file(s)", level="WARNING")
+            log_fn(f"[DEBUG] Parsed JSON from tail: {len(parsed)} file(s)", level="DEBUG")
             return parsed
 
-    # Strategy 5: No valid JS found—FAIL with clear error
-    log_fn(f"[CRITICAL-FAILURE] AI response does not contain valid JavaScript code", level="ERROR")
-    log_fn(f"[CRITICAL-FAILURE] Full response will be stored as-is for human review", level="ERROR")
-    log_fn(f"[CRITICAL-FAILURE] Response starts with: {text[:200].replace(chr(10), ' ')}", level="DEBUG")
-    log_fn(f"[CRITICAL-FAILURE] This indicates the AI model violated the Figma output format requirements", level="ERROR")
-
-    # Return empty files list and let the raw response go into deliverable.content for human review
-    # Do NOT save it as markdown—the human can see what went wrong in the UI
+    # No valid output found - return empty and let callback handle raw content
+    log_fn(f"[WARNING] Could not extract JavaScript code or file list from response", level="WARNING")
+    log_fn(f"[DEBUG] Raw response will be included in callback for manual review", level="DEBUG")
     return []
 
 
@@ -422,9 +427,6 @@ async def main() -> None:
 
     log(f"task={task_id!r} role={ACTOR_ROLE!r} model={MODEL}")
 
-    outgoing_ip = await _detect_outgoing_ip()
-    log(f"Outgoing IP: {outgoing_ip}", level="DEBUG", phase="planning")
-
     prompt = (
         "TASK FOR FIGMA SCRIPTER:\n"
         f"{task_info['title']}\n"
@@ -454,6 +456,14 @@ async def main() -> None:
 
     files = parse_files_with_fallback(content, task_info["title"], log)
     log(f"Parsed {len(files)} file(s) from response")
+
+    # Append extracted code to content for chat visibility (keep original response)
+    if files:
+        content += "\n\n---\n\n**✅ EXTRACTED CODE:**\n\n"
+        for file_obj in files:
+            code_content = file_obj['content'].rstrip()
+            # Simply use the code as extracted - no modification
+            content += f"```javascript\n{code_content}\n```\n\n"
 
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")
