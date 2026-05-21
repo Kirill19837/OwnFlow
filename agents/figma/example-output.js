@@ -33,14 +33,16 @@ async function createDesign() {
   defaultBg.fills = [{type: "SOLID", color: {r: 0.2, g: 0.4, b: 1}}];
   defaultBg.cornerRadius = 6;
   defaultButton.appendChild(defaultBg);
-  defaultButton.moveToBack(defaultBg);
+  defaultBg.moveToBack();
 
   // Add text to default button
   const defaultText = figma.createText();
+  const defaultTextFont = {family: "Inter", style: "Semi Bold"};
+  await figma.loadFontAsync(defaultTextFont);
   defaultText.name = "Label";
   defaultText.characters = "Click me";
   defaultText.fontSize = 16;
-  defaultText.fontWeight = 600;
+  defaultText.fontName = defaultTextFont;
   defaultText.fills = [{type: "SOLID", color: {r: 1, g: 1, b: 1}}];
   defaultButton.appendChild(defaultText);
 

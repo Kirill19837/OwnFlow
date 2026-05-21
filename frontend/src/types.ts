@@ -188,6 +188,7 @@ export interface Deliverable {
   content: string
   tool_calls_log?: unknown[]
   created_at: string
+  files?: Array<{ path: string; content: string }> | null
 }
 
 // ── Project Memory ────────────────────────────────────────────────────────────

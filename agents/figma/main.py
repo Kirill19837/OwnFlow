@@ -178,8 +178,6 @@ def _try_parse_json_array(text: str) -> list[dict] | None:
 
 
 def _extract_js_block(text: str) -> str | None:
-    """Витягує перший ```javascript ... ``` блок з тексту."""
-
     # Strategy 1: Properly closed ```javascript ... ```
     js_pattern = re.compile(r"```javascript\s*(.*?)\s*```", re.DOTALL)
     js_match = js_pattern.search(text)
@@ -233,7 +231,7 @@ def _extract_js_block(text: str) -> str | None:
 
 
 def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
-    slug = re.sub(r"[^a-z0-9]+", "-", task_title.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", task_title.lower()).strip("-") or "untitled"
 
     # Log response type for debugging
     starts_with_code = text.strip().startswith("```")
@@ -291,10 +289,23 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
             log_fn(f"[DEBUG] Parsed JSON from tail: {len(parsed)} file(s)", level="DEBUG")
             return parsed
 
-    # No valid output found - return empty and let callback handle raw content
-    log_fn(f"[WARNING] Could not extract JavaScript code or file list from response", level="WARNING")
-    log_fn(f"[DEBUG] Raw response will be included in callback for manual review", level="DEBUG")
-    return []
+    # No valid output found — save raw response as both .md and .js so the code is never lost
+    log_fn(f"[WARNING] Could not extract JavaScript code or file list from response — saving raw fallback", level="WARNING")
+
+    md_path = f"designs/{slug}.md"
+    js_path = f"designs/{slug}.js"
+
+    # Markdown file: human-readable, shows the full raw AI response
+    md_content = f"# Fallback: raw AI response\n\nTask: `{task_title}`\n\n---\n\n{text}"
+
+    # JS file: wrap raw text in a comment block so it's valid enough to open in an editor
+    js_content = f"// Fallback — could not parse structured code from AI response\n// Task: {task_title}\n\n/*\n{text}\n*/"
+
+    log_fn(f"[fallback] Saving raw response as {md_path} and {js_path}", level="INFO")
+    return [
+        {"path": md_path, "content": md_content},
+        {"path": js_path, "content": js_content},
+    ]
 
 
 async def create_pr(token: str, repo: str, task_id: str, task_title: str, files: list[dict]) -> Optional[str]:
@@ -457,13 +468,21 @@ async def main() -> None:
     files = parse_files_with_fallback(content, task_info["title"], log)
     log(f"Parsed {len(files)} file(s) from response")
 
-    # Append extracted code to content for chat visibility (keep original response)
+    # ── Build response: clean summary without truncated code ──────────────────
+    summary_lines = []
+
     if files:
-        content += "\n\n---\n\n**✅ EXTRACTED CODE:**\n\n"
+        summary_lines.append("✅ **Design files generated successfully:**\n")
         for file_obj in files:
-            code_content = file_obj['content'].rstrip()
-            # Simply use the code as extracted - no modification
-            content += f"```javascript\n{code_content}\n```\n\n"
+            file_path = file_obj['path']
+            file_size = len(file_obj['content'])
+            lines_count = file_obj['content'].count('\n') + 1
+            summary_lines.append(f"- `{file_path}` • {file_size:,} bytes • {lines_count} lines")
+        summary_lines.append("\nYour files are ready to use. They have been automatically generated and are available in the files section below.")
+    else:
+        summary_lines.append("⚠️ No design files were generated. Check the logs for details.")
+
+    content = "\n".join(summary_lines)
 
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")

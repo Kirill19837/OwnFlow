@@ -11,6 +11,7 @@ import { cn } from '../lib/utils'
 import { useConfirmation } from '../hooks/useConfirmation'
 import { ConfirmationModal } from './ConfirmationModal'
 import { AiCommandsModal } from './AiCommandsModal'
+import { FileViewerModal } from './FileViewerModal'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -73,7 +74,7 @@ type ChatMsg =
   | { kind: 'user'; content: string }
   | { kind: 'assistant'; content: string }
   | { kind: 'plan'; content: string }
-  | { kind: 'deliverable'; content: string; actorName: string }
+  | { kind: 'deliverable'; content: string; actorName: string; files?: Array<{ path: string; content: string }> }
   | { kind: 'memory'; titles: string[]; decisions: string[] }
   | { kind: 'thinking' }
 
@@ -112,6 +113,10 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     return Object.keys(pending).length > 0 ? pending : null
   }, [chat, task.task_details])
 
+  // File viewer modal state
+  const [fileViewerOpen, setFileViewerOpen] = useState(false)
+  const [fileViewerFiles, setFileViewerFiles] = useState<Array<{ path: string; content: string }>>([])
+
   const scrollBottom = () => setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
 
   const { data: deliverables } = useQuery({
@@ -143,14 +148,29 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
       kind: m.role as 'user' | 'assistant',
       content: m.content,
     }))
-    const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => ({
-      kind: 'deliverable' as const,
-      content: d.content,
-      actorName: assignedActor?.name ?? 'Agent',
-    }))
+    const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => {
+      let parsedFiles: Array<{ path: string; content: string }> | undefined
+      if (d.files) {
+        try {
+          if (typeof d.files === 'string') {
+            parsedFiles = JSON.parse(d.files)
+          } else if (Array.isArray(d.files)) {
+            parsedFiles = d.files
+          }
+        } catch {
+          // ignore malformed files
+        }
+      }
+      return {
+        kind: 'deliverable' as const,
+        content: d.content,
+        actorName: assignedActor?.name ?? 'Agent',
+        files: parsedFiles,
+      }
+    })
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setChat([...interactionMsgs, ...deliverableMsgs])
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interactions, deliverables])
 
   const assign = useMutation({
@@ -290,61 +310,74 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     await streamPrompt(msg)
   }
 
-  const handleExecute = async () => {
-    if (isStreaming) return
-    setIsStreaming(true)
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    const actorName = assignedActor?.name ?? 'Agent'
+   const handleExecute = async () => {
+     if (isStreaming) return
+     setIsStreaming(true)
+     const ctrl = new AbortController()
+     abortRef.current = ctrl
+     const actorName = assignedActor?.name ?? 'Agent'
 
-    setChat((prev) => [...prev, { kind: 'thinking' }])
-    scrollBottom()
+     setChat((prev) => [...prev, { kind: 'thinking' }])
+     scrollBottom()
 
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-    try {
-      const res = await fetch(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
-      if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
-      let planShown = false
-      let deliverableContent = ''
-      await readSSE(res.body!.getReader(), (payload) => {
-        try {
-          const evt = JSON.parse(payload)
-          if (evt.type === 'plan') {
-            setChat((prev) => [
-              ...prev.filter((m) => m.kind !== 'thinking'),
-              { kind: 'plan', content: evt.content },
-            ])
-            planShown = true
-            scrollBottom()
-          } else if (evt.type === 'content') {
-            deliverableContent += evt.content
-          } else if (evt.content) {
-            // legacy fallback (no type field)
-            deliverableContent += evt.content
-          }
-        } catch { /* malformed SSE chunk — skip */ }
-      })
+     try {
+       const res = await fetch(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
+       if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
+       let planShown = false
+       let deliverableContent = ''
+       await readSSE(res.body!.getReader(), (payload) => {
+         try {
+           const evt = JSON.parse(payload)
+           if (evt.type === 'plan') {
+             setChat((prev) => [
+               ...prev.filter((m) => m.kind !== 'thinking'),
+               { kind: 'plan', content: evt.content },
+             ])
+             planShown = true
+             scrollBottom()
+           } else if (evt.type === 'content') {
+             deliverableContent += evt.content
+           } else if (evt.content) {
+             // legacy fallback (no type field)
+             deliverableContent += evt.content
+           }
+         } catch { /* malformed SSE chunk — skip */ }
+       })
 
-      // Show deliverable as a chat card
-      if (deliverableContent) {
-        setChat((prev) => [
-          ...prev.filter((m) => m.kind !== 'thinking'),
-          ...(planShown ? [] : []),
-          { kind: 'deliverable', content: deliverableContent, actorName },
-        ])
-      } else {
-        setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
-      }
-    } catch {
-      setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
-    }
+       // Show deliverable as a chat card
+       if (deliverableContent) {
+         // Parse files from the deliverable content if present
+         let parsedFiles: Array<{ path: string; content: string }> | undefined
+         const filesMarker = deliverableContent.indexOf('###FILES###')
+         if (filesMarker !== -1) {
+           try {
+             const afterMarker = deliverableContent.slice(filesMarker + '###FILES###'.length).trim()
+             const arrStart = afterMarker.indexOf('[')
+             if (arrStart !== -1) {
+               parsedFiles = JSON.parse(afterMarker.slice(arrStart))
+             }
+           } catch { /* ignore malformed FILES block */ }
+         }
 
-    setIsStreaming(false)
-    qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
-    qc.invalidateQueries({ queryKey: ['project'] })
-    scrollBottom()
-  }
+         setChat((prev) => [
+           ...prev.filter((m) => m.kind !== 'thinking'),
+           ...(planShown ? [] : []),
+           { kind: 'deliverable', content: deliverableContent, actorName, files: parsedFiles },
+         ])
+       } else {
+         setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
+       }
+     } catch {
+       setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
+     }
+
+     setIsStreaming(false)
+     qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
+     qc.invalidateQueries({ queryKey: ['project'] })
+     scrollBottom()
+   }
 
 
   return (
@@ -782,44 +815,61 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                 )
               }
 
-              if (m.kind === 'deliverable') {
-                // Strip ###FILES### block from display; parse file names from it
-                const filesMarker = m.content.indexOf('###FILES###')
-                const narrativeText = filesMarker !== -1 ? m.content.slice(0, filesMarker).trim() : m.content
-                let parsedFiles: { path: string }[] = []
-                if (filesMarker !== -1) {
-                  try {
-                    const afterMarker = m.content.slice(filesMarker + '###FILES###'.length).trim()
-                    const arrStart = afterMarker.indexOf('[')
-                    if (arrStart !== -1) parsedFiles = JSON.parse(afterMarker.slice(arrStart))
-                  } catch { /* ignore malformed FILES block */ }
-                }
-                return (
-                  <div key={i} className="bg-gray-900 border border-green-800/40 rounded-xl px-3 py-2">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <FileText size={11} className="text-green-400" />
-                      <span className="text-xs text-green-400 font-medium uppercase tracking-wide">
-                        Result · {m.actorName}
-                      </span>
-                    </div>
-                    {narrativeText && (
-                      <div className="text-xs text-gray-300 max-h-96 overflow-y-auto pr-1 prose prose-invert prose-xs max-w-none [&>h1]:text-sm [&>h2]:text-xs [&>h3]:text-xs [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&_strong]:text-white [&>pre]:bg-gray-950 [&>pre]:rounded [&>pre]:p-2 [&>code]:text-green-300">
-                        <ReactMarkdown>{narrativeText}</ReactMarkdown>
-                      </div>
-                    )}
-                    {parsedFiles.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {parsedFiles.map((f, fi) => (
-                          <span key={fi} className="flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded-md font-mono">
-                            <FileText size={10} className="text-green-400 shrink-0" />
-                            {f.path}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              }
+               if (m.kind === 'deliverable') {
+                 // Strip ###FILES### block from display; parse file names from it
+                 const filesMarker = m.content.indexOf('###FILES###')
+                 const narrativeText = filesMarker !== -1 ? m.content.slice(0, filesMarker).trim() : m.content
+                 let parsedFiles: { path: string }[] = []
+                 if (filesMarker !== -1) {
+                   try {
+                     const afterMarker = m.content.slice(filesMarker + '###FILES###'.length).trim()
+                     const arrStart = afterMarker.indexOf('[')
+                     if (arrStart !== -1) parsedFiles = JSON.parse(afterMarker.slice(arrStart))
+                   } catch { /* ignore malformed FILES block */ }
+                 }
+
+                 // Use files from deliverable if available
+                 const files = m.files || parsedFiles.map(f => ({ path: f.path, content: '' }))
+
+                 return (
+                   <div key={i} className="bg-gray-900 border border-green-800/40 rounded-xl px-3 py-2">
+                     <div className="flex items-center gap-1.5 mb-2">
+                       <FileText size={11} className="text-green-400" />
+                       <span className="text-xs text-green-400 font-medium uppercase tracking-wide">
+                         Result · {m.actorName}
+                       </span>
+                     </div>
+                     {narrativeText && (
+                       <div className="text-xs text-gray-300 max-h-96 overflow-y-auto pr-1 prose prose-invert prose-xs max-w-none [&>h1]:text-sm [&>h2]:text-xs [&>h3]:text-xs [&>h1]:font-semibold [&>h2]:font-semibold [&>h3]:font-medium [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>li]:my-0.5 [&>p]:leading-relaxed [&_strong]:text-white [&>pre]:bg-gray-950 [&>pre]:rounded [&>pre]:p-2 [&>code]:text-green-300">
+                         <ReactMarkdown>{narrativeText}</ReactMarkdown>
+                       </div>
+                     )}
+                     {files.length > 0 && (
+                       <div className="mt-3 space-y-2">
+                         <div className="flex flex-wrap gap-1.5">
+                           {files.map((f, fi) => (
+                             <span key={fi} className="flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded-md font-mono">
+                               <FileText size={10} className="text-green-400 shrink-0" />
+                               {f.path}
+                             </span>
+                           ))}
+                         </div>
+                         {m.files && m.files.length > 0 && (
+                           <button
+                             onClick={() => {
+                               setFileViewerFiles(m.files!)
+                               setFileViewerOpen(true)
+                             }}
+                             className="w-full text-xs px-3 py-1.5 rounded-lg font-medium bg-green-900/30 hover:bg-green-800/40 text-green-300 border border-green-700/50 transition-colors"
+                           >
+                             👁️ View Files ({m.files.length})
+                           </button>
+                         )}
+                       </div>
+                     )}
+                   </div>
+                 )
+               }
 
               if (m.kind === 'assistant') {
                 const actions = parseAllTaskActions(m.content)
@@ -994,19 +1044,26 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
         </div>
       </div>
 
-      <ConfirmationModal
-        confirmation={confirmation}
-        onConfirm={() => confirmation?.onConfirm()}
-        onCancel={() => confirmation?.onCancel()}
-      />
+       <ConfirmationModal
+         confirmation={confirmation}
+         onConfirm={() => confirmation?.onConfirm()}
+         onCancel={() => confirmation?.onCancel()}
+       />
 
-      {showTaskCommands && (
-        <AiCommandsModal
-          context="task"
-          onClose={() => setShowTaskCommands(false)}
-          onCommandClick={(example) => { setPromptInput(example); setChatOpen(true) }}
-        />
-      )}
-    </div>
-  )
-}
+       {showTaskCommands && (
+         <AiCommandsModal
+           context="task"
+           onClose={() => setShowTaskCommands(false)}
+           onCommandClick={(example) => { setPromptInput(example); setChatOpen(true) }}
+         />
+       )}
+
+       <FileViewerModal
+         files={fileViewerFiles}
+         isOpen={fileViewerOpen}
+         onClose={() => setFileViewerOpen(false)}
+         taskTitle={task.title}
+       />
+     </div>
+   )
+ }

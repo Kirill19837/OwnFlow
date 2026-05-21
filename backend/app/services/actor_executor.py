@@ -388,18 +388,6 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
             "level": 3,
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": f"image not found: {image}"}
-    except docker.errors.DockerException as exc:
-        # Catch all Docker-level errors (daemon not running, socket unavailable, etc.)
-        error_msg = f"Docker unavailable or error: {str(exc)}"
-        db.table("ai_logs").insert({
-            "id": str(uuid.uuid4()),
-            "project_id": project["id"],
-            "task_id": task["id"],
-            "phase": 3,
-            "message": error_msg,
-            "level": 3,
-        }).execute()
-        return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": error_msg}
     except docker.errors.APIError as exc:
         db.table("ai_logs").insert({
             "id": str(uuid.uuid4()),
@@ -411,6 +399,17 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": str(exc)}
 
+    except docker.errors.DockerException as exc:
+        error_msg = f"Docker unavailable or error: {str(exc)}"
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "task_id": task["id"],
+            "phase": 3,
+            "message": error_msg,
+            "level": 3,
+        }).execute()
+        return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": error_msg}
     return {"task_id": task["id"], "dispatched": True, "via": "docker", "actor": actor["name"], "container_id": container_id}
 
 
@@ -568,11 +567,32 @@ async def stream_task_execution(task_id: str, actor_id: str):
         pass
 
     # Persist deliverable after stream completes
+    files_data = None
+    files_marker = final_content.find("###FILES###")
+    if files_marker != -1:
+        try:
+            import json
+            import re
+            after_marker = final_content[files_marker + len("###FILES###"):].strip()
+            # Try to extract JSON array
+            arr_start = after_marker.find("[")
+            if arr_start != -1:
+                # Try to find the closing bracket
+                close_bracket = after_marker.rfind("]")
+                if close_bracket != -1:
+                    json_str = after_marker[arr_start:close_bracket + 1]
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, list) and all("path" in item and "content" in item for item in parsed):
+                        files_data = json.dumps(parsed)
+        except Exception:
+            pass  # Ignore parsing errors
+
     row = {
         "id": str(uuid.uuid4()),
         "task_id": task_id,
         "actor_id": actor_id,
         "content": final_content,
+        "files": files_data,
         "tool_calls_log": [],
         "created_at": datetime.utcnow().isoformat(),
     }
