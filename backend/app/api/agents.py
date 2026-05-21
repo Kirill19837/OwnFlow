@@ -29,6 +29,7 @@ from typing import Optional, List
 
 from app.db import get_supabase
 from app.services.github_service import create_pr_for_task
+from app.services.file_storage import upload_file
 
 router = APIRouter()
 
@@ -101,12 +102,41 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # ── Save deliverable FIRST ────────────────────────────────────────────────
     # Insert before consuming the token so that if this fails the agent can
     # still retry (the token is still valid and the task stays in its current
-    # status).
+    # status)
+    files_data = None
+    file_urls: list[dict] = []
+    if body.files:
+        # Upload files to Supabase Storage and collect URLs.
+        # NOTE: tests must mock `app.services.file_storage.upload_file` (or its
+        # alias `app.api.agents.upload_file`) to keep callback tests hermetic.
+        # Patching only `app.api.agents.get_supabase` is no longer sufficient
+        # because upload_file uses its own internal storage client.
+        try:
+            for file_entry in body.files:
+                download_url = await upload_file(
+                    body.task_id,
+                    file_entry.path,
+                    file_entry.content,
+                )
+                file_urls.append({
+                    "path": file_entry.path,
+                    "url": download_url,
+                })
+
+            # Pass the Python list directly so the Supabase client serialises it
+            # as a real JSONB array — not a JSONB string.
+            # Consistent shape stored in deliverables.files: [{path, url}, ...].
+            files_data = file_urls if file_urls else None
+        except Exception as exc:
+            # Log but don't fail — continue with the deliverable
+            print(f"[agents] Warning: Failed to upload files: {exc}", flush=True)
+
     deliverable_row = {
         "id": str(uuid.uuid4()),
         "task_id": body.task_id,
         "actor_id": actor_id,
         "content": body.content,
+        "files": files_data,
         "tool_calls_log": [],
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -197,3 +227,54 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
             pass
 
     return {"ok": True, "task_id": body.task_id}
+
+
+@router.get("/deliverables/{task_id}/files")
+async def get_deliverable_files(task_id: str):
+    """
+    Get download URLs for all files generated for a deliverable.
+
+    Returns:
+        {
+            "files": [
+                {"path": "src/main.py", "url": "https://..."},
+                ...
+            ]
+        }
+    """
+    db = get_supabase()
+
+    # Separate DB errors (500) from "no rows found" (404) so callers and
+    # on-call engineers get an accurate signal.
+    try:
+        deliverable_resp = (
+            db.table("deliverables")
+            .select("files")
+            .eq("task_id", task_id)
+            .order("created_at", ascending=False)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to query deliverables: {exc}") from exc
+
+    deliverables = deliverable_resp.data
+    if not deliverables:
+        raise HTTPException(404, "No deliverable found for this task")
+
+    deliverable = deliverables[0]
+    files = deliverable.get("files")
+
+    if not files:
+        return {"files": []}
+
+    # files is stored as a native JSONB array, so the Supabase client returns
+    # it already deserialised.  Guard against the legacy string shape just in case.
+    if isinstance(files, str):
+        import json
+        try:
+            files = json.loads(files)
+        except Exception:
+            return {"files": []}
+
+    return {"files": files}

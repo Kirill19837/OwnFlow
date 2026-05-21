@@ -399,6 +399,17 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
         }).execute()
         return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": str(exc)}
 
+    except docker.errors.DockerException as exc:
+        error_msg = f"Docker unavailable or error: {str(exc)}"
+        db.table("ai_logs").insert({
+            "id": str(uuid.uuid4()),
+            "project_id": project["id"],
+            "task_id": task["id"],
+            "phase": 3,
+            "message": error_msg,
+            "level": 3,
+        }).execute()
+        return {"task_id": task["id"], "dispatched": False, "via": "docker", "actor": actor["name"], "error": error_msg}
     return {"task_id": task["id"], "dispatched": True, "via": "docker", "actor": actor["name"], "container_id": container_id}
 
 
@@ -556,11 +567,27 @@ async def stream_task_execution(task_id: str, actor_id: str):
         pass
 
     # Persist deliverable after stream completes
+    files_data = None
+    files_marker = final_content.find("###FILES###")
+    if files_marker != -1:
+        after_marker = final_content[files_marker + len("###FILES###"):].strip()
+        arr_start = after_marker.find("[")
+        if arr_start != -1:
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(after_marker, arr_start)
+                if isinstance(parsed, list) and all(
+                    "path" in item and "content" in item for item in parsed
+                ):
+                    files_data = parsed
+            except json.JSONDecodeError:
+                pass
+
     row = {
         "id": str(uuid.uuid4()),
         "task_id": task_id,
         "actor_id": actor_id,
         "content": final_content,
+        "files": files_data,
         "tool_calls_log": [],
         "created_at": datetime.utcnow().isoformat(),
     }

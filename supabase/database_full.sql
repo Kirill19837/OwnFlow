@@ -310,9 +310,12 @@ create table deliverables (
   task_id        uuid        not null references tasks(id)   on delete cascade,
   actor_id       uuid        not null references actors(id)  on delete cascade,
   content        text        not null,
+  files          jsonb,
   tool_calls_log jsonb       default '[]',
   created_at     timestamptz not null default now()
 );
+
+create index if not exists ix_deliverables_task_files on deliverables(task_id) where files is not null;
 
 -- ─── AI context ──────────────────────────────────────────────────────────────
 
