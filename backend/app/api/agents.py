@@ -104,12 +104,13 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # still retry (the token is still valid and the task stays in its current
     # status)
     files_data = None
-    file_urls = []
+    file_urls: list[dict] = []
     if body.files:
-        import json
-        import asyncio
-
-        # Upload files to Supabase Storage and collect URLs
+        # Upload files to Supabase Storage and collect URLs.
+        # NOTE: tests must mock `app.services.file_storage.upload_file` (or its
+        # alias `app.api.agents.upload_file`) to keep callback tests hermetic.
+        # Patching only `app.api.agents.get_supabase` is no longer sufficient
+        # because upload_file uses its own internal storage client.
         try:
             for file_entry in body.files:
                 download_url = await upload_file(
@@ -122,8 +123,10 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
                     "url": download_url,
                 })
 
-            # Store URLs (not raw content) in the database
-            files_data = json.dumps(file_urls)
+            # Pass the Python list directly so the Supabase client serialises it
+            # as a real JSONB array — not a JSONB string.
+            # Consistent shape stored in deliverables.files: [{path, url}, ...].
+            files_data = file_urls if file_urls else None
         except Exception as exc:
             # Log but don't fail — continue with the deliverable
             print(f"[agents] Warning: Failed to upload files: {exc}", flush=True)
@@ -213,10 +216,15 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # already created the PR; creating another one here would produce a duplicate.
     if body.files and not body.pr_url:
         import json
-        # Note: files now contain URLs, not raw content
-        # Only create PR if agent had GitHub connection and wanted us to
-        # For now, skip PR creation since Figma agent handles it
-        pass
+        files_json = [{"path": f.path, "content": f.content} for f in body.files]
+        # Strip any existing ###FILES### block the agent may have included in its
+        # content, then append a clean one so create_pr_for_task sees exactly one.
+        narrative = body.content.split("###FILES###")[0].rstrip()
+        content_with_files = narrative + "\n\n###FILES###\n" + json.dumps(files_json, indent=2)
+        try:
+            await create_pr_for_task(body.task_id, task.get("title", ""), content_with_files)
+        except Exception:
+            pass
 
     return {"ok": True, "task_id": body.task_id}
 
@@ -236,6 +244,8 @@ async def get_deliverable_files(task_id: str):
     """
     db = get_supabase()
 
+    # Separate DB errors (500) from "no rows found" (404) so callers and
+    # on-call engineers get an accurate signal.
     try:
         deliverable_resp = (
             db.table("deliverables")
@@ -245,8 +255,8 @@ async def get_deliverable_files(task_id: str):
             .limit(1)
             .execute()
         )
-    except Exception:
-        raise HTTPException(404, "Deliverable not found")
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to query deliverables: {exc}") from exc
 
     deliverables = deliverable_resp.data
     if not deliverables:
@@ -258,9 +268,13 @@ async def get_deliverable_files(task_id: str):
     if not files:
         return {"files": []}
 
-    import json
-    try:
-        files_list = json.loads(files) if isinstance(files, str) else files
-        return {"files": files_list}
-    except Exception:
-        return {"files": []}
+    # files is stored as a native JSONB array, so the Supabase client returns
+    # it already deserialised.  Guard against the legacy string shape just in case.
+    if isinstance(files, str):
+        import json
+        try:
+            files = json.loads(files)
+        except Exception:
+            return {"files": []}
+
+    return {"files": files}

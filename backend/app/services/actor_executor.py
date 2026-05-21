@@ -570,22 +570,17 @@ async def stream_task_execution(task_id: str, actor_id: str):
     files_data = None
     files_marker = final_content.find("###FILES###")
     if files_marker != -1:
-        try:
-            import json
-            import re
-            after_marker = final_content[files_marker + len("###FILES###"):].strip()
-            # Try to extract JSON array
-            arr_start = after_marker.find("[")
-            if arr_start != -1:
-                # Try to find the closing bracket
-                close_bracket = after_marker.rfind("]")
-                if close_bracket != -1:
-                    json_str = after_marker[arr_start:close_bracket + 1]
-                    parsed = json.loads(json_str)
-                    if isinstance(parsed, list) and all("path" in item and "content" in item for item in parsed):
-                        files_data = json.dumps(parsed)
-        except Exception:
-            pass  # Ignore parsing errors
+        after_marker = final_content[files_marker + len("###FILES###"):].strip()
+        arr_start = after_marker.find("[")
+        if arr_start != -1:
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(after_marker, arr_start)
+                if isinstance(parsed, list) and all(
+                    "path" in item and "content" in item for item in parsed
+                ):
+                    files_data = parsed
+            except json.JSONDecodeError:
+                pass
 
     row = {
         "id": str(uuid.uuid4()),

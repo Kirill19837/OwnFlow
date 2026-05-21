@@ -181,6 +181,12 @@ export interface Project {
   actors?: Actor[]
 }
 
+export interface DeliverableFile {
+  path: string
+  content?: string
+  url?: string
+}
+
 export interface Deliverable {
   id: string
   task_id: string
@@ -188,7 +194,7 @@ export interface Deliverable {
   content: string
   tool_calls_log?: unknown[]
   created_at: string
-  files?: Array<{ path: string; content: string }> | null
+  files?: DeliverableFile[] | null
 }
 
 // ── Project Memory ────────────────────────────────────────────────────────────
