@@ -196,7 +196,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
      const hasDeliverables = deliverables && deliverables.length > 0
      if (!hasInteractions && !hasDeliverables) return
      seededRef.current = true
-     console.log(`[TaskDrawer] Seeding chat: ${interactions?.length ?? 0} interactions, ${deliverables?.length ?? 0} deliverables`)
      const interactionMsgs: ChatMsg[] = (interactions ?? []).map((m) => ({
        kind: m.role as 'user' | 'assistant',
        content: m.content,
@@ -204,12 +203,6 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
      const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => {
        // Use the safe parser — handles both {path,url} and {path,content} shapes
        const parsedFiles = parseDeliverableFiles(d.files)
-       console.log(`[TaskDrawer] Deliverable: files_raw=${d.files ? 'present' : 'absent'}, parsed=${parsedFiles.length} files`)
-       if (parsedFiles.length > 0) {
-         parsedFiles.forEach((f, idx) => {
-           console.log(`  [${idx}] ${f.path} (${f.content?.length ?? 0} bytes)`)
-         })
-       }
        return {
          kind: 'deliverable' as const,
          content: d.content,

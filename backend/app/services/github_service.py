@@ -284,11 +284,13 @@ async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
                 return False
             commit_sha = commit_resp.json()["sha"]
 
-            await client.post(
+            default_ref_resp = await client.post(
                 f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
                 headers=_auth(token),
                 json={"ref": f"refs/heads/{default_branch}", "sha": commit_sha},
             )
+            if default_ref_resp.status_code not in (201, 422):
+                return False
 
             create_resp = await client.post(
                 f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",

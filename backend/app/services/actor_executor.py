@@ -599,7 +599,6 @@ async def stream_task_execution(task_id: str, actor_id: str):
     try:
         _log(f"[PR] Attempting PR for task_id={task_id} project_id={project['id']}", level=0)
         conn = await get_connection_for_project(project["id"])
-        _log(f"[PR] Connection found: {conn}", level=0)
         if not conn:
             _log("[PR] No GitHub connection — skipping PR", level=2)
         else:

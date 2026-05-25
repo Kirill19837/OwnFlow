@@ -32,7 +32,12 @@ async function createDesign() {
     const r = figma.createRectangle();
     r.name = name;
     r.resize(w, h);
-    r.fills = [{ type: "SOLID", color: fill }];
+
+    const { a, ...color } = fill;
+    const paint = { type: "SOLID", color };
+    if (a !== undefined) paint.opacity = a;
+
+    r.fills = [paint];
     if (rx) r.cornerRadius = rx;
     if (parent) parent.appendChild(r);
     return r;

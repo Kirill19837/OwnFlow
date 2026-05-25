@@ -321,13 +321,6 @@ def get_deliverables(task_id: str):
         .execute()
     )
     data = resp.data or []
-    print(f"[tasks] GET /{{task_id}}/deliverables: task_id={task_id} returned {len(data)} deliverable(s)", flush=True)
-    for i, d in enumerate(data):
-        files_info = d.get("files")
-        print(f"  [deliverable {i}] has files={files_info is not None} (count={len(files_info) if isinstance(files_info, list) else 0})", flush=True)
-        if files_info and isinstance(files_info, list):
-            for j, f in enumerate(files_info):
-                print(f"    [file {j}] path={f.get('path')} has_content={bool(f.get('content'))} has_url={bool(f.get('url'))}", flush=True)
     return data
 
 

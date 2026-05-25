@@ -65,8 +65,6 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     if not provided_token:
         raise HTTPException(401, "Empty callback token.")
 
-    print(f"[agents] DEBUG: Received callback POST for task {body.task_id!r}, files_count={len(body.files) if body.files else 0}", flush=True)
-
     db = get_supabase()
 
     try:
@@ -111,7 +109,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         for file_entry in body.files:
             file_record = {
                 "path": file_entry.path,
-                "content": file_entry.content,   # <-- головне: контент у БД
+                "content": file_entry.content,
             }
             print(f"[agents] DEBUG: Processing file: path={file_entry.path!r} size={len(file_entry.content)} bytes", flush=True)
 

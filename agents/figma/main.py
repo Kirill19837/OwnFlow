@@ -59,8 +59,6 @@ ACTOR: dict = payload.get("actor") or {}
 ACTOR_ROLE: str = ACTOR.get("role") or "UI/UX Designer"
 ACTOR_CAPABILITIES: list = ACTOR.get("capabilities") or []
 
-
-
 SYSTEM_PROMPT = f"""\
 YOUR RESPONSE MUST BE EXACTLY THIS FORMAT AND NOTHING ELSE:
 
@@ -81,51 +79,66 @@ ABSOLUTE REQUIREMENTS (this is a contract):
 - ZERO markdown formatting outside the code block
 - ZERO newlines before the first ``` or after the last ```
 
+FIGMA API RULES — follow every rule exactly:
+
+FONTS:
+- Load fonts BEFORE any figma.createText() call
+- Load ONLY these two variants — no others exist reliably:
+await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+await figma.loadFontAsync({{ family: "Inter", style: "Bold" }});
+- Never use "SemiBold", "Medium", "Light", or any other style — they will silently fail
+- Set font on text nodes using ONLY:
+node.fontName = {{ family: "Inter", style: "Regular" }};
+node.fontName = {{ family: "Inter", style: "Bold" }};
+- NEVER use .fontFamily or .fontWeight — these properties do not exist in the Figma API
+
+SIZING:
+- NEVER set .width or .height directly
+- ALWAYS use node.resize(width, height)
+
+ASYNC / LOOPS:
+- NEVER use .forEach() with await inside — forEach ignores async/await silently
+- ALWAYS use for...of when await is needed inside a loop:
+
+    WRONG:
+    items.forEach(async (item) => {{
+        await figma.loadFontAsync(...); // silently ignored
+    }});
+
+    CORRECT:
+    for (const item of items) {{
+        await figma.loadFontAsync(...); // works correctly
+    }}
+
 What the code MUST do:
 - Create Figma design elements using the Figma Plugin SDK
 - Use figma.createFrame(), figma.createText(), figma.createComponent(), etc.
-- CRITICAL: Before ANY figma.createText() call, ALWAYS load the font first:
-  await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
-  If you use Bold/SemiBold — load that variant too.
-  Skipping loadFontAsync causes ALL text to silently fail and produces a blank frame.
-- NEVER set .width or .height directly — ALWAYS use node.resize(w, h)
-- NEVER use .fontFamily or .fontWeight — ALWAYS use .fontName = {{  family: "Inter", style: "Bold" }}
-- CRITICAL: NEVER use .forEach() with await inside — forEach does NOT support async/await.
-  Instead, ALWAYS use for...of loop when you need await inside a loop:
-  
-  WRONG (silently breaks, fonts fail):
-    items.forEach((item, index) => {{
-      await figma.loadFontAsync(...);  // ← this await is IGNORED
-    }});
-  
-  CORRECT:
-    for (const [index, item] of items.entries()) {{
-      await figma.loadFontAsync(...);  // ← this await works correctly
-    }}
-  
-  This applies to ALL async calls inside loops: loadFontAsync, any other async figma API.
-- Load ONLY these two font variants (they always exist in Figma):
-  await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
-  await figma.loadFontAsync({{ family: "Inter", style: "Bold" }});
-  Use ONLY style: "Regular" or style: "Bold" — never "SemiBold", "Medium", etc.
-- Set colors, typography, sizing, constraints using Figma API
-- Handle "design system", "colors", "typography", "wireframes" as CODE that creates them
+- Set colors, typography, sizing, and constraints using the Figma API
+- Treat "design system", "colors", "typography", "wireframes" as CODE that creates them
 
-Examples of correct format:
+FORMAT EXAMPLES:
+
+CORRECT:
 ```javascript
 async function createDesign() {{
-  const page = figma.currentPage;
-  const frame = figma.createFrame();
-  frame.x = 0; frame.y = 0; frame.resize(100, 100);
+    const page = figma.currentPage;
+await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+const frame = figma.createFrame();
+frame.resize(375, 812);
+const text = figma.createText();
+text.fontName = {{ family: "Inter", style: "Regular" }};
+text.characters = "Hello";
+frame.appendChild(text);
 }}
 createDesign().catch(e => console.error(e));
 ```
 
-Examples of WRONG format (DO NOT DO):
-- "Here's the design code: ```javascript ... ```" ← NO! This has text before
-- "```javascript ... ``` Hope this helps!" ← NO! This has text after
-- "```javascript ... ```\n\nAlternatively, you could..." ← NO! Text after code
-- "Design System Overview\n\n```javascript ... ```" ← NO! Text before code
+WRONG — never do these:
+- Text before the code block: "Here's the code: ```javascript"
+- Text after the code block: "``` Let me know if you need changes!"
+- Any font style other than "Regular" or "Bold"
+- .width = 100 instead of .resize(100, height)
+- forEach with await inside
 
 YOUR RESPONSE STARTS NOW. RESPOND WITH ONLY THE CODE BLOCK. NOTHING ELSE.
 """
