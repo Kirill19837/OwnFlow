@@ -188,32 +188,39 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
     return a.id === a0?.actor_id
   })
 
-  // Seed chat from persisted interactions on first open (once)
-  const seededRef = useRef(false)
-  useEffect(() => {
-    if (seededRef.current) return
-    const hasInteractions = interactions && interactions.length > 0
-    const hasDeliverables = deliverables && deliverables.length > 0
-    if (!hasInteractions && !hasDeliverables) return
-    seededRef.current = true
-    const interactionMsgs: ChatMsg[] = (interactions ?? []).map((m) => ({
-      kind: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
-    const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => {
-      // Use the safe parser — handles both {path,url} and {path,content} shapes
-      const parsedFiles = parseDeliverableFiles(d.files)
-      return {
-        kind: 'deliverable' as const,
-        content: d.content,
-        actorName: assignedActor?.name ?? 'Agent',
-        files: parsedFiles.length > 0 ? parsedFiles : undefined,
-      }
-    })
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setChat([...interactionMsgs, ...deliverableMsgs])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interactions, deliverables])
+   // Seed chat from persisted interactions on first open (once)
+   const seededRef = useRef(false)
+   useEffect(() => {
+     if (seededRef.current) return
+     const hasInteractions = interactions && interactions.length > 0
+     const hasDeliverables = deliverables && deliverables.length > 0
+     if (!hasInteractions && !hasDeliverables) return
+     seededRef.current = true
+     console.log(`[TaskDrawer] Seeding chat: ${interactions?.length ?? 0} interactions, ${deliverables?.length ?? 0} deliverables`)
+     const interactionMsgs: ChatMsg[] = (interactions ?? []).map((m) => ({
+       kind: m.role as 'user' | 'assistant',
+       content: m.content,
+     }))
+     const deliverableMsgs: ChatMsg[] = (deliverables ?? []).map((d) => {
+       // Use the safe parser — handles both {path,url} and {path,content} shapes
+       const parsedFiles = parseDeliverableFiles(d.files)
+       console.log(`[TaskDrawer] Deliverable: files_raw=${d.files ? 'present' : 'absent'}, parsed=${parsedFiles.length} files`)
+       if (parsedFiles.length > 0) {
+         parsedFiles.forEach((f, idx) => {
+           console.log(`  [${idx}] ${f.path} (${f.content?.length ?? 0} bytes)`)
+         })
+       }
+       return {
+         kind: 'deliverable' as const,
+         content: d.content,
+         actorName: assignedActor?.name ?? 'Agent',
+         files: parsedFiles.length > 0 ? parsedFiles : undefined,
+       }
+     })
+     // eslint-disable-next-line react-hooks/set-state-in-effect
+     setChat([...interactionMsgs, ...deliverableMsgs])
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [interactions, deliverables])
 
   const assign = useMutation({
     mutationFn: (actor_id: string) =>
@@ -893,29 +900,35 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
                                     <ReactMarkdown>{narrativeText}</ReactMarkdown>
                                   </div>
                               )}
-                              {files.length > 0 && (
-                                  <div className="mt-3 space-y-2">
-                                    {/* File name chips */}
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {files.map((f, fi) => (
-                                          <span key={fi} className="flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded-md font-mono">
-                                  <FileText size={10} className="text-green-400 shrink-0" />
-                                            {f.path}
-                                </span>
-                                      ))}
-                                    </div>
-                                    {/* View Files button — lazy-fetches content on click */}
-                                    <button
-                                        onClick={() => handleViewFiles(files, i)}
-                                        disabled={isLoading}
-                                        className="w-full text-xs px-3 py-1.5 rounded-lg font-medium bg-green-900/30 hover:bg-green-800/40 text-green-300 border border-green-700/50 transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
-                                    >
-                                      {isLoading
-                                          ? <><Loader2 size={11} className="animate-spin" /> Loading files…</>
-                                          : <>👁️ View Files ({files.length})</>}
-                                    </button>
-                                  </div>
-                              )}
+                               {files.length > 0 && (
+                                   <div className="mt-3 space-y-2">
+                                     {/* File name chips — clickable */}
+                                     <div className="flex flex-wrap gap-1.5">
+                                       {files.map((f, fi) => (
+                                           <button
+                                               key={fi}
+                                               onClick={() => handleViewFiles(files, i)}
+                                               disabled={isLoading}
+                                               className="flex items-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-green-600 text-gray-300 hover:text-green-300 px-2 py-0.5 rounded-md font-mono transition-colors disabled:opacity-50 cursor-pointer"
+                                               title="Click to open file viewer"
+                                           >
+                                               <FileText size={10} className="text-green-400 shrink-0" />
+                                               {f.path}
+                                           </button>
+                                       ))}
+                                     </div>
+                                     {/* View Files button — lazy-fetches content on click */}
+                                     <button
+                                         onClick={() => handleViewFiles(files, i)}
+                                         disabled={isLoading}
+                                         className="w-full text-xs px-3 py-1.5 rounded-lg font-medium bg-green-900/30 hover:bg-green-800/40 text-green-300 border border-green-700/50 transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
+                                     >
+                                       {isLoading
+                                           ? <><Loader2 size={11} className="animate-spin" /> Loading files…</>
+                                           : <>👁️ View Files ({files.length})</>}
+                                     </button>
+                                   </div>
+                               )}
                             </div>
                         )
                       }

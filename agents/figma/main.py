@@ -84,6 +84,30 @@ ABSOLUTE REQUIREMENTS (this is a contract):
 What the code MUST do:
 - Create Figma design elements using the Figma Plugin SDK
 - Use figma.createFrame(), figma.createText(), figma.createComponent(), etc.
+- CRITICAL: Before ANY figma.createText() call, ALWAYS load the font first:
+  await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+  If you use Bold/SemiBold — load that variant too.
+  Skipping loadFontAsync causes ALL text to silently fail and produces a blank frame.
+- NEVER set .width or .height directly — ALWAYS use node.resize(w, h)
+- NEVER use .fontFamily or .fontWeight — ALWAYS use .fontName = {{  family: "Inter", style: "Bold" }}
+- CRITICAL: NEVER use .forEach() with await inside — forEach does NOT support async/await.
+  Instead, ALWAYS use for...of loop when you need await inside a loop:
+  
+  WRONG (silently breaks, fonts fail):
+    items.forEach((item, index) => {{
+      await figma.loadFontAsync(...);  // ← this await is IGNORED
+    }});
+  
+  CORRECT:
+    for (const [index, item] of items.entries()) {{
+      await figma.loadFontAsync(...);  // ← this await works correctly
+    }}
+  
+  This applies to ALL async calls inside loops: loadFontAsync, any other async figma API.
+- Load ONLY these two font variants (they always exist in Figma):
+  await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+  await figma.loadFontAsync({{ family: "Inter", style: "Bold" }});
+  Use ONLY style: "Regular" or style: "Bold" — never "SemiBold", "Medium", etc.
 - Set colors, typography, sizing, constraints using Figma API
 - Handle "design system", "colors", "typography", "wireframes" as CODE that creates them
 
@@ -92,7 +116,7 @@ Examples of correct format:
 async function createDesign() {{
   const page = figma.currentPage;
   const frame = figma.createFrame();
-  frame.x = 0; frame.y = 0; frame.width = 100; frame.height = 100;
+  frame.x = 0; frame.y = 0; frame.resize(100, 100);
 }}
 createDesign().catch(e => console.error(e));
 ```
@@ -107,13 +131,6 @@ YOUR RESPONSE STARTS NOW. RESPOND WITH ONLY THE CODE BLOCK. NOTHING ELSE.
 """
 
 FILES_REMINDER = ""
-
-
-
-
-
-
-
 
 async def call_ai(prompt: str) -> str:
     if MODEL.startswith("claude"):
@@ -134,7 +151,7 @@ async def _call_openai(prompt: str) -> str:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0,
             },
         )
@@ -154,7 +171,7 @@ async def _call_anthropic(prompt: str) -> str:
             },
             json={
                 "model": MODEL,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0,
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": prompt}],
@@ -246,6 +263,11 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         fallback_path = f"designs/{slug}.js"
         code_lines = js_code.count("\n") + 1
         log_fn(f"[js-extract PRIMARY] Found JS block ({len(js_code)} chars, {code_lines} lines), saving as: {fallback_path}", level="INFO")
+
+        if "createDesign().catch" not in js_code and "createDesign()" not in js_code:
+            js_code += "\n\ncreateDesign().catch(e => console.error(e));"
+            log_fn("[fix] Appended missing createDesign() call", level="INFO")
+
         return [{"path": fallback_path, "content": js_code}]
 
     # If no code found but text starts with description, log this explicitly
@@ -383,15 +405,33 @@ async def _deliver_callback(url: str, token: str, body: dict, log_fn) -> None:
 
     for attempt in range(1, _CALLBACK_MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
-                resp = await client.post(
-                    url,
-                    json=body,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                )
+            json_body = json.dumps(body)
+            log_fn(f"[deliver-attempt {attempt}] Sending POST to {url} with {len(json_body)} bytes", level="DEBUG")
+            log_fn(f"[deliver-auth] Token length={len(token)}, URL={url}", level="DEBUG")
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
+                    log_fn(f"[deliver-client] HTTP client created, posting...", level="DEBUG")
+                    resp = await client.post(
+                        url,
+                        json=body,
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    )
+                    log_fn(f"[deliver-post-returned] Got response object", level="DEBUG")
+            except asyncio.TimeoutError as te:
+                log_fn(f"[deliver-timeout] Request timed out after 30s: {te}", level="ERROR")
+                raise RuntimeError(f"Callback POST timed out: {te}")
+            except Exception as post_exc:
+                log_fn(f"[deliver-post-error] Exception during POST: {type(post_exc).__name__}: {post_exc}", level="ERROR")
+                raise
+
+            log_fn(f"[deliver-response] HTTP {resp.status_code} received", level="DEBUG")
+            if resp.status_code >= 400:
+                resp_text = resp.text[:500]
+                log_fn(f"[deliver-error] Response body: {resp_text}", level="DEBUG")
 
             if resp.status_code < 400:
-                log_fn(f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})", level="DEBUG")
+                log_fn(f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})", level="INFO")
                 return
 
             if resp.status_code < 500:
@@ -399,13 +439,18 @@ async def _deliver_callback(url: str, token: str, body: dict, log_fn) -> None:
 
             last_exc = RuntimeError(f"Callback HTTP {resp.status_code}: {resp.text[:400]}")
 
-        except RuntimeError:
+        except RuntimeError as run_exc:
+            log_fn(f"[deliver-runtime-error] {run_exc}", level="ERROR")
             raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             last_exc = exc
+            log_fn(f"[deliver-exception] {type(exc).__name__}: {exc}", level="ERROR")
+        except Exception as unexpected:
+            last_exc = unexpected
+            log_fn(f"[deliver-unexpected] {type(unexpected).__name__}: {unexpected}", level="ERROR")
 
         wait = _CALLBACK_BACKOFF_BASE ** (attempt - 1)
-        log_fn(f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed ({last_exc}) — retry in {wait}s", level="WARNING")
+        log_fn(f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed ({type(last_exc).__name__}: {last_exc}) — retry in {wait}s", level="WARNING")
         if attempt < _CALLBACK_MAX_ATTEMPTS:
             await asyncio.sleep(wait)
 
@@ -467,6 +512,8 @@ async def main() -> None:
 
     files = parse_files_with_fallback(content, task_info["title"], log)
     log(f"Parsed {len(files)} file(s) from response")
+    for f in files:
+        log(f"[files] path={f['path']!r} size={len(f['content'])} bytes", level="DEBUG")
 
     # ── Build response: clean summary without truncated code ──────────────────
     summary_lines = []
@@ -478,7 +525,7 @@ async def main() -> None:
             file_size = len(file_obj['content'])
             lines_count = file_obj['content'].count('\n') + 1
             summary_lines.append(f"- `{file_path}` • {file_size:,} bytes • {lines_count} lines")
-        summary_lines.append("\nYour files are ready to use. They have been automatically generated and are available in the files section below.")
+        summary_lines.append("\nClick the file names above or use the **View Files** button to open and download your generated design files.")
     else:
         summary_lines.append("⚠️ No design files were generated. Check the logs for details.")
 
@@ -506,12 +553,18 @@ async def main() -> None:
         "task_id": task_id,
         "content": content,
         "files": files,
+        "pr_url": pr_url,
         "logs": logs,
         "prompt": prompt,
         "model": MODEL,
     }
 
+    log(f"[callback] Preparing payload with {len(files)} file(s) to send to {callback_url}")
+    for f in files:
+        log(f"[callback-files] Including: {f['path']} ({len(f['content'])} bytes)", level="DEBUG")
+
     log(f"Sending callback to {callback_url}")
+    log(f"[callback-body] task_id={callback_body['task_id']} files={len(callback_body.get('files', []))} content_len={len(callback_body.get('content', ''))} logs={len(callback_body.get('logs', []))}", level="DEBUG")
     try:
         await _deliver_callback(callback_url, callback_token, callback_body, log)
         log("Callback delivered successfully")

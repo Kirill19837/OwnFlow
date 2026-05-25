@@ -65,6 +65,8 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     if not provided_token:
         raise HTTPException(401, "Empty callback token.")
 
+    print(f"[agents] DEBUG: Received callback POST for task {body.task_id!r}, files_count={len(body.files) if body.files else 0}", flush=True)
+
     db = get_supabase()
 
     try:
@@ -103,33 +105,33 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # Insert before consuming the token so that if this fails the agent can
     # still retry (the token is still valid and the task stays in its current
     # status)
-    files_data = None
-    file_urls: list[dict] = []
+    files_data = []
     if body.files:
-        # Upload files to Supabase Storage and collect URLs.
-        # NOTE: tests must mock `app.services.file_storage.upload_file` (or its
-        # alias `app.api.agents.upload_file`) to keep callback tests hermetic.
-        # Patching only `app.api.agents.get_supabase` is no longer sufficient
-        # because upload_file uses its own internal storage client.
-        try:
-            for file_entry in body.files:
+        print(f"[agents] DEBUG: Received {len(body.files)} file(s) from agent callback for task {body.task_id}", flush=True)
+        for file_entry in body.files:
+            file_record = {
+                "path": file_entry.path,
+                "content": file_entry.content,   # <-- головне: контент у БД
+            }
+            print(f"[agents] DEBUG: Processing file: path={file_entry.path!r} size={len(file_entry.content)} bytes", flush=True)
+
+            try:
                 download_url = await upload_file(
                     body.task_id,
                     file_entry.path,
                     file_entry.content,
                 )
-                file_urls.append({
-                    "path": file_entry.path,
-                    "url": download_url,
-                })
+                file_record["url"] = download_url
+                print(f"[agents] DEBUG: Uploaded {file_entry.path} to storage: {download_url}", flush=True)
+            except Exception as exc:
+                print(f"[agents] Warning: Storage upload failed for {file_entry.path}: {exc}", flush=True)
 
-            # Pass the Python list directly so the Supabase client serialises it
-            # as a real JSONB array — not a JSONB string.
-            # Consistent shape stored in deliverables.files: [{path, url}, ...].
-            files_data = file_urls if file_urls else None
-        except Exception as exc:
-            # Log but don't fail — continue with the deliverable
-            print(f"[agents] Warning: Failed to upload files: {exc}", flush=True)
+            files_data.append(file_record)
+    else:
+        print(f"[agents] DEBUG: No files in callback body for task {body.task_id}", flush=True)
+
+    files_data = files_data if files_data else None
+    print(f"[agents] DEBUG: Final files_data={files_data is not None} (count={len(files_data) if files_data else 0})", flush=True)
 
     deliverable_row = {
         "id": str(uuid.uuid4()),
@@ -140,15 +142,20 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         "tool_calls_log": [],
         "created_at": datetime.now(UTC).isoformat(),
     }
+    print(f"[agents] DEBUG: About to insert deliverable with files={files_data is not None} (count={len(files_data) if files_data else 0})", flush=True)
+    print(f"[agents] DEBUG: deliverable_row={{'task_id': '{body.task_id}', 'actor_id': '{actor_id}', 'files_present': {files_data is not None}, 'content_len': {len(body.content)}}}", flush=True)
     try:
-        db.table("deliverables").insert(deliverable_row).execute()
+        insert_resp = db.table("deliverables").insert(deliverable_row).execute()
+        print(f"[agents] DEBUG: Deliverable saved successfully. Response count: {insert_resp.count if insert_resp else 'none'}", flush=True)
     except Exception as exc:
+        print(f"[agents] ERROR: Failed to save deliverable: {exc}", flush=True)
         raise HTTPException(500, f"Failed to save deliverable: {str(exc)}") from exc
 
     # ── Atomically consume the token + move to review ──────────────────────────
     # Moves the task to 'review' so a human can validate the result before
     # closing it as done. Clears is_ready and ai_ready so the task is no longer
     # eligible for re-dispatch via run-ready.
+    print(f"[agents] DEBUG: Consuming callback token for task {body.task_id}", flush=True)
     consumed = (
         db.table("tasks")
         .update({"status": "review", "agent_callback_token": None, "is_ready": False, "ai_ready": False})
@@ -156,11 +163,28 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         .eq("agent_callback_token", provided_token)
         .execute()
     )
+    print(f"[agents] DEBUG: Token consumption result: count={consumed.count if consumed else 'none'}", flush=True)
     if not consumed.data:
         # Deliverable was inserted but token was already gone — idempotent: the
         # first caller already finished successfully, so return 200 rather than
         # leaving a duplicate deliverable row. Optionally delete the duplicate.
+        print(f"[agents] WARNING: Callback token already consumed for task {body.task_id}", flush=True)
         raise HTTPException(409, "Callback token already consumed.")
+
+    # Verify what was saved
+    verify_resp = (
+        db.table("deliverables")
+        .select("id, task_id, files")
+        .eq("task_id", body.task_id)
+        .order("created_at", ascending=False)
+        .limit(1)
+        .execute()
+    )
+    if verify_resp.data:
+        saved_del = verify_resp.data[0]
+        print(f"[agents] DEBUG: Verification - saved deliverable has files={saved_del.get('files') is not None}", flush=True)
+    else:
+        print("[agents] WARNING: Could not verify saved deliverable", flush=True)
 
     # ── Persist agent logs to ai_logs ─────────────────────────────────────────
     if body.logs:
@@ -226,6 +250,7 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
         except Exception:
             pass
 
+    print(f"[agents] DEBUG: Callback completed successfully for task {body.task_id}. Returning 200 OK.", flush=True)
     return {"ok": True, "task_id": body.task_id}
 
 
