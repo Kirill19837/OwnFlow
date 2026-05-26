@@ -211,20 +211,31 @@ async def _call_anthropic(prompt: str) -> str:
 # ── File parsing ──────────────────────────────────────────────────────────────
 
 def parse_files(text: str) -> list[dict]:
-    # Models sometimes wrap the JSON in a markdown code fence (```json ... ```).
-    # The optional non-capturing group strips it before we try to parse.
-    match = re.search(
-        r"###FILES###\s*(?:```(?:json)?\s*)?(\[.*\])\s*(?:```)?\s*$",
-        text,
-        re.DOTALL,
-    )
-    if not match:
+    marker = "###FILES###"
+    idx = text.rfind(marker)
+    if idx == -1:
         return []
-    try:
-        return json.loads(match.group(1))
-    except json.JSONDecodeError:
+    after = text[idx + len(marker):].strip()
+
+    if after.startswith("```"):
+        after = re.sub(r"^```(?:json)?\s*", "", after)
+        after = re.sub(r"\s*```.*$", "", after.strip(), flags=re.DOTALL)
+
+    arr_start = after.find("[")
+    if arr_start == -1:
         return []
 
+    try:
+        parsed, _ = json.JSONDecoder().raw_decode(after, arr_start)
+        if not isinstance(parsed, list):
+            return []
+        return [
+            {"path": str(f["path"]), "content": str(f["content"])}
+            for f in parsed
+            if isinstance(f, dict) and "path" in f and "content" in f
+        ]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
 
 # ── GitHub PR ─────────────────────────────────────────────────────────────────
 

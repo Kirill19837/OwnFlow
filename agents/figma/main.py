@@ -94,7 +94,8 @@ node.fontName = {{ family: "Inter", style: "Bold" }};
 
 SIZING:
 - NEVER set .width or .height directly
-- ALWAYS use node.resize(width, height)
+- ALWAYS use node.resize(width, height) — EXCEPT for Auto Layout frames,
+  where resize() must be called BEFORE appendChild() or omitted entirely
 
 ASYNC / LOOPS:
 - NEVER use .forEach() with await inside — forEach ignores async/await silently
@@ -109,12 +110,35 @@ ASYNC / LOOPS:
     for (const item of items) {{
         await figma.loadFontAsync(...); // works correctly
     }}
+    
+CODE EFFICIENCY RULES (critical — output has a hard token limit):
+- NEVER repeat figma.loadFontAsync() — load all fonts ONCE at the top of the function
+- NEVER use verbose variable names — use short ones: f (frame), t (text), r (rect)
+- Reuse helper functions for repeated patterns (e.g. makeButton, makeInput)
+- Do NOT add comments explaining what the code does
+- Do NOT add blank lines between statements
+- If creating many similar items, use a loop with a data array, never copy-paste blocks
+- Prioritize completeness over readability — the code must fully run, never be truncated
 
 What the code MUST do:
 - Create Figma design elements using the Figma Plugin SDK
 - Use figma.createFrame(), figma.createText(), figma.createComponent(), etc.
 - Set colors, typography, sizing, and constraints using the Figma API
 - Treat "design system", "colors", "typography", "wireframes" as CODE that creates them
+
+TEXT ALIGNMENT & PADDING RULES:
+- For buttons: ALWAYS use Auto Layout so text centers automatically:
+    node.layoutMode = "HORIZONTAL";
+    node.primaryAxisAlignItems = "CENTER";
+    node.counterAxisAlignItems = "CENTER";
+    node.paddingLeft = 16; node.paddingRight = 16;
+    node.paddingTop = 12; node.paddingBottom = 12;
+- For input fields: use Auto Layout with left padding:
+    node.layoutMode = "HORIZONTAL";
+    node.counterAxisAlignItems = "CENTER";
+    node.paddingLeft = 12; node.paddingRight = 12;
+    node.paddingTop = 10; node.paddingBottom = 10;
+- NEVER position text with x/y inside a button or input — use Auto Layout padding instead
 
 FORMAT EXAMPLES:
 

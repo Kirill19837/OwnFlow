@@ -225,18 +225,37 @@ def parse_code_files(content: str) -> list[dict]:
     if idx == -1:
         return []
     after = content[idx + len(marker):].strip()
-    match = re.search(r"(\[[\s\S]*\])", after)
-    if not match:
-        return []
-    try:
-        items = json.loads(match.group(1))
-        return [
-            {"path": str(f["path"]), "content": str(f["content"])}
-            for f in items
-            if isinstance(f, dict) and "path" in f and "content" in f
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return []
+
+    arr_start = after.find("[")
+    if arr_start != -1:
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(after, arr_start)
+            if isinstance(parsed, list):
+                return [
+                    {"path": str(f["path"]), "content": str(f["content"])}
+                    for f in parsed
+                    if isinstance(f, dict) and "path" in f and "content" in f
+                ]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    results = []
+    path_pattern = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    content_pattern = re.compile(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+
+    paths = path_pattern.findall(after)
+    contents = content_pattern.findall(after)
+
+    print(f"[parse_code_files] Fallback regex: found {len(paths)} paths, {len(contents)} contents", flush=True)
+
+    for path, file_content in zip(paths, contents):
+        try:
+            decoded_content = file_content.encode().decode('unicode_escape')
+        except Exception:
+            decoded_content = file_content
+        results.append({"path": path, "content": decoded_content})
+
+    return results
 
 async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
     """Create a new branch from the repo's default branch. Returns True on success."""
