@@ -597,10 +597,16 @@ async def stream_task_execution(task_id: str, actor_id: str):
 
     # Create GitHub PR if connected
     try:
-        pr_url = await create_pr_for_task(task_id, task["title"], final_content)
-        if pr_url:
-            _log(f"GitHub PR created: {pr_url}", level=1)
+        _log(f"[PR] Attempting PR for task_id={task_id} project_id={project['id']}", level=0)
+        conn = await get_connection_for_project(project["id"])
+        if not conn:
+            _log("[PR] No GitHub connection — skipping PR", level=2)
         else:
-            _log("GitHub PR skipped (no connection or PR creation failed)", level=0)
+            pr_url = await create_pr_for_task(task_id, task["title"], final_content)
+            if pr_url:
+                _log(f"[PR] PR created: {pr_url}", level=1)
+            else:
+                _log("[PR] create_pr_for_task returned None — check github_service logs", level=2)
     except Exception as exc:
-        _log(f"GitHub PR error: {type(exc).__name__}: {exc}", level=3)
+        import traceback
+        _log(f"[PR] ERROR {type(exc).__name__}: {exc}\n{traceback.format_exc()}", level=3)

@@ -225,19 +225,37 @@ def parse_code_files(content: str) -> list[dict]:
     if idx == -1:
         return []
     after = content[idx + len(marker):].strip()
-    match = re.search(r"(\[[\s\S]*\])", after)
-    if not match:
-        return []
-    try:
-        items = json.loads(match.group(1))
-        return [
-            {"path": str(f["path"]), "content": str(f["content"])}
-            for f in items
-            if isinstance(f, dict) and "path" in f and "content" in f
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return []
 
+    arr_start = after.find("[")
+    if arr_start != -1:
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(after, arr_start)
+            if isinstance(parsed, list):
+                return [
+                    {"path": str(f["path"]), "content": str(f["content"])}
+                    for f in parsed
+                    if isinstance(f, dict) and "path" in f and "content" in f
+                ]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    results = []
+    path_pattern = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    content_pattern = re.compile(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+
+    paths = path_pattern.findall(after)
+    contents = content_pattern.findall(after)
+
+    print(f"[parse_code_files] Fallback regex: found {len(paths)} paths, {len(contents)} contents", flush=True)
+
+    for path, file_content in zip(paths, contents):
+        try:
+            decoded_content = file_content.encode().decode('unicode_escape')
+        except Exception:
+            decoded_content = file_content
+        results.append({"path": path, "content": decoded_content})
+
+    return results
 
 async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
     """Create a new branch from the repo's default branch. Returns True on success."""
@@ -254,6 +272,52 @@ async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
             f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{default_branch}",
             headers=_auth(token),
         )
+
+        if ref_resp.status_code == 409 or ref_resp.status_code == 404:
+            # 1. Blob для README
+            blob_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/blobs",
+                headers=_auth(token),
+                json={"content": "# OwnFlow Project\n", "encoding": "utf-8"},
+            )
+            if blob_resp.status_code != 201:
+                return False
+            blob_sha = blob_resp.json()["sha"]
+
+            # 2. Tree
+            tree_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/trees",
+                headers=_auth(token),
+                json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]},
+            )
+            if tree_resp.status_code != 201:
+                return False
+            tree_sha = tree_resp.json()["sha"]
+
+            commit_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/commits",
+                headers=_auth(token),
+                json={"message": "Initial commit by OwnFlow", "tree": tree_sha, "parents": []},
+            )
+            if commit_resp.status_code != 201:
+                return False
+            commit_sha = commit_resp.json()["sha"]
+
+            default_ref_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
+                headers=_auth(token),
+                json={"ref": f"refs/heads/{default_branch}", "sha": commit_sha},
+            )
+            if default_ref_resp.status_code not in (201, 422):
+                return False
+
+            create_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
+                headers=_auth(token),
+                json={"ref": f"refs/heads/{branch}", "sha": commit_sha},
+            )
+            return create_resp.status_code in (201, 422)
+
         ref_resp.raise_for_status()
         sha = ref_resp.json()["object"]["sha"]
 
@@ -262,8 +326,7 @@ async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
             headers=_auth(token),
             json={"ref": f"refs/heads/{branch}", "sha": sha},
         )
-        return create_resp.status_code in (201, 422)  # 422 = already exists
-
+        return create_resp.status_code in (201, 422)
 
 async def commit_file(
     token: str,
@@ -397,7 +460,10 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
             }).eq("id", task_id).execute()
             return pr_result["url"]
 
-    except Exception:
+    except Exception as exc:
+        import traceback
+        print(f"[create_pr_for_task] EXCEPTION: {type(exc).__name__}: {exc}", flush=True)
+        print(traceback.format_exc(), flush=True)
         return None
 
     return None

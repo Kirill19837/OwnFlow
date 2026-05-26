@@ -320,7 +320,8 @@ def get_deliverables(task_id: str):
         .order("created_at")
         .execute()
     )
-    return resp.data or []
+    data = resp.data or []
+    return data
 
 
 @router.post("/{task_id}/prompt/stream")

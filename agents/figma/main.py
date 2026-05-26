@@ -59,8 +59,6 @@ ACTOR: dict = payload.get("actor") or {}
 ACTOR_ROLE: str = ACTOR.get("role") or "UI/UX Designer"
 ACTOR_CAPABILITIES: list = ACTOR.get("capabilities") or []
 
-
-
 SYSTEM_PROMPT = f"""\
 YOUR RESPONSE MUST BE EXACTLY THIS FORMAT AND NOTHING ELSE:
 
@@ -81,39 +79,95 @@ ABSOLUTE REQUIREMENTS (this is a contract):
 - ZERO markdown formatting outside the code block
 - ZERO newlines before the first ``` or after the last ```
 
+FIGMA API RULES — follow every rule exactly:
+
+FONTS:
+- Load fonts BEFORE any figma.createText() call
+- Load ONLY these two variants — no others exist reliably:
+await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+await figma.loadFontAsync({{ family: "Inter", style: "Bold" }});
+- Never use "SemiBold", "Medium", "Light", or any other style — they will silently fail
+- Set font on text nodes using ONLY:
+node.fontName = {{ family: "Inter", style: "Regular" }};
+node.fontName = {{ family: "Inter", style: "Bold" }};
+- NEVER use .fontFamily or .fontWeight — these properties do not exist in the Figma API
+
+SIZING:
+- NEVER set .width or .height directly
+- ALWAYS use node.resize(width, height) — EXCEPT for Auto Layout frames,
+  where resize() must be called BEFORE appendChild() or omitted entirely
+
+ASYNC / LOOPS:
+- NEVER use .forEach() with await inside — forEach ignores async/await silently
+- ALWAYS use for...of when await is needed inside a loop:
+
+    WRONG:
+    items.forEach(async (item) => {{
+        await figma.loadFontAsync(...); // silently ignored
+    }});
+
+    CORRECT:
+    for (const item of items) {{
+        await figma.loadFontAsync(...); // works correctly
+    }}
+    
+CODE EFFICIENCY RULES (critical — output has a hard token limit):
+- NEVER repeat figma.loadFontAsync() — load all fonts ONCE at the top of the function
+- NEVER use verbose variable names — use short ones: f (frame), t (text), r (rect)
+- Reuse helper functions for repeated patterns (e.g. makeButton, makeInput)
+- Do NOT add comments explaining what the code does
+- Do NOT add blank lines between statements
+- If creating many similar items, use a loop with a data array, never copy-paste blocks
+- Prioritize completeness over readability — the code must fully run, never be truncated
+
 What the code MUST do:
 - Create Figma design elements using the Figma Plugin SDK
 - Use figma.createFrame(), figma.createText(), figma.createComponent(), etc.
-- Set colors, typography, sizing, constraints using Figma API
-- Handle "design system", "colors", "typography", "wireframes" as CODE that creates them
+- Set colors, typography, sizing, and constraints using the Figma API
+- Treat "design system", "colors", "typography", "wireframes" as CODE that creates them
 
-Examples of correct format:
+TEXT ALIGNMENT & PADDING RULES:
+- For buttons: ALWAYS use Auto Layout so text centers automatically:
+    node.layoutMode = "HORIZONTAL";
+    node.primaryAxisAlignItems = "CENTER";
+    node.counterAxisAlignItems = "CENTER";
+    node.paddingLeft = 16; node.paddingRight = 16;
+    node.paddingTop = 12; node.paddingBottom = 12;
+- For input fields: use Auto Layout with left padding:
+    node.layoutMode = "HORIZONTAL";
+    node.counterAxisAlignItems = "CENTER";
+    node.paddingLeft = 12; node.paddingRight = 12;
+    node.paddingTop = 10; node.paddingBottom = 10;
+- NEVER position text with x/y inside a button or input — use Auto Layout padding instead
+
+FORMAT EXAMPLES:
+
+CORRECT:
 ```javascript
 async function createDesign() {{
-  const page = figma.currentPage;
-  const frame = figma.createFrame();
-  frame.x = 0; frame.y = 0; frame.width = 100; frame.height = 100;
+    const page = figma.currentPage;
+await figma.loadFontAsync({{ family: "Inter", style: "Regular" }});
+const frame = figma.createFrame();
+frame.resize(375, 812);
+const text = figma.createText();
+text.fontName = {{ family: "Inter", style: "Regular" }};
+text.characters = "Hello";
+frame.appendChild(text);
 }}
 createDesign().catch(e => console.error(e));
 ```
 
-Examples of WRONG format (DO NOT DO):
-- "Here's the design code: ```javascript ... ```" ← NO! This has text before
-- "```javascript ... ``` Hope this helps!" ← NO! This has text after
-- "```javascript ... ```\n\nAlternatively, you could..." ← NO! Text after code
-- "Design System Overview\n\n```javascript ... ```" ← NO! Text before code
+WRONG — never do these:
+- Text before the code block: "Here's the code: ```javascript"
+- Text after the code block: "``` Let me know if you need changes!"
+- Any font style other than "Regular" or "Bold"
+- .width = 100 instead of .resize(100, height)
+- forEach with await inside
 
 YOUR RESPONSE STARTS NOW. RESPOND WITH ONLY THE CODE BLOCK. NOTHING ELSE.
 """
 
 FILES_REMINDER = ""
-
-
-
-
-
-
-
 
 async def call_ai(prompt: str) -> str:
     if MODEL.startswith("claude"):
@@ -134,7 +188,7 @@ async def _call_openai(prompt: str) -> str:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0,
             },
         )
@@ -154,7 +208,7 @@ async def _call_anthropic(prompt: str) -> str:
             },
             json={
                 "model": MODEL,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0,
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": prompt}],
@@ -246,6 +300,11 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         fallback_path = f"designs/{slug}.js"
         code_lines = js_code.count("\n") + 1
         log_fn(f"[js-extract PRIMARY] Found JS block ({len(js_code)} chars, {code_lines} lines), saving as: {fallback_path}", level="INFO")
+
+        if "createDesign().catch" not in js_code and "createDesign()" not in js_code:
+            js_code += "\n\ncreateDesign().catch(e => console.error(e));"
+            log_fn("[fix] Appended missing createDesign() call", level="INFO")
+
         return [{"path": fallback_path, "content": js_code}]
 
     # If no code found but text starts with description, log this explicitly
@@ -383,15 +442,33 @@ async def _deliver_callback(url: str, token: str, body: dict, log_fn) -> None:
 
     for attempt in range(1, _CALLBACK_MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
-                resp = await client.post(
-                    url,
-                    json=body,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                )
+            json_body = json.dumps(body)
+            log_fn(f"[deliver-attempt {attempt}] Sending POST to {url} with {len(json_body)} bytes", level="DEBUG")
+            log_fn(f"[deliver-auth] Token length={len(token)}, URL={url}", level="DEBUG")
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0, **_get_httpx_kwargs()) as client:
+                    log_fn(f"[deliver-client] HTTP client created, posting...", level="DEBUG")
+                    resp = await client.post(
+                        url,
+                        json=body,
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    )
+                    log_fn(f"[deliver-post-returned] Got response object", level="DEBUG")
+            except asyncio.TimeoutError as te:
+                log_fn(f"[deliver-timeout] Request timed out after 30s: {te}", level="ERROR")
+                raise RuntimeError(f"Callback POST timed out: {te}")
+            except Exception as post_exc:
+                log_fn(f"[deliver-post-error] Exception during POST: {type(post_exc).__name__}: {post_exc}", level="ERROR")
+                raise
+
+            log_fn(f"[deliver-response] HTTP {resp.status_code} received", level="DEBUG")
+            if resp.status_code >= 400:
+                resp_text = resp.text[:500]
+                log_fn(f"[deliver-error] Response body: {resp_text}", level="DEBUG")
 
             if resp.status_code < 400:
-                log_fn(f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})", level="DEBUG")
+                log_fn(f"Callback delivered (attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS})", level="INFO")
                 return
 
             if resp.status_code < 500:
@@ -399,13 +476,18 @@ async def _deliver_callback(url: str, token: str, body: dict, log_fn) -> None:
 
             last_exc = RuntimeError(f"Callback HTTP {resp.status_code}: {resp.text[:400]}")
 
-        except RuntimeError:
+        except RuntimeError as run_exc:
+            log_fn(f"[deliver-runtime-error] {run_exc}", level="ERROR")
             raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             last_exc = exc
+            log_fn(f"[deliver-exception] {type(exc).__name__}: {exc}", level="ERROR")
+        except Exception as unexpected:
+            last_exc = unexpected
+            log_fn(f"[deliver-unexpected] {type(unexpected).__name__}: {unexpected}", level="ERROR")
 
         wait = _CALLBACK_BACKOFF_BASE ** (attempt - 1)
-        log_fn(f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed ({last_exc}) — retry in {wait}s", level="WARNING")
+        log_fn(f"Callback attempt {attempt}/{_CALLBACK_MAX_ATTEMPTS} failed ({type(last_exc).__name__}: {last_exc}) — retry in {wait}s", level="WARNING")
         if attempt < _CALLBACK_MAX_ATTEMPTS:
             await asyncio.sleep(wait)
 
@@ -467,6 +549,8 @@ async def main() -> None:
 
     files = parse_files_with_fallback(content, task_info["title"], log)
     log(f"Parsed {len(files)} file(s) from response")
+    for f in files:
+        log(f"[files] path={f['path']!r} size={len(f['content'])} bytes", level="DEBUG")
 
     # ── Build response: clean summary without truncated code ──────────────────
     summary_lines = []
@@ -478,7 +562,7 @@ async def main() -> None:
             file_size = len(file_obj['content'])
             lines_count = file_obj['content'].count('\n') + 1
             summary_lines.append(f"- `{file_path}` • {file_size:,} bytes • {lines_count} lines")
-        summary_lines.append("\nYour files are ready to use. They have been automatically generated and are available in the files section below.")
+        summary_lines.append("\nClick the file names above or use the **View Files** button to open and download your generated design files.")
     else:
         summary_lines.append("⚠️ No design files were generated. Check the logs for details.")
 
@@ -506,12 +590,18 @@ async def main() -> None:
         "task_id": task_id,
         "content": content,
         "files": files,
+        "pr_url": pr_url,
         "logs": logs,
         "prompt": prompt,
         "model": MODEL,
     }
 
+    log(f"[callback] Preparing payload with {len(files)} file(s) to send to {callback_url}")
+    for f in files:
+        log(f"[callback-files] Including: {f['path']} ({len(f['content'])} bytes)", level="DEBUG")
+
     log(f"Sending callback to {callback_url}")
+    log(f"[callback-body] task_id={callback_body['task_id']} files={len(callback_body.get('files', []))} content_len={len(callback_body.get('content', ''))} logs={len(callback_body.get('logs', []))}", level="DEBUG")
     try:
         await _deliver_callback(callback_url, callback_token, callback_body, log)
         log("Callback delivered successfully")
