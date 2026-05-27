@@ -350,3 +350,4 @@ create policy "service_role_all_tasks" on tasks for all to service_role using (t
    `TO service_role … WITH CHECK (true)`.
 2. Update matching blocks in `supabase/database_full.sql`.
 3. Deploy migration to the production Supabase project.
+# locode-crm
