@@ -1156,3 +1156,8 @@ Commit: 42ad2e9
 
 Commit: 87a4f0eddee15985a07b73e84bfc46564c208d81
 
+## 2026-05-27 — repo gate + pitch update (424478c)
+- Enforced repository gate before task execution across Task Drawer, Board "Run Ready", and Dashboard "Re-run" flows.
+- Added consistent repo chooser behavior so users can connect/select a repo before running tasks.
+- Updated pitch slide 4 copy to explicitly state that tasks can be executed by either human or AI actors.
+
