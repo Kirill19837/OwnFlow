@@ -553,20 +553,19 @@ async def main() -> None:
         log(f"[files] path={f['path']!r} size={len(f['content'])} bytes", level="DEBUG")
 
     # ── Build response: clean summary without truncated code ──────────────────
-    summary_lines = []
-
+    js_content = ""
     if files:
-        summary_lines.append("✅ **Design files generated successfully:**\n")
-        for file_obj in files:
-            file_path = file_obj['path']
-            file_size = len(file_obj['content'])
-            lines_count = file_obj['content'].count('\n') + 1
-            summary_lines.append(f"- `{file_path}` • {file_size:,} bytes • {lines_count} lines")
-        summary_lines.append("\nClick the file names above or use the **View Files** button to open and download your generated design files.")
-    else:
-        summary_lines.append("⚠️ No design files were generated. Check the logs for details.")
+        for f in files:
+            if f["path"].endswith(".js"):
+                js_content = f["content"]
+                break
+        if not js_content:
+            js_content = files[0]["content"]
 
-    content = "\n".join(summary_lines)
+    if js_content:
+        content = f"```javascript\n{js_content}\n```"
+    else:
+        content = "Did not find any JavaScript code in the response."
 
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")
@@ -583,13 +582,10 @@ async def main() -> None:
     else:
         log("No files — skipping PR")
 
-    if pr_url:
-        content += f"\n\n**GitHub PR:** {pr_url}"
-
     callback_body = {
         "task_id": task_id,
         "content": content,
-        "files": files,
+        "files": None,
         "pr_url": pr_url,
         "logs": logs,
         "prompt": prompt,

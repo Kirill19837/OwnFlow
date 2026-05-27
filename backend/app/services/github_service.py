@@ -270,7 +270,7 @@ def parse_code_files(content: str) -> list[dict]:
 async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
     """Create a new branch from the repo's default branch. Returns True on success."""
     async with httpx.AsyncClient() as client:
-        # Find default branch
+        # 1. Get repo info
         repo_resp = await client.get(
             f"{GITHUB_API}/repos/{owner}/{repo}",
             headers=_auth(token),
@@ -278,49 +278,36 @@ async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
         repo_resp.raise_for_status()
         default_branch = repo_resp.json().get("default_branch", "main")
 
+        # 2. Try to get the ref for default branch
         ref_resp = await client.get(
             f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{default_branch}",
             headers=_auth(token),
         )
 
-        if ref_resp.status_code == 409 or ref_resp.status_code == 404:
-            # 1. Blob для README
-            blob_resp = await client.post(
-                f"{GITHUB_API}/repos/{owner}/{repo}/git/blobs",
-                headers=_auth(token),
-                json={"content": "# OwnFlow Project\n", "encoding": "utf-8"},
-            )
-            if blob_resp.status_code != 201:
-                return False
-            blob_sha = blob_resp.json()["sha"]
+        if ref_resp.status_code in (409, 404):
+            # Repo is empty — use contents API to create initial file (simpler, works in all cases)
 
-            # 2. Tree
-            tree_resp = await client.post(
-                f"{GITHUB_API}/repos/{owner}/{repo}/git/trees",
+            init_resp = await client.put(
+                f"{GITHUB_API}/repos/{owner}/{repo}/contents/README.md",
                 headers=_auth(token),
-                json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]},
+                json={
+                    "message": "Initial commit by OwnFlow",
+                    "content": base64.b64encode(b"# OwnFlow Project\n").decode(),
+                },
             )
-            if tree_resp.status_code != 201:
-                return False
-            tree_sha = tree_resp.json()["sha"]
-
-            commit_resp = await client.post(
-                f"{GITHUB_API}/repos/{owner}/{repo}/git/commits",
-                headers=_auth(token),
-                json={"message": "Initial commit by OwnFlow", "tree": tree_sha, "parents": []},
-            )
-            if commit_resp.status_code != 201:
-                return False
-            commit_sha = commit_resp.json()["sha"]
-
-            default_ref_resp = await client.post(
-                f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
-                headers=_auth(token),
-                json={"ref": f"refs/heads/{default_branch}", "sha": commit_sha},
-            )
-            if default_ref_resp.status_code not in (201, 422):
+            if init_resp.status_code not in (200, 201):
                 return False
 
+            # Get the SHA of the newly created default branch
+            ref_resp2 = await client.get(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{default_branch}",
+                headers=_auth(token),
+            )
+            if ref_resp2.status_code != 200:
+                return False
+            commit_sha = ref_resp2.json()["object"]["sha"]
+
+            # Create the feature branch
             create_resp = await client.post(
                 f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
                 headers=_auth(token),
@@ -328,9 +315,11 @@ async def create_branch(token: str, owner: str, repo: str, branch: str) -> bool:
             )
             return create_resp.status_code in (201, 422)
 
+        # Repo not empty — get SHA of default branch tip
         ref_resp.raise_for_status()
         sha = ref_resp.json()["object"]["sha"]
 
+        # Create feature branch
         create_resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
             headers=_auth(token),
@@ -388,6 +377,8 @@ async def open_pull_request(
             headers=_auth(token),
             json={"title": title, "body": body, "head": branch, "base": default_branch},
         )
+
+        print(f"[PR DEBUG] open_pull_request status={resp.status_code} body={resp.text[:500]}", flush=True)
         if resp.status_code == 201:
             data = resp.json()
             return {"url": data["html_url"], "number": data["number"]}
@@ -412,7 +403,9 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
     try:
         token, owner, repo = conn["token"], conn["owner"], conn["repo"]
         branch = f"ownflow/{task_id[:8]}"
-        await create_branch(token, owner, repo, branch)
+        branch_ok = await create_branch(token, owner, repo, branch)
+        if not branch_ok:
+            return None
 
         safe_title = (
             "".join(c if c.isalnum() or c in "-_ " else "" for c in task_title)
@@ -449,6 +442,8 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
                 deliverable_content,
                 f"feat: OwnFlow deliverable — {task_title}",
             )
+
+        print(f"[PR DEBUG] About to open PR: owner={owner} repo={repo} branch={branch}", flush=True)
 
         pr_result = await open_pull_request(
             token, owner, repo, branch,
