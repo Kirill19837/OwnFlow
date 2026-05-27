@@ -11,10 +11,14 @@ import hmac
 import json
 import re
 
+import logging
+
 import httpx
 
 from app.db import get_supabase
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 
@@ -50,9 +54,15 @@ async def get_connection_for_project(project_id: str) -> dict | None:
             token = await _get_team_token_for_project(project_id, db)
         if token and repo_name:
             return {"token": token, "owner": owner, "repo": repo_name}
+        log.warning("github_connections row exists but missing %s for project %s",
+                    "token" if not token else "repo_name", project_id)
+        return None
 
-    # No github_connections row at all — still try team token
-    # (project might not have connected a repo yet)
+    # No github_connections row — try team token + project may still have repo info
+    token = await _get_team_token_for_project(project_id, db)
+    if token:
+        log.info("Using team-level token for project %s (no github_connections row)", project_id)
+        return {"token": token, "owner": "", "repo": ""}
     return None
 
 
@@ -461,9 +471,7 @@ async def create_pr_for_task(task_id: str, task_title: str, deliverable_content:
             return pr_result["url"]
 
     except Exception as exc:
-        import traceback
-        print(f"[create_pr_for_task] EXCEPTION: {type(exc).__name__}: {exc}", flush=True)
-        print(traceback.format_exc(), flush=True)
+        log.exception("PR creation failed for task %s: %s", task_id, exc)
         return None
 
     return None

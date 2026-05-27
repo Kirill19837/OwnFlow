@@ -12,6 +12,7 @@ import { useConfirmation } from '../hooks/useConfirmation'
 import { ConfirmationModal } from './ConfirmationModal'
 import { AiCommandsModal } from './AiCommandsModal'
 import { FileViewerModal } from './FileViewerModal'
+import RepoGateModal from './RepoGateModal'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -134,13 +135,18 @@ interface Props {
   task: Task
   actors: Actor[]
   onClose: () => void
+  githubConnected?: boolean
+  githubTokenAvailable?: boolean
+  githubRepos?: { full_name: string; private: boolean }[]
+  onRepoSet?: (repo: string) => void
 }
 
-export default function TaskDrawer({ task, actors, onClose }: Props) {
+export default function TaskDrawer({ task, actors, onClose, githubConnected, githubTokenAvailable, githubRepos, onRepoSet }: Props) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
   const { confirmation, confirm } = useConfirmation()
+  const [showRepoGate, setShowRepoGate] = useState(false)
 
   const [chat, setChat] = useState<ChatMsg[]>([])
   const [chatOpen, setChatOpen] = useState(false)
@@ -351,6 +357,18 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
 
   const handleExecute = async () => {
     if (isStreaming) return
+
+    // Gate: no repo connected → show repo picker or warning
+    if (!githubConnected) {
+      setShowRepoGate(true)
+      return
+    }
+
+    await doExecute()
+  }
+
+  const doExecute = async () => {
+    setShowRepoGate(false)
     setIsStreaming(true)
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -1102,6 +1120,17 @@ export default function TaskDrawer({ task, actors, onClose }: Props) {
             onConfirm={() => confirmation?.onConfirm()}
             onCancel={() => confirmation?.onCancel()}
         />
+
+        {/* Pre-execute gate: repo not connected */}
+        {showRepoGate && (
+            <RepoGateModal
+                githubTokenAvailable={githubTokenAvailable}
+                githubRepos={githubRepos}
+                onRepoSet={onRepoSet}
+                onExecuteWithout={() => doExecute()}
+                onCancel={() => setShowRepoGate(false)}
+            />
+        )}
 
         {showTaskCommands && (
             <AiCommandsModal

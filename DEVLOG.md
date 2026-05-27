@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-05-18 | `252c2ec` — fix: route AI actors to in-process streaming instead of Docker dispatch
+
+- `stream_task_execution`: only dispatch to Docker when actor has explicit `docker_image` set; actors with a model (e.g. `claude-haiku-4-5`) now stream in-process so users get real-time output.
+- Render prose after action cards with `ReactMarkdown` (was plain text — markdown questions weren't visible).
+- Stronger memory gate check in refinement prompt: AI must check memory/decisions/captured details before asking any question.
+
 ## 2026-05-18 | `ebe9d37` — feat: project memory vector search + memory-aware assistants + UI feedback
 
 - Migration 020: pgvector extension, `embedding vector(1536)` column on `memory_chunks`, `match_memory_chunks` RPC with IVFFLAT index.

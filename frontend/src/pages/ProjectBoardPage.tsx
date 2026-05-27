@@ -192,19 +192,21 @@ export default function ProjectBoardPage() {
   const { data: githubStatus, refetch: refetchGithub } = useQuery({
     queryKey: ['github-status', projectId],
     queryFn: () => api.get<{ connected: boolean; has_token?: boolean; repo?: string; github_user?: string }>(`/github/status?project_id=${projectId}`).then(r => r.data),
-    enabled: !!projectId && showSettings,
+    enabled: !!projectId,
   })
 
   const { data: githubTeamStatus } = useQuery({
     queryKey: ['github-team-status', data?.team_id],
     queryFn: () => api.get<{ connected: boolean; github_user?: string }>(`/github/team-status?team_id=${data?.team_id}`).then(r => r.data),
-    enabled: !!data?.team_id && showSettings,
+    enabled: !!data?.team_id,
   })
 
   // Team is connected if either the project has its own connection or the team has one
   const teamGithubConnected = !!githubTeamStatus?.connected
   const githubTokenAvailable = !!githubStatus?.has_token || teamGithubConnected
   const githubFullyConnected = !!githubStatus?.connected || teamGithubConnected
+  // Repo is actually selected for this project (required for PRs)
+  const githubRepoConnected = !!githubStatus?.connected && !!githubStatus?.repo
 
   const { data: githubRepos } = useQuery({
     queryKey: ['github-repos', projectId, data?.team_id],
@@ -1168,6 +1170,17 @@ export default function ProjectBoardPage() {
             task={liveTask}
             actors={actors}
             onClose={() => setSelectedTaskId(null)}
+            githubConnected={githubRepoConnected}
+            githubTokenAvailable={githubTokenAvailable}
+            githubRepos={githubRepos}
+            onRepoSet={(repo) => {
+              setRepo.mutate(repo, {
+                onSuccess: () => {
+                  // After repo is set, auto-trigger execution
+                  // The TaskDrawer will call doExecute after onRepoSet
+                },
+              })
+            }}
           />
         ) : null
       })()}
