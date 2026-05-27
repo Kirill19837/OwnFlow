@@ -58,6 +58,7 @@ OwnFlow turns a product prompt into a planned board of sprints and tasks, assign
 - AI logs/messages persisted for traceability
 - Task refinement support with structured decisions (`task_details`) and readiness flags (`ai_ready`, `is_ready`)
 - Task interaction history persisted in `task_interactions`
+- Project Memory supports document upload (PDF, DOCX, text-like files) with chunked vector indexing
 
 ## Architecture
 
@@ -67,6 +68,7 @@ OwnFlow turns a product prompt into a planned board of sprints and tasks, assign
 - Agent workers: [agents/builtin](agents/builtin), [agents/senior_dev](agents/senior_dev)
 - Canonical schema: [supabase/migrations/001_schema.sql](supabase/migrations/001_schema.sql)
 - Full DB reference: [docs/database.md](docs/database.md)
+- Project memory and document indexing: [docs/project-memory.md](docs/project-memory.md)
 - Auth & onboarding flow: [docs/auth-flow.md](docs/auth-flow.md)
 - Agent dispatch & callback protocol: [docs/agent-flow.md](docs/agent-flow.md)
 - Detailed release log: [DEVLOG.md](DEVLOG.md)
@@ -89,6 +91,7 @@ In production compose, backend Docker API calls go through `tecnativa/docker-soc
 | `/companies/{id}/agents` | Company-level agent registry CRUD |
 | `/skills/*` | Skills catalogue and user skill profiles |
 | `/github/*` | GitHub PAT integration |
+| `/projects/{id}/memory/*` | Project memory CRUD, document upload, embedding sync |
 
 ## Database Setup
 

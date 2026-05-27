@@ -207,6 +207,7 @@ export type MemorySourceType =
   | 'code_file'
   | 'pull_request'
   | 'commit'
+  | 'document'
 
 export interface MemoryChunk {
   id: string

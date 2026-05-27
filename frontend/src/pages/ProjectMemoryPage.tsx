@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
@@ -27,6 +27,7 @@ const STATIC_TYPES: { value: MemorySourceType; label: string }[] = [
   { value: 'architecture', label: 'Architecture' },
   { value: 'coding-standards', label: 'Coding Standards' },
   { value: 'business-rules', label: 'Business Rules' },
+  { value: 'document', label: 'Documents' },
 ]
 
 const GITHUB_TYPES: { value: MemorySourceType; label: string }[] = [
@@ -315,6 +316,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [filterType, setFilterType] = useState<MemorySourceType | 'all'>('all')
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const { data: chunks = [], isLoading } = useQuery<MemoryChunk[]>({
     queryKey: ['memory-chunks', projectId],
@@ -364,6 +366,31 @@ function MemoryTab({ projectId }: { projectId: string }) {
     },
   })
 
+  const uploadDocsMutation = useMutation({
+    mutationFn: (files: FileList) => {
+      const form = new FormData()
+      Array.from(files).forEach((f) => form.append('files', f))
+      return api.post(`/projects/${projectId}/memory/upload-documents`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['memory-chunks', projectId] })
+      const data = res.data as {
+        indexed_files: number
+        created_chunks: number
+        uploaded_files: number
+      }
+      toast.success(
+        `Indexed ${data.indexed_files}/${data.uploaded_files} file${data.uploaded_files === 1 ? '' : 's'} into ${data.created_chunks} memory chunk${data.created_chunks === 1 ? '' : 's'}`
+      )
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(msg || 'Document upload failed')
+    },
+  })
+
   function handleCreate(data: ChunkFormData) {
     createMutation.mutate({
       source_type: data.source_type,
@@ -407,6 +434,29 @@ function MemoryTab({ projectId }: { projectId: string }) {
           ))}
         </select>
         <div className="ml-auto flex items-center gap-2">
+          <input
+            ref={uploadInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".pdf,.docx,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.tsv,.py,.js,.ts,.tsx,.jsx,.java,.go,.rs,.rb,.php,.sql,.html,.htm,.css,.scss,.xml,.toml,.ini,.cfg,.log,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            onChange={(e) => {
+              const files = e.target.files
+              if (files && files.length > 0) {
+                uploadDocsMutation.mutate(files)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+          <button
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={uploadDocsMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 text-sm text-white transition-colors disabled:opacity-40"
+            title="Upload PDF, DOCX, or text-based files and index them in vector memory"
+          >
+            <Plus size={13} />
+            {uploadDocsMutation.isPending ? 'Uploading…' : 'Upload docs'}
+          </button>
           <button
             onClick={() => syncTasksMutation.mutate()}
             disabled={syncTasksMutation.isPending}

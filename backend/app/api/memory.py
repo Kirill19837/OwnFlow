@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from app.auth_deps import current_user_id
 from app.db import get_supabase
 from app.models import (
     DecisionCreate,
@@ -13,14 +14,53 @@ from app.models import (
     MemoryChunkUpdate,
 )
 from app.services.embeddings import embed_memory_chunk
+from app.services.document_ingestion import (
+    DocumentIngestionError,
+    extract_document_text,
+    split_text_into_chunks,
+)
 
 router = APIRouter()
+
+
+def _require_project_member(project_id: str, caller_id: str) -> None:
+    """Allow only project owner or members of the project's team."""
+    db = get_supabase()
+    project = (
+        db.table("projects")
+        .select("id,owner_id,team_id")
+        .eq("id", project_id)
+        .single()
+        .execute()
+    )
+    row = project.data
+    if not row:
+        raise HTTPException(404, "Project not found")
+
+    if str(row.get("owner_id") or "") == caller_id:
+        return
+
+    team_id = row.get("team_id")
+    if team_id:
+        member = (
+            db.table("team_members")
+            .select("user_id")
+            .eq("team_id", team_id)
+            .eq("user_id", caller_id)
+            .limit(1)
+            .execute()
+        )
+        if member.data:
+            return
+
+    raise HTTPException(403, "You do not have access to this project memory")
 
 
 # ── Memory Chunks ─────────────────────────────────────────────────────────────
 
 @router.get("/{project_id}/memory")
-def list_memory_chunks(project_id: str, source_type: str = ""):
+def list_memory_chunks(project_id: str, source_type: str = "", caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     q = (
         db.table("memory_chunks")
@@ -35,7 +75,8 @@ def list_memory_chunks(project_id: str, source_type: str = ""):
 
 
 @router.post("/{project_id}/memory", status_code=201)
-async def create_memory_chunk(project_id: str, body: MemoryChunkCreate):
+async def create_memory_chunk(project_id: str, body: MemoryChunkCreate, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     embedding = await embed_memory_chunk(body.title, body.content, body.summary)
     row = {
@@ -55,7 +96,8 @@ async def create_memory_chunk(project_id: str, body: MemoryChunkCreate):
 
 
 @router.patch("/{project_id}/memory/{chunk_id}")
-async def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkUpdate):
+async def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkUpdate, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     chunk = (
         db.table("memory_chunks")
@@ -84,7 +126,8 @@ async def update_memory_chunk(project_id: str, chunk_id: str, body: MemoryChunkU
 
 
 @router.delete("/{project_id}/memory/{chunk_id}", status_code=204)
-def delete_memory_chunk(project_id: str, chunk_id: str):
+def delete_memory_chunk(project_id: str, chunk_id: str, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     chunk = (
         db.table("memory_chunks")
@@ -101,7 +144,8 @@ def delete_memory_chunk(project_id: str, chunk_id: str):
 # ── Decisions ─────────────────────────────────────────────────────────────────
 
 @router.get("/{project_id}/decisions")
-def list_decisions(project_id: str):
+def list_decisions(project_id: str, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     return (
         db.table("decisions")
@@ -115,7 +159,8 @@ def list_decisions(project_id: str):
 
 
 @router.post("/{project_id}/decisions", status_code=201)
-def create_decision(project_id: str, body: DecisionCreate):
+def create_decision(project_id: str, body: DecisionCreate, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     row = {
         "id": str(uuid.uuid4()),
@@ -127,7 +172,8 @@ def create_decision(project_id: str, body: DecisionCreate):
 
 
 @router.patch("/{project_id}/decisions/{decision_id}")
-def update_decision(project_id: str, decision_id: str, body: DecisionUpdate):
+def update_decision(project_id: str, decision_id: str, body: DecisionUpdate, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     d = (
         db.table("decisions")
@@ -146,7 +192,8 @@ def update_decision(project_id: str, decision_id: str, body: DecisionUpdate):
 
 
 @router.delete("/{project_id}/decisions/{decision_id}", status_code=204)
-def delete_decision(project_id: str, decision_id: str):
+def delete_decision(project_id: str, decision_id: str, caller_id: str = Depends(current_user_id)):
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     d = (
         db.table("decisions")
@@ -163,8 +210,9 @@ def delete_decision(project_id: str, decision_id: str):
 # ── Context Pack ──────────────────────────────────────────────────────────────
 
 @router.post("/{project_id}/context-pack/{task_id}")
-def build_context_pack(project_id: str, task_id: str):
+def build_context_pack(project_id: str, task_id: str, caller_id: str = Depends(current_user_id)):
     """Build and persist a context pack for a specific task."""
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
 
     project = (
@@ -245,8 +293,9 @@ def build_context_pack(project_id: str, task_id: str):
 
 
 @router.get("/{project_id}/context-pack/{task_id}/latest")
-def get_latest_context_pack(project_id: str, task_id: str):
+def get_latest_context_pack(project_id: str, task_id: str, caller_id: str = Depends(current_user_id)):
     """Return the most recent context pack for a task."""
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     result = (
         db.table("context_packs")
@@ -265,8 +314,9 @@ def get_latest_context_pack(project_id: str, task_id: str):
 # ── Task Memory Backfill ──────────────────────────────────────────────────────
 
 @router.post("/{project_id}/memory/sync-tasks")
-async def sync_tasks_memory(project_id: str):
+async def sync_tasks_memory(project_id: str, caller_id: str = Depends(current_user_id)):
     """Backfill memory_chunks from existing tasks with non-empty task_details."""
+    _require_project_member(project_id, caller_id)
     from datetime import datetime, timezone
     db = get_supabase()
     tasks = (
@@ -329,8 +379,9 @@ async def sync_tasks_memory(project_id: str):
 # ── Embedding Backfill ────────────────────────────────────────────────────────
 
 @router.post("/{project_id}/memory/sync-embeddings")
-async def sync_memory_embeddings(project_id: str):
+async def sync_memory_embeddings(project_id: str, caller_id: str = Depends(current_user_id)):
     """Generate missing embeddings for chunks that don't have one yet."""
+    _require_project_member(project_id, caller_id)
     db = get_supabase()
     chunks = (
         db.table("memory_chunks")
@@ -356,11 +407,97 @@ async def sync_memory_embeddings(project_id: str):
     return {"updated": updated, "skipped": skipped, "failed": failed, "total": len(chunks)}
 
 
+@router.post("/{project_id}/memory/upload-documents", status_code=201)
+async def upload_documents_to_memory(
+    project_id: str,
+    files: list[UploadFile] = File(...),
+    importance: int = 6,
+    caller_id: str = Depends(current_user_id),
+):
+    """Upload project documents, split into chunks, and index in vector memory."""
+    _require_project_member(project_id, caller_id)
+    if not files:
+        raise HTTPException(400, "No files uploaded")
+    if importance < 1 or importance > 10:
+        raise HTTPException(400, "importance must be between 1 and 10")
+
+    db = get_supabase()
+    created_chunks = 0
+    accepted_files = 0
+    file_results: list[dict] = []
+
+    for upload in files:
+        filename = upload.filename or "uploaded-file"
+        try:
+            raw = await upload.read()
+            extracted = extract_document_text(filename, upload.content_type, raw)
+            chunks = split_text_into_chunks(extracted)
+            if not chunks:
+                raise DocumentIngestionError("No readable text chunks found")
+
+            doc_id = str(uuid.uuid4())
+            total_parts = len(chunks)
+            for idx, chunk in enumerate(chunks, start=1):
+                title = filename if total_parts == 1 else f"{filename} (part {idx}/{total_parts})"
+                summary = chunk[:240] if len(chunk) > 240 else chunk
+                embedding = await embed_memory_chunk(title, chunk, summary)
+                db.table("memory_chunks").insert(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "project_id": project_id,
+                        "source_type": "document",
+                        "source_id": f"{doc_id}:{idx}",
+                        "title": title,
+                        "content": chunk,
+                        "summary": summary,
+                        "tags": ["document-upload", f"filename:{filename}"],
+                        "importance": importance,
+                        "embedding": embedding,
+                    }
+                ).execute()
+            accepted_files += 1
+            created_chunks += total_parts
+            file_results.append(
+                {
+                    "filename": filename,
+                    "status": "indexed",
+                    "chunks": total_parts,
+                }
+            )
+        except DocumentIngestionError as exc:
+            file_results.append(
+                {
+                    "filename": filename,
+                    "status": "skipped",
+                    "reason": str(exc),
+                }
+            )
+        except Exception as exc:
+            file_results.append(
+                {
+                    "filename": filename,
+                    "status": "failed",
+                    "reason": str(exc),
+                }
+            )
+
+    if accepted_files == 0:
+        raise HTTPException(400, {"message": "No files were indexed", "results": file_results})
+
+    return {
+        "uploaded_files": len(files),
+        "indexed_files": accepted_files,
+        "created_chunks": created_chunks,
+        "results": file_results,
+    }
+
+
 # ── GitHub Memory Sync (MVP2) ─────────────────────────────────────────────────
 
 @router.post("/{project_id}/memory/sync-github")
-async def sync_github_memory(project_id: str):
+async def sync_github_memory(project_id: str, caller_id: str = Depends(current_user_id)):
     """Sync recent merged PRs and commits as memory chunks (MVP2)."""
+    _require_project_member(project_id, caller_id)
     from app.services import github_service as gh
 
     db = get_supabase()

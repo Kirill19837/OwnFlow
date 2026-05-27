@@ -422,6 +422,60 @@ PK: `(user_id, skill_id)`
 
 ---
 
+### `memory_chunks` — project memory units
+
+Normalized memory entries used for context packs and vector retrieval.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `project_id` | uuid FK → projects | Cascade delete |
+| `source_type` | text | `product` / `architecture` / `coding-standards` / `business-rules` / `code_file` / `pull_request` / `commit` / `document` |
+| `source_id` | text | Optional source reference (task id, PR number, document part id, etc.) |
+| `title` | text | |
+| `content` | text | Full chunk content |
+| `summary` | text | Optional summary |
+| `tags` | jsonb | Default `[]` |
+| `importance` | int | 1..10 |
+| `embedding` | vector(1536) | Optional pgvector embedding |
+| `created_at` | timestamptz | |
+| `updated_at` | timestamptz | |
+
+### `decisions` — project decision records
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `project_id` | uuid FK → projects | Cascade delete |
+| `title` | text | |
+| `status` | text | `active` / `superseded` / `rejected` / `draft` |
+| `context` | text | Optional |
+| `decision` | text | |
+| `reason` | text | Optional |
+| `consequences` | text | Optional |
+| `related_task_ids` | jsonb | Default `[]` |
+| `superseded_by` | uuid FK → decisions | Nullable |
+| `created_at` | timestamptz | |
+
+### `context_packs` — assembled context snapshots
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `project_id` | uuid FK → projects | Cascade delete |
+| `task_id` | uuid FK → tasks | Nullable |
+| `content` | text | Materialized context payload |
+| `included_chunk_ids` | jsonb | Default `[]` |
+| `token_count` | int | Approximate token count |
+| `created_at` | timestamptz | |
+
+Vector similarity RPC:
+- `match_memory_chunks(p_project_id, p_query_embedding, p_match_threshold, p_match_count)`
+
+See [docs/project-memory.md](docs/project-memory.md) for ingestion flow and endpoints.
+
+---
+
 ## Migrations
 
 | File | Description |
@@ -439,6 +493,11 @@ PK: `(user_id, skill_id)`
 | `015_ai_logs_task_id.sql` | Add `ai_logs.task_id` |
 | `016_team_log_level.sql` | Add `teams.log_level` |
 | `017_actor_docker_image.sql` | Add `actors.docker_image` |
+| `018_update_claude_model_names.sql` | Normalize Claude model names |
+| `019_project_memory.sql` | Add `memory_chunks`, `decisions`, `context_packs` |
+| `020_memory_embeddings.sql` | Add `memory_chunks.embedding` and vector match RPC |
+| `021_deliverables_files.sql` | Add deliverable files support |
+| `022_memory_document_source_type.sql` | Add `document` to `memory_chunks.source_type` constraint |
 
 For a fresh deployment run `database_full.sql` only. For existing deployments apply incremental migrations from `007_*` onward.
 

@@ -143,7 +143,7 @@ class Deliverable(BaseModel):
 # ── Project Memory ────────────────────────────────────────
 MEMORY_SOURCE_TYPES = Literal[
     "product", "architecture", "coding-standards", "business-rules",
-    "code_file", "pull_request", "commit",
+    "code_file", "pull_request", "commit", "document",
 ]
 
 
