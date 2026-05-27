@@ -545,50 +545,28 @@ h2 {
     </div>
   </div>
 
-  <!-- 7 · Business Model ──────────────────── -->
+  <!-- 7 · Core Value ──────────────────────── -->
   <div class="slide" id="s7">
-    <div class="label">Business Model</div>
-    <h2>Cheaper than Jira. <span class="accent">Built for AI teams.</span></h2>
-    <div class="price-row">
-      <div class="pc">
-        <div class="tier">Free</div>
-        <div class="price">$0</div>
-        <div class="period">forever</div>
-        <ul class="checklist">
-          <li><span class="ck">✓</span> 1 team, up to 3 members</li>
-          <li><span class="ck">✓</span> 2 active projects</li>
-          <li><span class="ck">✓</span> Human actors only</li>
-          <li><span class="ck">✓</span> Kanban board &amp; sprints</li>
-        </ul>
-      </div>
-      <div class="pc hi">
-        <div class="tier">Pro</div>
-        <div class="price">$100<span style="font-size:18px;font-weight:500;color:var(--gray)">/mo</span></div>
-        <div class="period">per company &nbsp;+&nbsp; <strong style="color:var(--white)">$3</strong> per user/mo</div>
-        <ul class="checklist">
-          <li><span class="ck">✓</span> Unlimited teams &amp; projects</li>
-          <li><span class="ck">✓</span> AI actors (GPT-4o, Claude)</li>
-          <li><span class="ck">✓</span> GitHub integration</li>
-          <li><span class="ck">✓</span> AI sprint planning</li>
-          <li><span class="ck">✓</span> Custom AI models</li>
-        </ul>
-        <div style="margin-top:16px;padding:10px 14px;background:var(--green-dim);border:1px solid rgba(74,222,128,.2);border-radius:10px;font-size:12px;color:var(--green);text-align:center">
-          10 users = <strong>$130/mo</strong> &nbsp;·&nbsp; Jira charges $1,500+
+    <div class="label">Core Advantage</div>
+    <h2>One source of truth.<br><span class="accent">Full context for the whole dev process.</span></h2>
+    <div class="two-col" style="margin-top:40px;gap:52px">
+      <ul class="checklist">
+        <li><span class="ck">✓</span> Product goals, task details, decisions, code links, and delivery status stay connected in one place</li>
+        <li><span class="ck">✓</span> Humans and AI read the same context before every action, so work starts with alignment instead of guesswork</li>
+        <li><span class="ck">✓</span> Every question, answer, and approval is captured as project memory and remains visible to the whole team</li>
+      </ul>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card" style="padding:28px">
+          <div class="big" style="font-size:42px">No context loss</div>
+          <div class="big-label">No more switching between chat threads, docs, PM tools, and PR tabs to reconstruct what happened.</div>
+        </div>
+        <div class="card" style="padding:28px">
+          <div class="big" style="font-size:42px">One team memory</div>
+          <div class="big-label">OwnFlow becomes the shared brain across planning, execution, review, and handoff.</div>
         </div>
       </div>
-      <div class="pc">
-        <div class="tier">Enterprise</div>
-        <div class="price" style="font-size:32px;line-height:1.3">Custom</div>
-        <div class="period">tailored contract</div>
-        <ul class="checklist">
-          <li><span class="ck">✓</span> On-premise deploy</li>
-          <li><span class="ck">✓</span> SSO &amp; audit logs</li>
-          <li><span class="ck">✓</span> SLA &amp; dedicated support</li>
-          <li><span class="ck">✓</span> Volume AI credit pricing</li>
-        </ul>
-      </div>
     </div>
-    <p class="sub" style="margin-top:22px">+ Usage-based AI execution credits &nbsp;·&nbsp; Net retention target: <strong style="color:var(--white)">130%+</strong></p>
+    <p class="sub" style="margin-top:24px">OwnFlow gives PMs and builders a single, reliable view of reality across the entire software lifecycle.</p>
   </div>
 
   <!-- 8 · Traction ────────────────────────── -->
@@ -692,6 +670,8 @@ h2 {
     const dx = e.changedTouches[0].clientX - tx
     if (Math.abs(dx) > 40) dx < 0 ? next() : prev()
   })
+
+  update()
 </script>
 </body>
 </html>
