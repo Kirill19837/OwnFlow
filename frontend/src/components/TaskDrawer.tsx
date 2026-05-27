@@ -136,12 +136,13 @@ interface Props {
   actors: Actor[]
   onClose: () => void
   githubConnected?: boolean
+  githubRepo?: string | null
   githubTokenAvailable?: boolean
   githubRepos?: { full_name: string; private: boolean }[]
   onRepoSet?: (repo: string) => void
 }
 
-export default function TaskDrawer({ task, actors, onClose, githubConnected, githubTokenAvailable, githubRepos, onRepoSet }: Props) {
+export default function TaskDrawer({ task, actors, onClose, githubConnected, githubRepo, githubTokenAvailable, githubRepos, onRepoSet }: Props) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
@@ -358,8 +359,9 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
   const handleExecute = async () => {
     if (isStreaming) return
 
-    // Gate: no repo connected → show repo picker or warning
-    if (!githubConnected) {
+    // Gate: no project repo selected (or not connected) -> show repo picker before execute
+    const hasProjectRepo = !!githubRepo && githubRepo.trim().length > 0
+    if (!githubConnected || !hasProjectRepo) {
       setShowRepoGate(true)
       return
     }

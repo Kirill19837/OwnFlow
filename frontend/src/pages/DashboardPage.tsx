@@ -10,6 +10,7 @@ import { Plus, Layers, Clock, CheckCircle, AlertCircle, Building2, Trash2, Refre
 import { formatDistanceToNow } from 'date-fns'
 import { useConfirmation } from '../hooks/useConfirmation'
 import { ConfirmationModal } from '../components/ConfirmationModal'
+import RepoGateModal from '../components/RepoGateModal'
 
 interface TaskActivity {
   task: { id: string; title: string; status: string; priority: string; agent_dispatched_at?: string }
@@ -75,6 +76,12 @@ export default function DashboardPage() {
   const logsEndRef = useRef<HTMLDivElement>(null)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [monitorOpen, setMonitorOpen] = useState(false)
+  const [rerunGate, setRerunGate] = useState<{
+    taskId: string
+    projectId: string
+    githubTokenAvailable: boolean
+    githubRepos: { full_name: string; private: boolean }[]
+  } | null>(null)
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -131,6 +138,53 @@ export default function DashboardPage() {
     mutationFn: (id: string) => api.delete(`/projects/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   })
+
+  const handleRerunClick = async (item: ExecutorRunningTask) => {
+    try {
+      const status = await api
+        .get<{ connected: boolean; has_token?: boolean; repo?: string }>(`/github/status?project_id=${item.project_id}`)
+        .then((r) => r.data)
+
+      if (status.connected && status.repo) {
+        rerunTask.mutate(item.task_id)
+        return
+      }
+
+      let githubTokenAvailable = !!status.has_token
+      if (!githubTokenAvailable && activeTeam?.id) {
+        try {
+          const teamStatus = await api
+            .get<{ connected: boolean }>(`/github/team-status?team_id=${activeTeam.id}`)
+            .then((r) => r.data)
+          githubTokenAvailable = !!teamStatus.connected
+        } catch {
+          githubTokenAvailable = false
+        }
+      }
+
+      let githubRepos: { full_name: string; private: boolean }[] = []
+      if (githubTokenAvailable) {
+        try {
+          const param = activeTeam?.id ? `team_id=${activeTeam.id}` : `project_id=${item.project_id}`
+          githubRepos = await api
+            .get<{ repos: { full_name: string; private: boolean }[] }>(`/github/repos?${param}`)
+            .then((r) => r.data.repos)
+        } catch {
+          githubRepos = []
+        }
+      }
+
+      setRerunGate({
+        taskId: item.task_id,
+        projectId: item.project_id,
+        githubTokenAvailable,
+        githubRepos,
+      })
+    } catch {
+      // Fallback to legacy behavior if status lookup fails unexpectedly.
+      rerunTask.mutate(item.task_id)
+    }
+  }
 
   const startRegen = async (p: Project) => {
     setRegenError(null)
@@ -258,7 +312,7 @@ export default function DashboardPage() {
                       >→</Link>
                       <button
                         title="Re-run task"
-                        onClick={(e) => { e.stopPropagation(); rerunTask.mutate(item.task_id) }}
+                        onClick={(e) => { e.stopPropagation(); void handleRerunClick(item) }}
                         disabled={rerunTask.isPending}
                         className="text-gray-600 hover:text-yellow-400 transition-colors disabled:opacity-40 shrink-0"
                       >
@@ -410,6 +464,26 @@ export default function DashboardPage() {
         onConfirm={() => confirmation?.onConfirm()}
         onCancel={() => confirmation?.onCancel()}
       />
+
+      {rerunGate && (
+        <RepoGateModal
+          githubTokenAvailable={rerunGate.githubTokenAvailable}
+          githubRepos={rerunGate.githubRepos}
+          onRepoSet={(repo) => {
+            api.patch(`/github/repo?project_id=${rerunGate.projectId}`, { repo }).then(() => {
+              const taskId = rerunGate.taskId
+              setRerunGate(null)
+              rerunTask.mutate(taskId)
+            })
+          }}
+          onExecuteWithout={() => {
+            const taskId = rerunGate.taskId
+            setRerunGate(null)
+            rerunTask.mutate(taskId)
+          }}
+          onCancel={() => setRerunGate(null)}
+        />
+      )}
     </div>
   )
 }

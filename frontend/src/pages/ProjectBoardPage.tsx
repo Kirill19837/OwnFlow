@@ -36,6 +36,7 @@ function resolveActorImageSource(actor: { webhook_url?: string; docker_image?: s
 }
 import TaskCard from '../components/TaskCard'
 import TaskDrawer from '../components/TaskDrawer'
+import RepoGateModal from '../components/RepoGateModal'
 import { AiCommandsModal } from '../components/AiCommandsModal'
 import { ChevronLeft, ChevronDown, Loader2, AlertCircle, Bot, User, Sparkles, Settings2, X, Plus, Trash2, Send, CheckCircle, Activity, GitBranch, LinkIcon, Unlink, Zap, HelpCircle, Brain } from 'lucide-react'
 import { format } from 'date-fns'
@@ -92,6 +93,7 @@ export default function ProjectBoardPage() {
   const [actorEnvEdits, setActorEnvEdits] = useState<Record<string, EnvPair[]>>({})
   const [actorEnvOpen, setActorEnvOpen] = useState<Record<string, boolean>>({})
   const [repoInput, setRepoInput] = useState('')
+  const [showRunReadyRepoGate, setShowRunReadyRepoGate] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'general' | 'agents' | 'team-actors' | 'github'>('general')
   const [showRolePicker, setShowRolePicker] = useState(false)
 
@@ -496,7 +498,13 @@ export default function ProjectBoardPage() {
               ).length
               return readyCount > 0 ? (
                 <button
-                  onClick={() => runReadyTasks.mutate()}
+                  onClick={() => {
+                    if (!githubRepoConnected) {
+                      setShowRunReadyRepoGate(true)
+                      return
+                    }
+                    runReadyTasks.mutate()
+                  }}
                   disabled={runReadyTasks.isPending}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
                   title={`Run all ${readyCount} ready task${readyCount !== 1 ? 's' : ''}`}
@@ -1171,6 +1179,7 @@ export default function ProjectBoardPage() {
             actors={actors}
             onClose={() => setSelectedTaskId(null)}
             githubConnected={githubRepoConnected}
+            githubRepo={githubStatus?.repo ?? null}
             githubTokenAvailable={githubTokenAvailable}
             githubRepos={githubRepos}
             onRepoSet={(repo) => {
@@ -1409,6 +1418,26 @@ export default function ProjectBoardPage() {
           onCommandClick={(example) => setBoardPrompt(example)}
         />
       )}
+
+        {showRunReadyRepoGate && (
+          <RepoGateModal
+            githubTokenAvailable={githubTokenAvailable}
+            githubRepos={githubRepos}
+            onRepoSet={(repo) => {
+              setRepo.mutate(repo, {
+                onSuccess: () => {
+                  setShowRunReadyRepoGate(false)
+                  runReadyTasks.mutate()
+                },
+              })
+            }}
+            onExecuteWithout={() => {
+              setShowRunReadyRepoGate(false)
+              runReadyTasks.mutate()
+            }}
+            onCancel={() => setShowRunReadyRepoGate(false)}
+          />
+        )}
     </div>
   )
 }
