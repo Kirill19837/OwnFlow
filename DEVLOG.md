@@ -1161,3 +1161,9 @@ Commit: 87a4f0eddee15985a07b73e84bfc46564c208d81
 - Added consistent repo chooser behavior so users can connect/select a repo before running tasks.
 - Updated pitch slide 4 copy to explicitly state that tasks can be executed by either human or AI actors.
 
+## 2026-05-27 — project memory document indexing + access control (cb075ad)
+- Added document upload pipeline for Project Memory (PDF, DOCX, text-like files) with chunking and vector embedding indexing.
+- Added migration `022_memory_document_source_type.sql` and source type support for `document` in backend/frontend models.
+- Added Project Memory upload UI, filters, and comprehensive docs (`docs/project-memory.md`, README/database cross-links).
+- Locked Project Memory APIs to authenticated project owner/team members and added tests in `backend/tests/test_memory_access.py`.
+
