@@ -2,7 +2,7 @@ from app.assistants.project_creation import (
     ProjectAssistBody,
     generate_project_creation_suggestion,
 )
-from app.assistants.project_board import build_project_board_messages
+from app.assistants.board_assistant import build_project_board_messages
 from app.assistants.task_assistant import (
     build_task_assistant_messages,
     has_mark_ready_action,

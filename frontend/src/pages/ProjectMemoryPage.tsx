@@ -15,6 +15,8 @@ import {
   ChevronUp,
   Check,
   X,
+  FileText,
+  Download,
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDistanceToNow } from 'date-fns'
@@ -56,7 +58,14 @@ const STATUS_STYLES: Record<DecisionStatus, string> = {
   rejected: 'bg-red-900/40 text-red-400 border-red-700/40',
 }
 
-type Tab = 'memory' | 'decisions' | 'github'
+type Tab = 'memory' | 'decisions' | 'github' | 'documents'
+
+interface ProjectDocument {
+  doc_id: string
+  filename: string
+  has_file: boolean
+  uploaded_at: string
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -370,9 +379,7 @@ function MemoryTab({ projectId }: { projectId: string }) {
     mutationFn: (files: FileList) => {
       const form = new FormData()
       Array.from(files).forEach((f) => form.append('files', f))
-      return api.post(`/projects/${projectId}/memory/upload-documents`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      return api.post(`/projects/${projectId}/memory/upload-documents`, form)
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['memory-chunks', projectId] })
@@ -810,6 +817,75 @@ function DecisionsTab({ projectId }: { projectId: string }) {
   )
 }
 
+// ── Documents Tab ────────────────────────────────────────────────────────────
+
+function DocumentsTab({ projectId }: { projectId: string }) {
+  const { data: docs = [], isLoading } = useQuery<ProjectDocument[]>({
+    queryKey: ['project-documents', projectId],
+    queryFn: () =>
+      api.get(`/projects/${projectId}/memory/documents`).then((r) => r.data),
+  })
+
+  async function handleDownload(doc: ProjectDocument) {
+    try {
+      const { data } = await api.get(
+        `/projects/${projectId}/memory/documents/${doc.doc_id}/download`
+      )
+      window.open(data.url, '_blank', 'noopener,noreferrer')
+    } catch {
+      toast.error('Could not get download link')
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-gray-500 text-sm">
+        Loading documents…
+      </div>
+    )
+  }
+
+  if (docs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <FileText size={32} className="text-gray-600 mb-3" />
+        <p className="text-gray-400 text-sm">No documents uploaded yet.</p>
+        <p className="text-gray-600 text-xs mt-1">
+          Upload documents from the Memory tab to index them here.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {docs.map((doc) => (
+        <div
+          key={doc.doc_id}
+          className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3"
+        >
+          <FileText size={16} className="text-gray-400 shrink-0" />
+          <span className="flex-1 text-sm text-white truncate">{doc.filename}</span>
+          <span className="text-xs text-gray-500 shrink-0">
+            {formatDistanceToNow(new Date(doc.uploaded_at), { addSuffix: true })}
+          </span>
+          {doc.has_file ? (
+            <button
+              onClick={() => handleDownload(doc)}
+              className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors shrink-0"
+            >
+              <Download size={13} />
+              Download
+            </button>
+          ) : (
+            <span className="text-xs text-gray-600 shrink-0">text-only</span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── GitHub Tab ────────────────────────────────────────────────────────────────
 
 function GitHubTab({ projectId }: { projectId: string }) {
@@ -981,6 +1057,17 @@ export default function ProjectMemoryPage() {
             <GitMerge size={13} />
             GitHub
           </button>
+          <button
+            onClick={() => setTab('documents')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+              tab === 'documents'
+                ? 'bg-gray-700 text-white'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <FileText size={13} />
+            Documents
+          </button>
         </div>
       </div>
 
@@ -989,6 +1076,7 @@ export default function ProjectMemoryPage() {
         {tab === 'memory' && <MemoryTab projectId={id} />}
         {tab === 'decisions' && <DecisionsTab projectId={id} />}
         {tab === 'github' && <GitHubTab projectId={id} />}
+        {tab === 'documents' && <DocumentsTab projectId={id} />}
       </div>
     </div>
   )

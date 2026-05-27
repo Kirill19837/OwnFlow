@@ -10,6 +10,7 @@ def build_project_board_messages(
     user_prompt: str,
     memory_chunks: list[dict] | None = None,
     active_decisions: list[dict] | None = None,
+    document_files: list[str] | None = None,
 ) -> list[dict]:
     """Build chat messages for project-board (kanban) assistant."""
     sprint_summary = ", ".join(
@@ -55,6 +56,15 @@ def build_project_board_messages(
             "\nACTIVE PROJECT DECISIONS (binding):\n" + "\n".join(dlines) + "\n"
         )
 
+    documents_section = ""
+    if document_files:
+        docs_list = "\n".join(f"  - {f}" for f in document_files)
+        documents_section = (
+            "\nUPLOADED PROJECT DOCUMENTS (content available in RELEVANT PROJECT MEMORY above):\n"
+            + docs_list
+            + "\n  Reference these by filename when answering questions about their content.\n"
+        )
+
     return [
         {
             "role": "system",
@@ -65,7 +75,7 @@ def build_project_board_messages(
                 f"Sprints: {sprint_summary or 'none yet'}\n\n"
                 f"Current tasks:\n{task_lines}\n\n"
                 f"Team actors (use exact IDs when assigning):\n{actors_lines}\n"
-                f"{memory_section}{decisions_section}\n"
+                f"{memory_section}{decisions_section}{documents_section}\n"
                 "Answer helpfully and concisely. Use the RELEVANT PROJECT MEMORY and "
                 "ACTIVE PROJECT DECISIONS above as ground truth — do not contradict them "
                 "and do not re-ask the user about facts already captured there.\n\n"

@@ -28,6 +28,7 @@ def build_task_assistant_messages(
     user_prompt: str,
     memory_chunks: list[dict] | None = None,
     active_decisions: list[dict] | None = None,
+    document_files: list[str] | None = None,
 ) -> list[dict]:
     """Build chat messages for task assistant."""
     actors_lines = "\n".join(
@@ -71,6 +72,15 @@ def build_task_assistant_messages(
             + "\n\n"
         )
 
+    documents_section = ""
+    if document_files:
+        docs_list = "\n".join(f"  - {f}" for f in document_files)
+        documents_section = (
+            "UPLOADED PROJECT DOCUMENTS (full content chunked into RELEVANT PROJECT MEMORY above):\n"
+            + docs_list
+            + "\n  Reference these by filename when answering questions about their content.\n\n"
+        )
+
     return [
         {
             "role": "system",
@@ -80,6 +90,7 @@ def build_task_assistant_messages(
                 f"Project brief: {project.get('prompt', '')}\n\n"
                 f"{memory_section}"
                 f"{decisions_section}"
+                f"{documents_section}"
                 "Current task:\n"
                 f"  Title: {task['title']}\n"
                 f"  Description: {task.get('description') or '(empty)'}\n"

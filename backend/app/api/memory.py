@@ -1,6 +1,7 @@
 """Project Memory API — memory chunks, decisions, context packs, GitHub sync."""
 from __future__ import annotations
 
+import mimetypes
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -19,6 +20,18 @@ from app.services.document_ingestion import (
     extract_document_text,
     split_text_into_chunks,
 )
+
+DOCS_BUCKET = "project-documents"
+
+
+def _ensure_docs_bucket(db) -> None:  # type: ignore[type-arg]
+    try:
+        db.storage.from_(DOCS_BUCKET).list()
+    except Exception:
+        try:
+            db.storage.create_bucket(DOCS_BUCKET, options={"public": False})
+        except Exception:
+            pass
 
 router = APIRouter()
 
@@ -436,7 +449,27 @@ async def upload_documents_to_memory(
                 raise DocumentIngestionError("No readable text chunks found")
 
             doc_id = str(uuid.uuid4())
+
+            # Store original file in Supabase Storage
+            storage_path: str | None = None
+            try:
+                _ensure_docs_bucket(db)
+                storage_path = f"projects/{project_id}/documents/{doc_id}/{filename}"
+                content_type = upload.content_type or (
+                    mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                )
+                db.storage.from_(DOCS_BUCKET).upload(
+                    storage_path,
+                    raw,
+                    {"content-type": content_type},
+                )
+            except Exception:
+                storage_path = None  # indexing still proceeds without storage
+
             total_parts = len(chunks)
+            base_tags = ["document-upload", f"filename:{filename}"]
+            if storage_path:
+                base_tags.append(f"storage:{storage_path}")
             for idx, chunk in enumerate(chunks, start=1):
                 title = filename if total_parts == 1 else f"{filename} (part {idx}/{total_parts})"
                 summary = chunk[:240] if len(chunk) > 240 else chunk
@@ -450,7 +483,7 @@ async def upload_documents_to_memory(
                         "title": title,
                         "content": chunk,
                         "summary": summary,
-                        "tags": ["document-upload", f"filename:{filename}"],
+                        "tags": base_tags,
                         "importance": importance,
                         "embedding": embedding,
                     }
@@ -490,6 +523,71 @@ async def upload_documents_to_memory(
         "created_chunks": created_chunks,
         "results": file_results,
     }
+
+
+@router.get("/{project_id}/memory/documents")
+async def list_documents(project_id: str, caller_id: str = Depends(current_user_id)):
+    """List all uploaded documents for a project (deduplicated by doc_id)."""
+    _require_project_member(project_id, caller_id)
+    db = get_supabase()
+    rows = (
+        db.table("memory_chunks")
+        .select("source_id,tags,created_at")
+        .eq("project_id", project_id)
+        .eq("source_type", "document")
+        .order("created_at", desc=False)
+        .execute()
+        .data
+    )
+    seen: dict[str, dict] = {}
+    for row in rows:
+        doc_id = row["source_id"].rsplit(":", 1)[0]
+        if doc_id in seen:
+            continue
+        tags: list[str] = row.get("tags") or []
+        filename = next(
+            (t[len("filename:"):] for t in tags if t.startswith("filename:")), "unknown"
+        )
+        storage_path = next(
+            (t[len("storage:"):] for t in tags if t.startswith("storage:")), None
+        )
+        seen[doc_id] = {
+            "doc_id": doc_id,
+            "filename": filename,
+            "has_file": storage_path is not None,
+            "uploaded_at": row["created_at"],
+        }
+    return list(seen.values())
+
+
+@router.get("/{project_id}/memory/documents/{doc_id}/download")
+async def download_document(
+    project_id: str,
+    doc_id: str,
+    caller_id: str = Depends(current_user_id),
+):
+    """Return a 1-hour signed download URL for an uploaded document."""
+    _require_project_member(project_id, caller_id)
+    db = get_supabase()
+    rows = (
+        db.table("memory_chunks")
+        .select("tags")
+        .eq("project_id", project_id)
+        .like("source_id", f"{doc_id}:%")
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        raise HTTPException(404, "Document not found")
+    tags: list[str] = rows[0].get("tags") or []
+    storage_path = next(
+        (t[len("storage:"):] for t in tags if t.startswith("storage:")), None
+    )
+    if not storage_path:
+        raise HTTPException(404, "File not stored — text was indexed but original file is unavailable")
+    signed = db.storage.from_(DOCS_BUCKET).create_signed_url(storage_path, 3600)
+    return {"url": signed["signedURL"], "expires_in": 3600}
 
 
 # ── GitHub Memory Sync (MVP2) ─────────────────────────────────────────────────

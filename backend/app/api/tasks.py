@@ -421,6 +421,34 @@ async def prompt_task_stream(task_id: str, body: dict):
         traceback.print_exc()
         print(f"[memory-search] failed: {exc}")
 
+    # Always include uploaded document chunks and build filename inventory.
+    document_files: list[str] = []
+    try:
+        doc_rows = (
+            db.table("memory_chunks")
+            .select("source_type,title,content,summary,importance,tags")
+            .eq("project_id", task["project_id"])
+            .eq("source_type", "document")
+            .order("importance", desc=True)
+            .limit(6)
+            .execute()
+            .data
+            or []
+        )
+        seen_titles = {c.get("title") for c in memory_chunks}
+        seen_files: set[str] = set()
+        for dr in doc_rows:
+            tags = dr.get("tags") or []
+            fname = next((t[len("filename:"):] for t in tags if t.startswith("filename:")), None)
+            if fname:
+                seen_files.add(fname)
+            if dr.get("title") not in seen_titles:
+                memory_chunks.append(dr)
+                seen_titles.add(dr.get("title"))
+        document_files = sorted(seen_files)
+    except Exception:
+        pass
+
     task_details = task.get("task_details") or {}
     messages = build_task_assistant_messages(
         task=task,
@@ -432,6 +460,7 @@ async def prompt_task_stream(task_id: str, body: dict):
         user_prompt=user_prompt,
         memory_chunks=memory_chunks,
         active_decisions=active_decisions,
+        document_files=document_files,
     )
 
     # Persist user message

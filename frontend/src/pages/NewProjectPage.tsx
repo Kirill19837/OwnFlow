@@ -2,11 +2,12 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import type { Skill, TeamMember } from '../types'
-import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap } from 'lucide-react'
+import { Trash2, Bot, User, ChevronLeft, ChevronDown, ChevronUp, Zap, Upload, Sparkles } from 'lucide-react'
 
 const AI_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
@@ -62,6 +63,10 @@ export default function NewProjectPage() {
   const [prompt, setPrompt] = useState('')
   const [aiModel, setAiModel] = useState(activeTeam?.default_ai_model ?? 'gpt-4o')
   const [sprintDays, setSprintDays] = useState(3)
+  const [projectDocs, setProjectDocs] = useState<File[]>([])
+  const docsInputRef = useRef<HTMLInputElement | null>(null)
+  const [step, setStep] = useState<'intake' | 'setup'>('intake')
+  const [intakeDescription, setIntakeDescription] = useState('')
 
   // Fetch team members to use as human actor options
   const { data: teamData, isLoading: teamMembersLoading } = useQuery({
@@ -151,12 +156,50 @@ export default function NewProjectPage() {
           })
         )
       )
-      return project
+
+      let docsSummary: { indexedFiles: number; uploadedFiles: number; createdChunks: number; error?: string } | null = null
+      if (projectDocs.length > 0) {
+        const form = new FormData()
+        projectDocs.forEach((f) => form.append('files', f))
+        try {
+          const { data } = await api.post(
+            `/projects/${project.id}/memory/upload-documents?importance=7`,
+            form
+          )
+          docsSummary = {
+            indexedFiles: data.indexed_files ?? 0,
+            uploadedFiles: data.uploaded_files ?? projectDocs.length,
+            createdChunks: data.created_chunks ?? 0,
+          }
+        } catch (err) {
+          const detail = (err as { response?: { data?: { detail?: string | { message?: string } } } })?.response?.data?.detail
+          const msg = typeof detail === 'string' ? detail : detail?.message || 'Document upload failed'
+          docsSummary = {
+            indexedFiles: 0,
+            uploadedFiles: projectDocs.length,
+            createdChunks: 0,
+            error: msg,
+          }
+        }
+      }
+
+      return { project, docsSummary }
     },
-    onSuccess: (project) => {
+    onSuccess: ({ project, docsSummary }) => {
       setPlanningState(true)
       setPlanError(null)
-      setLogs(['🚀 Project created. Starting plan generation…'])
+      const initialLogs = ['🚀 Project created. Starting plan generation…']
+      if (docsSummary) {
+        if (docsSummary.error) {
+          initialLogs.push(`⚠️ Documents upload skipped: ${docsSummary.error}`)
+          toast.error(`Project created, but docs upload failed: ${docsSummary.error}`)
+        } else {
+          initialLogs.push(
+            `📚 Indexed ${docsSummary.indexedFiles}/${docsSummary.uploadedFiles} document${docsSummary.uploadedFiles === 1 ? '' : 's'} into ${docsSummary.createdChunks} chunk${docsSummary.createdChunks === 1 ? '' : 's'}`
+          )
+        }
+      }
+      setLogs(initialLogs)
       const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
       const es = new EventSource(`${apiBase}/projects/${project.id}/plan/stream?ai_model=${encodeURIComponent(aiModel)}`)
       esRef.current = es
@@ -195,6 +238,31 @@ export default function NewProjectPage() {
     onSuccess: (data) => {
       setAssistantSuggestion(data)
       setClarifyAnswers([])
+    },
+  })
+
+  const analyzeWithDocs = useMutation({
+    mutationFn: async () => {
+      const form = new FormData()
+      projectDocs.forEach((f) => form.append('files', f))
+      form.append('request', intakeDescription)
+      form.append('ai_model', aiModel)
+      const { data } = await api.post<{ name: string; prompt: string; notes?: string; questions?: string[] }>(
+        '/projects/assist-with-documents',
+        form,
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      if (data.name) setName(data.name)
+      if (data.prompt) setPrompt(data.prompt)
+      setAssistantSuggestion(data)
+      setClarifyAnswers([])
+      setStep('setup')
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) toast.error(detail)
     },
   })
 
@@ -246,24 +314,128 @@ export default function NewProjectPage() {
   return (
     <div className="max-w-2xl mx-auto w-full px-6 py-10">
       <button
-        onClick={() => navigate('/')}
+        onClick={() => step === 'intake' ? navigate('/') : setStep('intake')}
         className="flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 transition-colors"
       >
-        <ChevronLeft size={16} /> Back
+        <ChevronLeft size={16} /> {step === 'intake' ? 'Back' : 'Back to documents'}
       </button>
-      <h1 className="text-2xl font-bold text-white mb-2">New Project</h1>
-      <p className="text-gray-400 text-sm mb-8">
-        Describe what you want to build — AI will break it into tasks and sprints.
-      </p>
 
-      <div className="space-y-6">
-        {/* AI assistant */}
-        <div className="bg-gray-900/70 border border-purple-900/60 rounded-lg p-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-purple-300">AI Assistant</p>
-            <span className="text-[11px] text-gray-500">Use it to draft or improve your project brief</span>
+      {/* ── INTAKE STEP ──────────────────────────────────────────────── */}
+      {step === 'intake' && (
+        <>
+          <h1 className="text-2xl font-bold text-white mb-2">New Project</h1>
+          <p className="text-gray-400 text-sm mb-8">
+            Upload your documents and describe the project — the AI advisor will read them and generate a full implementation spec.
+          </p>
+          <div className="space-y-5">
+            <div
+              className="border-2 border-dashed border-gray-700 hover:border-purple-500 rounded-xl p-10 text-center cursor-pointer transition-colors group"
+              onClick={() => docsInputRef.current?.click()}
+            >
+              <input
+                ref={docsInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept=".pdf,.docx,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.tsv,.py,.js,.ts,.tsx,.jsx,.java,.go,.rs,.rb,.php,.sql,.html,.htm,.css,.scss,.xml,.toml,.ini,.cfg,.log,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  if (files.length > 0) {
+                    setProjectDocs((prev) => {
+                      const map = new Map<string, File>()
+                      for (const f of prev) map.set(`${f.name}:${f.size}:${f.lastModified}`, f)
+                      for (const f of files) map.set(`${f.name}:${f.size}:${f.lastModified}`, f)
+                      return Array.from(map.values())
+                    })
+                  }
+                  e.currentTarget.value = ''
+                }}
+              />
+              <Upload size={28} className="mx-auto text-gray-500 group-hover:text-purple-400 mb-3 transition-colors" />
+              <p className="text-gray-300 text-sm font-medium">Drop files or click to upload</p>
+              <p className="text-gray-500 text-xs mt-1">PDF, DOCX, TXT, MD, JSON, YAML, CSV, code files and more</p>
+            </div>
+
+            {projectDocs.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {projectDocs.map((f, idx) => (
+                  <span key={`${f.name}-${f.size}-${f.lastModified}-${idx}`} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-gray-900 border border-gray-700 text-gray-300">
+                    {f.name}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setProjectDocs((prev) => prev.filter((x) => !(x.name === f.name && x.size === f.size && x.lastModified === f.lastModified))) }}
+                      className="text-gray-500 hover:text-red-400 transition-colors"
+                    ><Trash2 size={11} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Describe your project</label>
+              <textarea
+                rows={5}
+                value={intakeDescription}
+                onChange={(e) => setIntakeDescription(e.target.value)}
+                placeholder="E.g. We need a SaaS platform for managing restaurant reservations — table booking, waitlist, SMS confirmations. Target launch in 3 months, team of 4 engineers..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+              />
+            </div>
+
+            {analyzeWithDocs.isError && (
+              <p className="text-red-400 text-sm">
+                {(analyzeWithDocs.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+                  || (analyzeWithDocs.error as Error)?.message}
+              </p>
+            )}
+
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => analyzeWithDocs.mutate()}
+                disabled={analyzeWithDocs.isPending || (projectDocs.length === 0 && !intakeDescription.trim())}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Sparkles size={15} />
+                {analyzeWithDocs.isPending ? 'Analyzing…' : 'Analyze with AI'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep('setup')}
+                className="text-sm text-gray-400 hover:text-white transition-colors"
+              >
+                Skip, fill manually →
+              </button>
+            </div>
           </div>
-          <textarea
+        </>
+      )}
+
+      {/* ── SETUP STEP ───────────────────────────────────────────────── */}
+      {step === 'setup' && (
+        <>
+          <h1 className="text-2xl font-bold text-white mb-2">New Project</h1>
+          {projectDocs.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 items-center mb-6">
+              <span className="text-xs text-gray-500 shrink-0">📎 Attached:</span>
+              {projectDocs.map((f, idx) => (
+                <span key={idx} className="text-xs px-2 py-0.5 rounded bg-gray-900 border border-gray-700 text-gray-400">{f.name}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-400 text-sm mb-8">
+              Describe what you want to build — AI will break it into tasks and sprints.
+            </p>
+          )}
+
+          <div className="space-y-6">
+            {/* AI assistant */}
+            <div className="bg-gray-900/70 border border-purple-900/60 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-purple-300">AI Assistant</p>
+                <span className="text-[11px] text-gray-500">Use it to draft or improve your project brief</span>
+              </div>
+              <textarea
             rows={2}
             value={assistantRequest}
             onChange={(e) => setAssistantRequest(e.target.value)}
@@ -444,6 +616,61 @@ export default function NewProjectPage() {
               onChange={(e) => setPrompt(e.target.value)}
               className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none font-mono"
             />
+          )}
+        </div>
+
+        {/* Project documents */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-300">Project documents <span className="text-gray-500">(optional)</span></label>
+            <button
+              type="button"
+              onClick={() => docsInputRef.current?.click()}
+              className="text-xs px-2.5 py-1 rounded-lg bg-purple-900/40 text-purple-300 hover:bg-purple-900/70 transition-colors"
+            >
+              Add files
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mb-2">
+            Upload PDFs, DOCX, or text files now. They will be indexed in Project Memory right after project creation.
+          </p>
+          <input
+            ref={docsInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".pdf,.docx,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.tsv,.py,.js,.ts,.tsx,.jsx,.java,.go,.rs,.rb,.php,.sql,.html,.htm,.css,.scss,.xml,.toml,.ini,.cfg,.log,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? [])
+              if (files.length > 0) {
+                setProjectDocs((prev) => {
+                  const map = new Map<string, File>()
+                  for (const f of prev) map.set(`${f.name}:${f.size}:${f.lastModified}`, f)
+                  for (const f of files) map.set(`${f.name}:${f.size}:${f.lastModified}`, f)
+                  return Array.from(map.values())
+                })
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+          {projectDocs.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {projectDocs.map((f, idx) => (
+                <span key={`${f.name}-${f.size}-${f.lastModified}-${idx}`} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-gray-900 border border-gray-700 text-gray-300">
+                  {f.name}
+                  <button
+                    type="button"
+                    onClick={() => setProjectDocs((prev) => prev.filter((x) => !(x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)))}
+                    className="text-gray-500 hover:text-red-400 transition-colors"
+                    title="Remove"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-600">No documents selected.</p>
           )}
         </div>
 
@@ -739,7 +966,9 @@ export default function NewProjectPage() {
         >
           {createProject.isPending ? 'Creating project…' : '✨ Create Project & Generate Plan'}
         </button>
-      </div>
+          </div>
+        </>
+      )}
 
       {/* Planning log panel */}
       {planning && (

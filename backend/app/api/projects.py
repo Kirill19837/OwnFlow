@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 from app.models import ProjectCreate
 from app.db import get_supabase
 from app.services.ai_orchestrator import breakdown_project, plan_sprint_one, generate_next_sprint
 from app.services.sprint_planner import plan_and_persist
 from app.services.assignment_engine import auto_assign
-from app.providers.registry import get_provider
 from app.config import get_settings
 from app.auth_deps import current_user_id
 from app.assistants import (
     ProjectAssistBody,
-    build_project_board_messages,
     generate_project_creation_suggestion,
 )
 from app.api.actors import _mask_actor
@@ -26,6 +24,44 @@ router = APIRouter()
 @router.post("/assist")
 async def assist_project_creation(body: ProjectAssistBody, _caller_id: str = Depends(current_user_id)):
     """Generate a better project name/prompt draft before project creation."""
+    try:
+        return await generate_project_creation_suggestion(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"AI assistant failed: {exc}")
+
+
+@router.post("/assist-with-documents")
+async def assist_project_creation_with_documents(
+    files: list[UploadFile] = File(default=[]),
+    request: str = Form(""),
+    name: str = Form(""),
+    ai_model: str = Form("gpt-4o"),
+    _caller_id: str = Depends(current_user_id),
+):
+    """Analyse uploaded documents + description and generate project specs."""
+    from app.services.document_ingestion import extract_document_text, DocumentIngestionError
+
+    document_texts: list[str] = []
+    file_errors: list[str] = []
+    for upload in files:
+        try:
+            raw = await upload.read()
+            text = extract_document_text(upload.filename or "file", upload.content_type, raw)
+            document_texts.append(f"=== {upload.filename} ===\n{text[:5000]}")
+        except DocumentIngestionError as exc:
+            file_errors.append(f"{upload.filename}: {exc}")
+
+    if file_errors and not document_texts and not request.strip():
+        raise HTTPException(400, f"Could not read uploaded files — {'; '.join(file_errors)}. Add a text description or upload supported file types.")
+
+    body = ProjectAssistBody(
+        name=name,
+        request=request,
+        ai_model=ai_model,
+        document_texts=document_texts,
+    )
     try:
         return await generate_project_creation_suggestion(body)
     except ValueError as exc:
@@ -491,106 +527,6 @@ async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
         "sprint_number": next_sprint_num,
         "task_count": result["task_count"],
     }
-
-
-@router.post("/{project_id}/prompt/stream")
-async def prompt_project_stream(project_id: str, body: dict):
-    """Stream a free-form AI prompt with full project + sprint context."""
-    db = get_supabase()
-    user_prompt = (body.get("prompt") or "").strip()
-    if not user_prompt:
-        raise HTTPException(400, "prompt is required")
-
-    project_resp = db.table("projects").select("*").eq("id", project_id).single().execute()
-    project = project_resp.data
-    if not project:
-        raise HTTPException(404, "Project not found")
-
-    # Gather sprint + task summary for context
-    sprints_resp = db.table("sprints").select("id,sprint_number").eq("project_id", project_id).execute()
-    sprint_ids = [s["id"] for s in sprints_resp.data or []]
-    tasks_resp = db.table("tasks").select("id,title,status,type,priority,estimated_hours").in_("sprint_id", sprint_ids).execute() if sprint_ids else type("R", (), {"data": []})()
-    # Actors come from the client (already in frontend state) — no extra DB roundtrip
-    actors = body.get("actors") or []
-
-    history = body.get("history") or []
-
-    # Vector-search project memory for chunks relevant to the user's question.
-    memory_chunks: list[dict] = []
-    active_decisions: list[dict] = []
-    try:
-        from app.services.embeddings import generate_embedding
-        query_embedding = await generate_embedding(user_prompt)
-        if query_embedding is not None:
-            rpc_resp = db.rpc(
-                "match_memory_chunks",
-                {
-                    "p_project_id": project_id,
-                    "p_query_embedding": query_embedding,
-                    "p_match_threshold": 0.3,
-                    "p_match_count": 8,
-                },
-            ).execute()
-            memory_chunks = rpc_resp.data or []
-        if not memory_chunks:
-            memory_chunks = (
-                db.table("memory_chunks")
-                .select("source_type,title,content,summary,importance")
-                .eq("project_id", project_id)
-                .order("importance", desc=True)
-                .limit(8)
-                .execute()
-                .data
-                or []
-            )
-        active_decisions = (
-            db.table("decisions")
-            .select("title,decision,reason,status")
-            .eq("project_id", project_id)
-            .eq("status", "active")
-            .execute()
-            .data
-            or []
-        )
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        print(f"[memory-search] project-board failed: {exc}")
-
-    messages = build_project_board_messages(
-        project=project,
-        sprints=sprints_resp.data or [],
-        tasks=tasks_resp.data or [],
-        actors=actors,
-        history=history,
-        user_prompt=user_prompt,
-        memory_chunks=memory_chunks,
-        active_decisions=active_decisions,
-    )
-
-    model = "gpt-4o"
-    provider = get_provider(model)
-
-    memory_titles = [c.get("title") for c in memory_chunks if c.get("title")]
-    decision_titles = [d.get("title") for d in active_decisions if d.get("title")]
-
-    async def event_stream():
-        yield (
-            "data: "
-            + json.dumps({
-                "type": "memory_event",
-                "action": "queried",
-                "count": len(memory_titles),
-                "titles": memory_titles[:8],
-                "decisions": decision_titles[:5],
-            })
-            + "\n\n"
-        )
-        async for chunk in provider.stream(messages):
-            yield f"data: {json.dumps({'content': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/{project_id}/run-ready")

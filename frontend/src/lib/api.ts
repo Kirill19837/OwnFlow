@@ -3,7 +3,6 @@ import { useAuthStore } from '../store/authStore'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-  headers: { 'Content-Type': 'application/json' },
 })
 
 // Attach the Supabase session JWT to every request so the backend can verify

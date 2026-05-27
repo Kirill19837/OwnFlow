@@ -12,17 +12,29 @@ class ProjectAssistBody(BaseModel):
     prompt: str = ""
     request: str = ""
     ai_model: str = "gpt-4o"
+    document_texts: list[str] = []
 
 
 async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[str, str]:
     """Generate a project name + prompt draft for the creation form."""
     user_request = (body.request or "").strip()
     seed_prompt = (body.prompt or "").strip()
-    if not user_request and not seed_prompt:
-        raise ValueError("Provide a request or a prompt draft")
+    if not user_request and not seed_prompt and not body.document_texts:
+        raise ValueError("Provide a request, a prompt draft, or upload documents")
 
     model = body.ai_model or "gpt-4o"
     provider = get_provider(model)
+
+    docs_section = ""
+    if body.document_texts:
+        excerpts = []
+        for text in body.document_texts[:4]:
+            excerpts.append(text[:4000])
+        docs_section = (
+            "\n\nUPLOADED PROJECT DOCUMENTS (extract key requirements, goals, and constraints from these):\n"
+            + "\n\n---\n\n".join(excerpts)
+        )
+
     messages = [
         {
             "role": "system",
@@ -49,7 +61,8 @@ async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[
             "content": (
                 f"Current name: {body.name or '(empty)'}\\n"
                 f"Current prompt draft:\\n{seed_prompt or '(empty)'}\\n\\n"
-                f"Request:\\n{user_request or 'Help me draft this project clearly.'}"
+                f"Request:\\n{user_request or 'Analyse the uploaded documents and draft a full implementation-ready project brief.'}"
+                f"{docs_section}"
             ),
         },
     ]
