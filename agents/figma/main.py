@@ -284,7 +284,7 @@ def _extract_js_block(text: str) -> str | None:
     return None
 
 
-def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
+def parse_files_with_fallback(text: str, task_title: str, log_fn) -> tuple[list[dict], bool]:
     slug = re.sub(r"[^a-z0-9]+", "-", task_title.lower()).strip("-") or "untitled"
 
     # Log response type for debugging
@@ -305,7 +305,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
             js_code += "\n\ncreateDesign().catch(e => console.error(e));"
             log_fn("[fix] Appended missing createDesign() call", level="INFO")
 
-        return [{"path": fallback_path, "content": js_code}]
+        return [{"path": fallback_path, "content": js_code}], True
 
     # If no code found but text starts with description, log this explicitly
     if text.strip() and not (starts_with_code and has_js_marker):
@@ -323,7 +323,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         parsed = _try_parse_json_array(remainder)
         if parsed is not None:
             log_fn(f"[###FILES###] Parsed {len(parsed)} file(s): {[f.get('path') for f in parsed]}", level="DEBUG")
-            return parsed
+            return parsed, True
         else:
             log_fn(f"[DEBUG] ###FILES### marker found but JSON parse failed", level="DEBUG")
 
@@ -334,7 +334,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
             log_fn(f"[DEBUG] Parsed JSON from code block: {len(parsed)} file(s)", level="DEBUG")
-            return parsed
+            return parsed, True
 
     # Strategy 4: JSON array at end of response
     last_bracket = text.rfind("[{")
@@ -346,7 +346,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
         parsed = _try_parse_json_array(candidate)
         if parsed and all("path" in f and "content" in f for f in parsed):
             log_fn(f"[DEBUG] Parsed JSON from tail: {len(parsed)} file(s)", level="DEBUG")
-            return parsed
+            return parsed, True
 
     # No valid output found — save raw response as both .md and .js so the code is never lost
     log_fn(f"[WARNING] Could not extract JavaScript code or file list from response — saving raw fallback", level="WARNING")
@@ -364,7 +364,7 @@ def parse_files_with_fallback(text: str, task_title: str, log_fn) -> list[dict]:
     return [
         {"path": md_path, "content": md_content},
         {"path": js_path, "content": js_content},
-    ]
+    ], False
 
 
 async def create_pr(token: str, repo: str, task_id: str, task_title: str, files: list[dict]) -> Optional[str]:
@@ -547,22 +547,22 @@ async def main() -> None:
     tail_preview = content[-400:].replace("\n", "↵") if len(content) > 400 else content.replace("\n", "↵")
     log(f"AI response tail (last 400 chars): {tail_preview!r}", level="DEBUG")
 
-    files = parse_files_with_fallback(content, task_info["title"], log)
-    log(f"Parsed {len(files)} file(s) from response")
+    files, parse_success = parse_files_with_fallback(content, task_info["title"], log)
+    log(f"Parsed {len(files)} file(s) from response (success={parse_success})")
     for f in files:
-        log(f"[files] path={f['path']!r} size={len(f['content'])} bytes", level="DEBUG")
+        log(f"[files] path={f['path']!r} size={len(f['content'].encode('utf-8'))} bytes", level="DEBUG")
 
     # ── Build response: clean summary without truncated code ──────────────────
     summary_lines = []
 
-    if files:
+    if parse_success:
         summary_lines.append("✅ **Design files generated successfully:**\n")
         for file_obj in files:
             file_path = file_obj['path']
-            file_size = len(file_obj['content'])
+            file_size = len(file_obj['content'].encode('utf-8'))  # ← справжні байти
             lines_count = file_obj['content'].count('\n') + 1
             summary_lines.append(f"- `{file_path}` • {file_size:,} bytes • {lines_count} lines")
-        summary_lines.append("\nClick the file names above or use the **View Files** button to open and download your generated design files.")
+        summary_lines.append("\nClick the file names above...")
     else:
         summary_lines.append("⚠️ No design files were generated. Check the logs for details.")
 
@@ -571,14 +571,14 @@ async def main() -> None:
     pr_url: Optional[str] = None
     gh_repo = github_info.get("repo")
     gh_token = github_info.get("token")
-    if files and gh_repo and gh_token:
+    if parse_success and files and gh_repo and gh_token:
         log(f"Creating PR on repo={gh_repo!r} for {len(files)} file(s)")
         try:
             pr_url = await create_pr(gh_token, gh_repo, task_id, task_info["title"], files)
             log(f"PR created: {pr_url}")
         except Exception as exc:
             log(f"PR creation failed: {type(exc).__name__}: {exc}", level="ERROR")
-    elif files:
+    elif parse_success and files:
         log("Files parsed but no GitHub connection — skipping PR")
     else:
         log("No files — skipping PR")
