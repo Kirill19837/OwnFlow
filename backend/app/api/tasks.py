@@ -128,6 +128,10 @@ async def update_task_details(task_id: str, body: dict):
         "memory_saved", "refinement_complete", "persisted", "saved", "ready",
     }
     details = {k: v for k, v in details.items() if k not in _FORBIDDEN_DETAIL_KEYS}
+    details = {
+        k: v for k, v in details.items()
+        if v and str(v).strip().upper() not in ("TBD", "N/A", "UNKNOWN", "?", "")
+    }
     if not details:
         # Nothing real to save — return current state without writing
         existing = db.table("tasks").select("id,task_details").eq("id", task_id).single().execute()

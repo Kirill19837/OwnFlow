@@ -154,9 +154,20 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # closing it as done. Clears is_ready and ai_ready so the task is no longer
     # eligible for re-dispatch via run-ready.
     print(f"[agents] DEBUG: Consuming callback token for task {body.task_id}", flush=True)
+
+    update_fields: dict = {
+        "status": "review",
+        "agent_callback_token": None,
+        "is_ready": False,
+        "ai_ready": False,
+    }
+    if body.pr_url:
+        update_fields["github_pr_url"] = body.pr_url
+        update_fields["github_pr_state"] = "open"
+
     consumed = (
         db.table("tasks")
-        .update({"status": "review", "agent_callback_token": None, "is_ready": False, "ai_ready": False})
+        .update(update_fields)
         .eq("id", body.task_id)
         .eq("agent_callback_token", provided_token)
         .execute()
@@ -236,11 +247,9 @@ async def agent_callback(request: Request, body: AgentCallbackBody):
     # ── GitHub PR (fallback: only when the agent did not already open one) ─────
     # Agents are the primary PR authority. If body.pr_url is set, the agent
     # already created the PR; creating another one here would produce a duplicate.
-    if body.files and not body.pr_url:
+    if not body.pr_url and body.files:
         import json
         files_json = [{"path": f.path, "content": f.content} for f in body.files]
-        # Strip any existing ###FILES### block the agent may have included in its
-        # content, then append a clean one so create_pr_for_task sees exactly one.
         narrative = body.content.split("###FILES###")[0].rstrip()
         content_with_files = narrative + "\n\n###FILES###\n" + json.dumps(files_json, indent=2)
         try:
