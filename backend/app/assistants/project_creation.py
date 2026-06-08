@@ -13,6 +13,7 @@ class ProjectAssistBody(BaseModel):
     request: str = ""
     ai_model: str = "gpt-4o"
     document_texts: list[str] = []
+    company_id: str = ""
 
 
 async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[str, str]:
@@ -66,6 +67,11 @@ async def generate_project_creation_suggestion(body: ProjectAssistBody) -> dict[
             ),
         },
     ]
+
+    # Check AI prompt limit if company_id is provided
+    if body.company_id:
+        from app.services.usage_guard import check_and_increment_by_company
+        check_and_increment_by_company(body.company_id)
 
     raw = await provider.complete(messages)
     content = (raw or "").strip()

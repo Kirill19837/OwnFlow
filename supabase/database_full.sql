@@ -64,6 +64,8 @@ create table companies (
   phone               text,
   openai_api_key      text,
   anthropic_api_key   text,
+  ai_prompts_used     integer     not null default 0,
+  ai_prompts_limit    integer     not null default 100,
   created_at          timestamptz not null default now()
 );
 

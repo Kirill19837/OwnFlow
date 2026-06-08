@@ -101,6 +101,10 @@ async def create_project(body: ProjectCreate, background_tasks: BackgroundTasks)
 async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", sprint_days: int = 3):
     db = get_supabase()
     try:
+
+        from app.services.usage_guard import check_and_increment
+        check_and_increment(project_id)
+
         tasks = await breakdown_project(prompt, model=ai_model)
         await plan_and_persist(project_id, tasks, sprint_days=sprint_days)
 
@@ -112,6 +116,9 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", 
             await auto_assign(sprint["id"])
 
         db.table("projects").update({"status": "active"}).eq("id", project_id).execute()
+    except PermissionError:
+        # Limit reached — do not mark project as error, just stop silently
+        raise
     except Exception:
         db.table("projects").update({"status": "error"}).eq("id", project_id).execute()
         raise
@@ -147,6 +154,13 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
 
         try:
             yield _log(f"🔍 Analyzing project: {project['name']!r}")
+            from app.services.usage_guard import check_and_increment
+            try:
+                check_and_increment(project_id)
+            except PermissionError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
+
             yield _log(f"⚙️  Calling {ai_model} to generate roadmap + Sprint 1 breakdown…")
 
             # Load actors so the AI can assign actor_role per task
@@ -505,6 +519,9 @@ async def plan_next_sprint(project_id: str, ai_model: str = "gpt-4o"):
 
     # Generate tasks for next sprint
     next_actors_resp = db.table("actors").select("name,role,type").eq("project_id", project_id).execute()
+    from app.services.usage_guard import check_and_increment
+    check_and_increment(project_id)
+
     tasks = await generate_next_sprint(project_id, next_sprint_num, model=ai_model, actors=next_actors_resp.data or [])
     if not tasks:
         raise HTTPException(500, "AI returned no tasks for the next sprint")
