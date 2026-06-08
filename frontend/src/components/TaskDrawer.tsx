@@ -165,9 +165,11 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     if (!detailsAction?.details || Object.keys(detailsAction.details).length === 0) return null
     const existing = new Set(Object.keys(task.task_details ?? {}))
     const pending = Object.fromEntries(
-        Object.entries(detailsAction.details as Record<string, string>).filter(
-            ([k, v]) => !existing.has(k) && v && v.toString().trim().toUpperCase() !== 'TBD'
-        )
+        Object.entries(detailsAction.details as Record<string, string>).filter(([k, v]) => {
+          const normalized = String(v ?? '').trim()
+          const upper = normalized.toUpperCase()
+          return !existing.has(k) && normalized.length > 0 && !['TBD', 'N/A', 'UNKNOWN', '?'].includes(upper)
+        })
     )
     return Object.keys(pending).length > 0 ? pending : null
   }, [chat, task.task_details])
@@ -243,7 +245,7 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
             ...withoutWaiting,
             {
               kind: 'plan',
-              content: `✅ Agent finished — task moved to review`,
+              content: task.status === 'done' ? '✅ Agent finished — task marked done' : '✅ Agent finished — task moved to review',
             },
           ]
         })
@@ -455,6 +457,9 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
           },
         ])
         scrollBottom()
+        setIsStreaming(false)
+        qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
+        qc.invalidateQueries({ queryKey: ['project'] })
         return
       }
 
