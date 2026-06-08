@@ -308,6 +308,38 @@ export default function CompanySettingsPage() {
           </div>
         </section>
 
+        {/* AI prompt usage */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h2 className="font-semibold text-white mb-1">AI Usage</h2>
+          <p className="text-gray-500 text-sm mb-4">
+            Prompt usage across all projects in your company this billing period.
+          </p>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-300">
+              {company.ai_prompts_used ?? 0} / {company.ai_prompts_limit ?? 100} prompts used
+            </span>
+            {(company.ai_prompts_used ?? 0) >= (company.ai_prompts_limit ?? 100) && (
+                <span className="text-xs text-red-400 bg-red-900/30 border border-red-800/50 px-2 py-0.5 rounded-full">
+                  Limit reached — upgrade your plan
+                </span>
+            )}
+          </div>
+          <div className="w-full bg-gray-800 rounded-full h-2">
+            <div
+                className={`h-2 rounded-full transition-all ${
+                    (company.ai_prompts_used ?? 0) >= (company.ai_prompts_limit ?? 100)
+                        ? 'bg-red-500'
+                        : (company.ai_prompts_used ?? 0) >= (company.ai_prompts_limit ?? 100) * 0.8
+                            ? 'bg-yellow-500'
+                            : 'bg-purple-500'
+                }`}
+                style={{
+                  width: `${Math.min(100, ((company.ai_prompts_used ?? 0) / (company.ai_prompts_limit ?? 100)) * 100)}%`
+                }}
+            />
+          </div>
+        </section>
+
         {/* Agents shortcut */}
         <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <div className="flex items-center justify-between">

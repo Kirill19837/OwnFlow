@@ -424,6 +424,11 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
       await readSSE(res.body!.getReader(), (payload) => {
         try {
           const evt = JSON.parse(payload)
+          if (evt.type === 'error') {
+            toast.error(evt.message || 'AI execution failed')
+            setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
+            return
+          }
           if (evt.type === 'plan') {
             setChat((prev) => [
               ...prev.filter((m) => m.kind !== 'thinking'),
@@ -490,7 +495,9 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
       } else {
         setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
       }
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Execution failed'
+      toast.error(message)
       setChat((prev) => prev.filter((m) => m.kind !== 'thinking'))
     }
 

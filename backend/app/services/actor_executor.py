@@ -108,6 +108,11 @@ async def _assert_safe_webhook_url(url: str) -> None:
 
 async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -> dict:
     """Fire-and-forget dispatch to an external webhook agent."""
+
+    # Check AI prompt limit before dispatching to external agent
+    from app.services.usage_guard import check_and_increment
+    check_and_increment(project["id"])
+
     webhook_url = actor.get("webhook_url")
     if not webhook_url:
         raise ValueError(f"External actor '{actor['name']}' has no webhook_url configured.")
@@ -234,6 +239,10 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
 
 async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> dict:
     """Spawn the built-in ownflow-agent Docker container for this task."""
+    # Check AI prompt limit before spawning the container
+    from app.services.usage_guard import check_and_increment
+    check_and_increment(project["id"])
+
     settings = get_settings()
     callback_token = secrets.token_hex(32)
     now = datetime.now(timezone.utc).isoformat()
@@ -533,6 +542,14 @@ async def stream_task_execution(task_id: str, actor_id: str):
             ),
         },
     ]
+
+    # Check AI prompt limit before calling the provider
+    from app.services.usage_guard import check_and_increment
+    try:
+        check_and_increment(project["id"])
+    except PermissionError as e:
+        yield json.dumps({"type": "error", "message": str(e)})
+        return
 
     _log(f"Calling AI provider (model={model})…", level=1)
     t0 = datetime.now(timezone.utc)

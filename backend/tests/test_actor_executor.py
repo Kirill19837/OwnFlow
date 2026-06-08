@@ -106,7 +106,8 @@ async def test_execute_task_routes_to_docker_when_no_webhook():
 
     with patch("app.services.actor_executor.get_supabase", return_value=db), \
          patch("app.services.actor_executor._dispatch_docker_agent", new_callable=AsyncMock) as mock_docker, \
-         patch("app.services.actor_executor._dispatch_external_agent", new_callable=AsyncMock) as mock_webhook:
+         patch("app.services.actor_executor._dispatch_external_agent", new_callable=AsyncMock) as mock_webhook, \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_docker.return_value = {"task_id": TASK_ID, "dispatched": True, "via": "docker"}
 
@@ -195,7 +196,8 @@ async def test_dispatch_docker_sets_task_in_progress():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -241,7 +243,8 @@ async def test_dispatch_docker_payload_contains_required_fields():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value={"owner": "acme", "repo": "app", "token": "ghp_test"}), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -301,7 +304,8 @@ async def test_dispatch_docker_logs_error_on_api_error():
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
-         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_docker_client), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = ""
         mock_settings.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -435,7 +439,8 @@ async def _run_dispatch(actor: dict) -> str:
 
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as ms, \
-         patch("app.services.actor_executor.docker.from_env", return_value=mock_client):
+         patch("app.services.actor_executor.docker.from_env", return_value=mock_client), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         ms.return_value.backend_url = ""
         ms.return_value.builtin_agent_image = "ownflow-agent:latest"
@@ -501,7 +506,8 @@ async def test_dispatch_external_posts_to_webhook_url():
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
          patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
-         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
+         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = "https://ownflow.example.com/api"
 
@@ -549,7 +555,8 @@ async def test_dispatch_external_logs_on_http_failure():
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
          patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
-         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
+         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = ""
 
@@ -586,7 +593,8 @@ async def test_dispatch_external_no_api_key_header_when_not_set():
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
          patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
-         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
+         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = ""
 
@@ -627,7 +635,8 @@ async def test_dispatch_external_uses_company_level_callback_url():
     with patch("app.services.actor_executor.get_connection_for_project", new_callable=AsyncMock, return_value=None), \
          patch("app.services.actor_executor.get_settings") as mock_settings, \
          patch("app.services.actor_executor._assert_safe_webhook_url", new_callable=AsyncMock), \
-         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock):
+         patch("app.services.actor_executor.httpx.AsyncClient", return_value=http_mock), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = "https://custom.example.com/api"
 
@@ -722,7 +731,8 @@ async def test_dispatch_external_blocked_by_ssrf_guard():
          patch("app.services.actor_executor.get_settings") as mock_settings, \
          patch("app.services.actor_executor._assert_safe_webhook_url",
                new_callable=AsyncMock,
-               side_effect=ValueError("resolves to a non-routable address (10.0.0.1)")):
+               side_effect=ValueError("resolves to a non-routable address (10.0.0.1)")), \
+         patch("app.services.usage_guard.check_and_increment"):
 
         mock_settings.return_value.backend_url = ""
         from app.services.actor_executor import _dispatch_external_agent
