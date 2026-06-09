@@ -165,7 +165,11 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     if (!detailsAction?.details || Object.keys(detailsAction.details).length === 0) return null
     const existing = new Set(Object.keys(task.task_details ?? {}))
     const pending = Object.fromEntries(
-        Object.entries(detailsAction.details as Record<string, string>).filter(([k]) => !existing.has(k))
+        Object.entries(detailsAction.details as Record<string, string>).filter(([k, v]) => {
+          const normalized = String(v ?? '').trim()
+          const upper = normalized.toUpperCase()
+          return !existing.has(k) && normalized.length > 0 && !['TBD', 'N/A', 'UNKNOWN', '?'].includes(upper)
+        })
     )
     return Object.keys(pending).length > 0 ? pending : null
   }, [chat, task.task_details])
@@ -221,6 +225,35 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
      setChat([...interactionMsgs, ...deliverableMsgs])
      // eslint-disable-next-line react-hooks/exhaustive-deps
    }, [interactions, deliverables])
+
+  useEffect(() => {
+    if (!isStreaming) return
+    if (task.status === 'review' || task.status === 'done') {
+      queueMicrotask(() => {
+        setIsStreaming(false)
+        qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
+        qc.invalidateQueries({ queryKey: ['project'] })
+        setChat((prev) => {
+          const withoutWaiting = prev.filter(
+              (m) =>
+                  !(
+                      m.kind === 'plan' &&
+                      (m as { kind: string; content: string }).content.includes('waiting for results')
+                  )
+          )
+          return [
+            ...withoutWaiting,
+            {
+              kind: 'plan',
+              content: task.status === 'done' ? '✅ Agent finished — task marked done' : '✅ Agent finished — task moved to review',
+            },
+          ]
+        })
+        scrollBottom()
+      })
+    }
+  }, [task.status, isStreaming, qc, task.id])
+
 
   const assign = useMutation({
     mutationFn: (actor_id: string) =>
@@ -406,7 +439,6 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
           } else if (evt.type === 'content') {
             deliverableContent += evt.content
           } else if (evt.type === 'files' && Array.isArray(evt.files)) {
-            // Backend can emit a dedicated 'files' event with {path,url} entries
             streamedFiles = parseDeliverableFiles(evt.files)
           } else if (evt.content) {
             deliverableContent += evt.content
@@ -414,8 +446,29 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
         } catch { /* malformed SSE chunk — skip */ }
       })
 
+
+      const isDispatchMessage = (
+          deliverableContent.startsWith('Docker agent dispatched:') ||
+          deliverableContent.startsWith('Dispatching to external') ||
+          (deliverableContent.includes('"dispatched"') && deliverableContent.includes('"task_id"'))
+      )
+
+      if (isDispatchMessage) {
+        setChat((prev) => [
+          ...prev.filter((m) => m.kind !== 'thinking'),
+          {
+            kind: 'plan',
+            content: `⏳ Agent dispatched — waiting for results…`,
+          },
+        ])
+        scrollBottom()
+        setIsStreaming(false)
+        qc.invalidateQueries({ queryKey: ['deliverables', task.id] })
+        qc.invalidateQueries({ queryKey: ['project'] })
+        return
+      }
+
       if (deliverableContent) {
-        // Legacy: some backends embed ###FILES### JSON block in the content string
         const filesMarker = deliverableContent.indexOf('###FILES###')
         let narrativeContent = deliverableContent
         if (filesMarker !== -1 && streamedFiles.length === 0) {
