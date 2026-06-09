@@ -12,53 +12,36 @@ def get_company_id_for_project(project_id: str) -> str | None:
     return (team.data or {}).get("company_id")
 
 
-def check_and_increment(project_id: str) -> None:
+def check_and_increment_by_company(company_id: str) -> None:
     """
-    Check the AI prompt limit for the company that owns this project.
-    Raises PermissionError if the limit is reached.
-    Increments the counter by 1 if within limit.
+    Atomically check the AI prompt limit and increment the counter by 1.
+    Raises PermissionError if the limit is already reached.
     """
     db = get_supabase()
+
+    result = db.rpc("increment_ai_prompts", {"p_company_id": company_id}).execute()
+
+    # If the UPDATE found no matching row, the limit was already reached
+    if not result.data:
+        # Fetch current values only to build a meaningful error message
+        company = (
+            db.table("companies")
+            .select("ai_prompts_used, ai_prompts_limit")
+            .eq("id", company_id)
+            .single()
+            .execute()
+        )
+        data = company.data or {}
+        used = data.get("ai_prompts_used", 0)
+        limit = data.get("ai_prompts_limit", 100)
+        raise PermissionError(
+            f"AI prompt limit reached ({used}/{limit}). Please upgrade your plan."
+        )
+
+
+def check_and_increment(project_id: str) -> None:
+    """Same as check_and_increment_by_company but resolves company_id from project_id first."""
     company_id = get_company_id_for_project(project_id)
     if not company_id:
-        return  # no company found — allow without blocking
-
-    company = (
-        db.table("companies")
-        .select("ai_prompts_used, ai_prompts_limit")
-        .eq("id", company_id)
-        .single()
-        .execute()
-    )
-
-    data = company.data or {}
-    used = data.get("ai_prompts_used") or 0
-    limit = data.get("ai_prompts_limit") or 100
-
-    if used >= limit:
-        raise PermissionError(
-            f"AI prompt limit reached ({used}/{limit}). Please upgrade your plan."
-        )
-
-    db.table("companies").update({"ai_prompts_used": used + 1}).eq("id", company_id).execute()
-
-def check_and_increment_by_company(company_id: str) -> None:
-    """Same as check_and_increment but takes company_id directly."""
-    db = get_supabase()
-    company = (
-        db.table("companies")
-        .select("ai_prompts_used, ai_prompts_limit")
-        .eq("id", company_id)
-        .single()
-        .execute()
-    )
-    data = company.data or {}
-    used = data.get("ai_prompts_used") or 0
-    limit = data.get("ai_prompts_limit") or 100
-
-    if used >= limit:
-        raise PermissionError(
-            f"AI prompt limit reached ({used}/{limit}). Please upgrade your plan."
-        )
-
-    db.table("companies").update({"ai_prompts_used": used + 1}).eq("id", company_id).execute()
+        return  # No company found — allow without blocking
+    check_and_increment_by_company(company_id)
