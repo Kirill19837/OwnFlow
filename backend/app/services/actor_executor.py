@@ -111,7 +111,16 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
 
     # Check AI prompt limit before dispatching to external agent
     from app.services.usage_guard import check_and_increment
-    check_and_increment(project["id"])
+    try:
+        check_and_increment(project["id"])
+    except PermissionError as exc:
+        return {
+            "type": "error",
+            "message": str(exc),
+            "task_id": task.get("id"),
+            "dispatched": False,
+            "actor": actor.get("name"),
+        }
 
     webhook_url = actor.get("webhook_url")
     if not webhook_url:
@@ -241,7 +250,16 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
     """Spawn the built-in ownflow-agent Docker container for this task."""
     # Check AI prompt limit before spawning the container
     from app.services.usage_guard import check_and_increment
-    check_and_increment(project["id"])
+    try:
+        check_and_increment(project["id"])
+    except PermissionError as exc:
+        return {
+            "type": "error",
+            "message": str(exc),
+            "task_id": task.get("id"),
+            "dispatched": False,
+            "actor": actor.get("name"),
+        }
 
     settings = get_settings()
     callback_token = secrets.token_hex(32)

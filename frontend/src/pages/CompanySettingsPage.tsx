@@ -334,7 +334,7 @@ export default function CompanySettingsPage() {
                             : 'bg-purple-500'
                 }`}
                 style={{
-                  width: `${Math.min(100, ((company.ai_prompts_used ?? 0) / (company.ai_prompts_limit ?? 100)) * 100)}%`
+                  width: `${Math.min(100, ((company.ai_prompts_used ?? 0) / Math.max(1, (company.ai_prompts_limit ?? 100))) * 100)}%`
                 }}
             />
           </div>

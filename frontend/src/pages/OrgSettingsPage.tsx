@@ -65,9 +65,9 @@ export default function OrgSettingsPage() {
   })
 
   const { data: company } = useQuery({
-    queryKey: ['company-my'],
-    queryFn: () => api.get(`/companies/my?user_id=${session!.user.id}`).then((r) => r.data),
-    enabled: !!session?.user.id,
+    queryKey: ['company', session?.user.id],
+    queryFn: () => api.get('/companies/my', { params: { user_id: session!.user.id } }).then((r) => r.data),
+    enabled: !!session,
   })
 
   const companyTeamDetails = useQueries({
@@ -379,7 +379,7 @@ export default function OrgSettingsPage() {
                                 : 'bg-purple-500'
                     }`}
                     style={{
-                      width: `${Math.min(100, ((company.ai_prompts_used ?? 0) / (company.ai_prompts_limit ?? 100)) * 100)}%`
+                      width: `${Math.min(100, ((company.ai_prompts_used ?? 0) / Math.max(1, (company.ai_prompts_limit ?? 100))) * 100)}%`
                     }}
                 />
               </div>

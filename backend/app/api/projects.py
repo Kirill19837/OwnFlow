@@ -117,8 +117,8 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", 
 
         db.table("projects").update({"status": "active"}).eq("id", project_id).execute()
     except PermissionError:
-        # Limit reached — do not mark project as error, just stop silently
-        raise
+        # Limit reached — do not mark project as error; stop planning.
+        return
     except Exception:
         db.table("projects").update({"status": "error"}).eq("id", project_id).execute()
         raise
