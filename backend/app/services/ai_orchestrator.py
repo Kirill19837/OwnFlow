@@ -94,6 +94,7 @@ async def plan_sprint_one(
         {"role": "system", "content": SPRINT_ONE_SYSTEM},
         {"role": "user", "content": f"Plan this project:\n\n{prompt}{actors_text}"},
     ]
+
     raw = await provider.complete(messages, response_format={"type": "json_object"})
 
     if project_id:
@@ -189,6 +190,7 @@ async def generate_next_sprint(
             ),
         },
     ]
+
     raw = await provider.complete(messages, response_format={"type": "json_object"})
     _persist_ai_message(project_id, f"planning_sprint{sprint_number}", model, messages, raw)
 

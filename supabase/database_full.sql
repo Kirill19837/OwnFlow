@@ -56,14 +56,6 @@ insert into roles (id, name, description) values
 
 -- ─── Companies ───────────────────────────────────────────────────────────────
 
--- ─── Drop existing enum types (recreated below) ───────────────────────────────
-
-drop type if exists company_plan cascade;
-
--- ─── Enum types ───────────────────────────────────────────────────────────────
-
-create type company_plan as enum ('free', 'standard', 'pro');
-
 create table companies (
   id                  uuid        primary key default gen_random_uuid(),
   name                text        not null,
@@ -72,7 +64,8 @@ create table companies (
   phone               text,
   openai_api_key      text,
   anthropic_api_key   text,
-  plan                company_plan not null default 'free',
+  ai_prompts_used     integer     not null default 0,
+  ai_prompts_limit    integer     not null default 100,
   created_at          timestamptz not null default now()
 );
 

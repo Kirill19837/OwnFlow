@@ -341,6 +341,12 @@ async def prompt_task_stream(task_id: str, body: dict):
     if not task:
         raise HTTPException(404, "Task not found")
 
+    from app.services.usage_guard import check_and_increment
+    try:
+        check_and_increment(task["project_id"])
+    except PermissionError as e:
+        raise HTTPException(402, str(e))
+
     project_resp = (
         db.table("projects").select("name,prompt").eq("id", task["project_id"]).single().execute()
     )
