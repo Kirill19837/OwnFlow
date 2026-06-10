@@ -8,7 +8,8 @@ export interface Company {
   default_team_id?: string
   phone?: string | null
   openai_key_set?: boolean
-  anthropic_key_set?: boolean
+  anthropic_key_set?: boolean,
+  plan?: 'free' | 'standard' | 'pro'
 }
 
 export interface CompanyAgent {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
@@ -22,6 +22,8 @@ ROLE_IDS = {
     "member": "00000000-0000-0000-0000-000000000003",
 }
 ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
+
+VALID_PLANS = ("free", "standard", "pro")
 
 
 def _slug(name: str) -> str:
@@ -56,8 +58,6 @@ def create_company(body: CompanyCreate):
     if body.password is not None and len(body.password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
 
-    # Atomically set password + name BEFORE creating company rows.
-    # This ensures profile is never half-saved if company creation fails.
     if body.password or body.full_name:
         user_update: dict = {}
         if body.password:
@@ -72,7 +72,6 @@ def create_company(body: CompanyCreate):
         except Exception as exc:
             raise HTTPException(400, f"Failed to update profile: {exc}")
 
-    # Create company
     slug = _slug(body.name)
     if db.table("companies").select("id").eq("slug", slug).execute().data:
         slug = f"{slug}-{str(uuid.uuid4())[:6]}"
@@ -87,7 +86,6 @@ def create_company(body: CompanyCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
 
-    # Auto-create first team with same name
     team_slug = f"{slug}-team"
     if db.table("teams").select("id").eq("slug", team_slug).execute().data:
         team_slug = f"{team_slug}-{str(uuid.uuid4())[:6]}"
@@ -107,7 +105,6 @@ def create_company(body: CompanyCreate):
         "role": ROLE_IDS["owner"],
     }).execute()
 
-    # Mark the owner's onboarding as complete.
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc).isoformat()
     try:
@@ -118,7 +115,7 @@ def create_company(body: CompanyCreate):
             "completed_at": _now,
         }, on_conflict="user_id").execute()
     except Exception:
-        pass  # Non-blocking
+        pass
 
     return {**company_row, "my_role": "owner", "default_team_id": team_id}
 
@@ -149,7 +146,6 @@ def list_teams(company_id: str, user_id: Optional[str] = None):
     db = get_supabase()
 
     if user_id:
-        # Fetch only the teams this user belongs to within the company
         memberships = (
             db.table("team_members")
             .select("team_id, role")
@@ -172,7 +168,6 @@ def list_teams(company_id: str, user_id: Optional[str] = None):
             t["my_role"] = role_map.get(t["id"])
         return result
 
-    # No user_id — return all teams without role annotation (admin/internal use)
     teams = db.table("teams").select("*").eq("company_id", company_id).execute()
     return teams.data or []
 
@@ -216,18 +211,14 @@ class CompanyUpdate(BaseModel):
     phone: Optional[str] = None
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    plan: Optional[Literal["free", "standard", "pro"]] = None
 
 
 _SECRET_COMPANY_FIELDS = {"openai_api_key", "anthropic_api_key"}
 
 
 def _mask_company(data: dict) -> dict:
-    """Replace sensitive API key fields with presence booleans.
-
-    The raw key values are never sent to the client — only whether a key is
-    set (True) or not (False/None).  The frontend stores these as
-    openai_key_set / anthropic_key_set.
-    """
+    """Replace sensitive API key fields with presence booleans."""
     result = {k: v for k, v in data.items() if k not in _SECRET_COMPANY_FIELDS}
     for field in _SECRET_COMPANY_FIELDS:
         if field in data:
@@ -253,7 +244,7 @@ def _require_company_owner(db, company_id: str, user_id: str) -> None:
 
 @router.patch("/{company_id}")
 def update_company(company_id: str, body: CompanyUpdate, user_id: str):
-    """Rename or update phone. Only the company owner."""
+    """Rename, update phone, API keys, or change plan. Only the company owner."""
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
     update = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -265,14 +256,10 @@ def update_company(company_id: str, body: CompanyUpdate, user_id: str):
 
 @router.delete("/{company_id}", status_code=204)
 def delete_company(company_id: str, user_id: str):
-    """
-    Delete a company and cascade-remove all its teams, memberships and invites.
-    Only the company owner can do this.
-    """
+    """Delete a company and cascade-remove all its teams, memberships and invites."""
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
 
-    # Remove all teams belonging to this company
     teams = db.table("teams").select("id").eq("company_id", company_id).execute()
     for t in (teams.data or []):
         tid = t["id"]
@@ -295,11 +282,11 @@ def _validate_webhook_url(v: str) -> str:
 class CompanyAgentCreate(BaseModel):
     name: str
     role: Optional[str] = None
-    agent_type: str = "webhook"  # 'webhook' | 'builtin'
+    agent_type: str = "webhook"
     webhook_url: Optional[str] = None
     docker_image: Optional[str] = None
     agent_api_key: Optional[str] = None
-    extra_env: Optional[dict] = None   # {KEY: VALUE} injected into Docker containers; values are secrets
+    extra_env: Optional[dict] = None
     description: Optional[str] = None
 
     @field_validator("webhook_url")
@@ -346,7 +333,6 @@ class CompanyAgentUpdate(BaseModel):
 def list_company_agents(company_id: str, user_id: str):
     """List all reusable agents registered for the company."""
     db = get_supabase()
-    # Any member can read agents
     member = (
         db.table("company_members")
         .select("role")
@@ -361,7 +347,6 @@ def list_company_agents(company_id: str, user_id: str):
     agents = []
     for a in (resp.data or []):
         masked = {**a, "agent_api_key": "***" if a.get("agent_api_key") else None}
-        # Mask extra_env values — keys are safe to expose, values are secrets
         if isinstance(masked.get("extra_env"), dict):
             masked["extra_env"] = {k: "***" for k in masked["extra_env"]}
         agents.append(masked)
@@ -398,29 +383,15 @@ def create_company_agent(company_id: str, body: CompanyAgentCreate, user_id: str
 
 @router.patch("/{company_id}/agents/{agent_id}")
 def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdate, user_id: str):
-    """Update an agent. Only company owner.
-
-    Omitted fields are left unchanged.
-    Send null explicitly to clear optional fields (agent_api_key, description,
-    role, webhook_url, docker_image).  name cannot be cleared (400 if sent as null).
-
-    Invariants enforced after the patch:
-    - webhook agents must have a non-null webhook_url
-    - builtin agents must have a non-null docker_image
-    Switching agent_type auto-clears the dispatch field that no longer applies
-    (unless the client explicitly supplies a replacement in the same request).
-    """
+    """Update an agent. Only company owner."""
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
-    # exclude_unset=True: only fields the client actually sent are included,
-    # so omitting a field leaves it unchanged, while sending null clears it.
     update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(400, "No fields to update")
     if "name" in update and not update["name"]:
         raise HTTPException(400, "name cannot be empty or null")
 
-    # Fetch current row to evaluate the effective state after the patch.
     current_resp = (
         db.table("company_agents")
         .select("agent_type,webhook_url,docker_image")
@@ -442,8 +413,6 @@ def update_company_agent(company_id: str, agent_id: str, body: CompanyAgentUpdat
     if effective_type == "builtin" and not effective_docker:
         raise HTTPException(400, "docker_image is required for builtin agents")
 
-    # On type change, clear the dispatch field that no longer applies
-    # (only if the client did not supply an explicit value for it).
     if "agent_type" in update and update["agent_type"] != current["agent_type"]:
         if update["agent_type"] == "webhook":
             update.setdefault("docker_image", None)
@@ -465,4 +434,3 @@ def delete_company_agent(company_id: str, agent_id: str, user_id: str):
     db = get_supabase()
     _require_company_owner(db, company_id, user_id)
     db.table("company_agents").delete().eq("id", agent_id).eq("company_id", company_id).execute()
-
