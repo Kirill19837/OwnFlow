@@ -54,6 +54,14 @@ insert into roles (id, name, description) values
   ('00000000-0000-0000-0000-000000000002', 'admin',  'Can manage members and settings but cannot delete the entity'),
   ('00000000-0000-0000-0000-000000000003', 'member', 'Read/write access to projects and tasks');
 
+-- ─── Drop existing enum types (recreated below) ───────────────────────────────
+
+drop type if exists company_plan cascade;
+
+-- ─── Enum types ───────────────────────────────────────────────────────────────
+
+create type company_plan as enum ('free', 'standard', 'pro');
+
 -- ─── Companies ───────────────────────────────────────────────────────────────
 
 create table companies (
@@ -66,6 +74,7 @@ create table companies (
   anthropic_api_key   text,
   ai_prompts_used     integer     not null default 0,
   ai_prompts_limit    integer     not null default 100,
+  plan                company_plan not null default 'free',
   created_at          timestamptz not null default now()
 );
 

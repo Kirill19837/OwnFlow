@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import sentry_sdk
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.api import projects, tasks, actors, teams, github, companies, auth, skills, agents, ai_logs, memory, board_assistant
 
@@ -24,6 +25,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(PermissionError)
+async def ai_limit_handler(request: Request, exc: PermissionError):
+    return JSONResponse(status_code=402, content={"detail": str(exc)})
 
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])

@@ -25,6 +25,8 @@ ROLE_NAMES = {v: k for k, v in ROLE_IDS.items()}
 
 VALID_PLANS = ("free", "standard", "pro")
 
+PLAN_LIMITS: dict[str, int] = {"free": 100, "standard": 500, "pro": 1000}
+
 
 def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -250,6 +252,8 @@ def update_company(company_id: str, body: CompanyUpdate, user_id: str):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
+    if "plan" in update:
+        update["ai_prompts_limit"] = PLAN_LIMITS[update["plan"]]
     db.table("companies").update(update).eq("id", company_id).execute()
     return {"company_id": company_id, **_mask_company(update)}
 

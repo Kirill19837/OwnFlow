@@ -26,6 +26,12 @@ async def prompt_project_stream(project_id: str, body: dict):
     if not project:
         raise HTTPException(404, "Project not found")
 
+    from app.services.usage_guard import check_and_increment
+    try:
+        check_and_increment(project_id)
+    except PermissionError as e:
+        raise HTTPException(402, str(e))
+
     sprints_resp = db.table("sprints").select("id,sprint_number").eq("project_id", project_id).execute()
     sprint_ids = [s["id"] for s in sprints_resp.data or []]
     tasks_resp = (
