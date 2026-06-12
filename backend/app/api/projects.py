@@ -17,6 +17,7 @@ from app.api.actors import _mask_actor
 from app.api.tasks import _strip_task
 import uuid
 import json
+from app.exceptions import AiLimitReachedError
 
 router = APIRouter()
 
@@ -116,7 +117,7 @@ async def _run_planning(project_id: str, prompt: str, ai_model: str = "gpt-4o", 
             await auto_assign(sprint["id"])
 
         db.table("projects").update({"status": "active"}).eq("id", project_id).execute()
-    except PermissionError:
+    except AiLimitReachedError:
         # Limit reached — do not mark project as error; stop planning.
         return
     except Exception:
@@ -157,7 +158,7 @@ async def plan_stream(project_id: str, ai_model: str = "gpt-4o"):
             from app.services.usage_guard import check_and_increment
             try:
                 check_and_increment(project_id)
-            except PermissionError as e:
+            except AiLimitReachedError as e:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
                 return
 

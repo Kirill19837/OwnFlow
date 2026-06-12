@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
+import { useAiLimitStore } from '../store/aiLimitStore'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
@@ -17,5 +18,20 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+// Intercept HTTP 402 (AI prompt limit reached) and open the upgrade modal.
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 402) {
+        const detail: string = error.response.data?.detail ?? ''
+        const match = detail.match(/(\d+)\/(\d+)/)
+        useAiLimitStore.getState().open(
+            match ? { used: Number(match[1]), limit: Number(match[2]) } : {}
+        )
+      }
+      return Promise.reject(error)
+    }
+)
 
 export default api

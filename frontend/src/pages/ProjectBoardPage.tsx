@@ -11,6 +11,7 @@ import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../ty
 import { ExtraEnvEditor } from '../components/ExtraEnvEditor'
 import { envObjToPairs } from '../lib/envUtils'
 import type { EnvPair } from '../lib/envUtils'
+import { fetchWithAiLimitCheck } from '../lib/fetchWithAiLimitCheck'
 
 // Mirrors backend ROLE_IMAGE_MAP in actor_executor.py
 const ROLE_IMAGE_MAP: Record<string, string> = {
@@ -381,7 +382,7 @@ export default function ProjectBoardPage() {
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetch(`${baseUrl}/projects/${projectId}/prompt/stream`, {
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/projects/${projectId}/prompt/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -431,7 +432,12 @@ export default function ProjectBoardPage() {
       }
       finalHistory.push({ role: 'assistant', content: assistantContent })
       setBoardChatHistory(finalHistory)
-    } catch { /* stream error — silently stop */ }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'AI prompt limit reached') {
+        // Modal already opened by fetchWithAiLimitCheck
+      }
+      // stream error — silently stop
+    }
 
     setBoardPromptStreaming(false)
     setTimeout(() => boardChatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)

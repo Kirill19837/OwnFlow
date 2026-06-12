@@ -11,6 +11,7 @@ export interface Company {
   anthropic_key_set?: boolean
   ai_prompts_used?: number
   ai_prompts_limit?: number
+  plan?: 'free' | 'standard' | 'pro'
 }
 
 export interface CompanyAgent {

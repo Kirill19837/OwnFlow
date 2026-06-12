@@ -13,6 +13,7 @@ import { ConfirmationModal } from './ConfirmationModal'
 import { AiCommandsModal } from './AiCommandsModal'
 import { FileViewerModal } from './FileViewerModal'
 import RepoGateModal from './RepoGateModal'
+import { fetchWithAiLimitCheck } from '../lib/fetchWithAiLimitCheck'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -336,7 +337,7 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetch(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: msg, history: historyForBackend }),
@@ -415,7 +416,7 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetch(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
       if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
       let planShown = false
       let deliverableContent = ''
