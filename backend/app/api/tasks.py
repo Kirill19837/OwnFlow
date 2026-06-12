@@ -15,6 +15,7 @@ from app.assistants import (
     strip_duplicate_task_details,
 )
 import json
+from app.exceptions import AiLimitReachedError
 
 router = APIRouter()
 project_router = APIRouter()
@@ -344,7 +345,7 @@ async def prompt_task_stream(task_id: str, body: dict):
     from app.services.usage_guard import check_and_increment
     try:
         check_and_increment(task["project_id"])
-    except PermissionError as e:
+    except AiLimitReachedError as e:
         raise HTTPException(402, str(e))
 
     project_resp = (

@@ -1,5 +1,4 @@
-
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, Building2, Pencil, Check, Trash2, Key, Bot, Zap, Star, Rocket } from 'lucide-react'
@@ -8,9 +7,9 @@ import { useCompanyStore } from '../store/companyStore'
 import { useTeamStore } from '../store/teamStore'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { PLAN_LIMITS } from '../lib/planLimits'
 
 type Plan = 'free' | 'standard' | 'pro'
-const PLAN_LIMITS: Record<Plan, number> = { free: 100, standard: 500, pro: 1000 }
 
 const PLANS: {
   id: Plan
@@ -110,9 +109,16 @@ export default function CompanySettingsPage() {
   const [editingAnthropic, setEditingAnthropic] = useState(false)
   const [newAnthropicKey, setNewAnthropicKey] = useState('')
   const [selectedPlan, setSelectedPlan] = useState<Plan>((company?.plan as Plan) ?? 'free')
+  const userPickedPlan = useRef(false)
 
   const currentPlan: Plan = (company?.plan as Plan) ?? 'free'
   const planChanged = selectedPlan !== currentPlan
+
+  useEffect(() => {
+    if (!userPickedPlan.current && company?.plan) {
+      setSelectedPlan(company.plan as Plan)
+    }
+  }, [company?.plan])
 
   const rename = useMutation({
     mutationFn: (name: string) =>
@@ -325,7 +331,10 @@ export default function CompanySettingsPage() {
                 return (
                     <button
                         key={plan.id}
-                        onClick={() => setSelectedPlan(plan.id)}
+                        onClick={() => {
+                          userPickedPlan.current = true
+                          setSelectedPlan(plan.id)
+                        }}
                         className={`relative text-left rounded-xl border-2 p-4 transition-all ${isSelected ? plan.activeClass : plan.idleClass}`}
                     >
                       {isCurrent && (
@@ -370,7 +379,10 @@ export default function CompanySettingsPage() {
                         : `Switch to ${PLANS.find(p => p.id === selectedPlan)?.label}`}
                   </button>
                   <button
-                      onClick={() => setSelectedPlan(currentPlan)}
+                      onClick={() => {
+                        userPickedPlan.current = false
+                        setSelectedPlan(currentPlan)
+                      }}
                       className="text-sm text-gray-400 hover:text-white transition-colors"
                   >
                     Cancel

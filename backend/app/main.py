@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.api import projects, tasks, actors, teams, github, companies, auth, skills, agents, ai_logs, memory, board_assistant
+from app.exceptions import AiLimitReachedError
 
 settings = get_settings()
 
@@ -26,8 +27,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.exception_handler(PermissionError)
-async def ai_limit_handler(request: Request, exc: PermissionError):
+@app.exception_handler(AiLimitReachedError)
+async def ai_limit_handler(request: Request, exc: AiLimitReachedError):
     return JSONResponse(status_code=402, content={"detail": str(exc)})
 
 app.include_router(projects.router, prefix="/projects", tags=["projects"])

@@ -1,5 +1,5 @@
 from app.db import get_supabase
-
+from app.exceptions import AiLimitReachedError
 
 def get_company_id_for_project(project_id: str) -> str | None:
     """Resolve company_id for a project via project → team → company."""
@@ -15,7 +15,7 @@ def get_company_id_for_project(project_id: str) -> str | None:
 def check_and_increment_by_company(company_id: str) -> None:
     """
     Atomically check the AI prompt limit and increment the counter by 1.
-    Raises PermissionError if the limit is already reached.
+    Raises AiLimitReachedError if the limit is already reached.
     """
     db = get_supabase()
 
@@ -34,7 +34,7 @@ def check_and_increment_by_company(company_id: str) -> None:
         data = company.data or {}
         used = data.get("ai_prompts_used", 0)
         limit = data.get("ai_prompts_limit", 100)
-        raise PermissionError(
+        raise AiLimitReachedError(
             f"AI prompt limit reached ({used}/{limit}). Please upgrade your plan."
         )
 

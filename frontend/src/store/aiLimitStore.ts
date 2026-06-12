@@ -16,5 +16,5 @@ export const useAiLimitStore = create<AiLimitStore>((set) => ({
     isOpen: false,
     info: {},
     open: (info = {}) => set({ isOpen: true, info }),
-    close: () => set({ isOpen: false }),
+    close: () => set({ isOpen: false, info: {} }),
 }))

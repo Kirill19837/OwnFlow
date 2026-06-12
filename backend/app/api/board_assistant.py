@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.db import get_supabase
 from app.providers.registry import get_provider
 from app.assistants import build_project_board_messages
+from app.exceptions import AiLimitReachedError
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ async def prompt_project_stream(project_id: str, body: dict):
     from app.services.usage_guard import check_and_increment
     try:
         check_and_increment(project_id)
-    except PermissionError as e:
+    except AiLimitReachedError as e:
         raise HTTPException(402, str(e))
 
     sprints_resp = db.table("sprints").select("id,sprint_number").eq("project_id", project_id).execute()

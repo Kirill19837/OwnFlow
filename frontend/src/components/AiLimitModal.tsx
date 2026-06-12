@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Zap, Rocket, Star, X, ArrowRight } from 'lucide-react'
+import { PLAN_LABELS } from '../lib/planLimits'
 
 interface Props {
   used?: number
@@ -23,15 +24,19 @@ export default function AiLimitModal({ used, limit, onClose }: Props) {
             onClick={onClose}
         />
 
-        {/* Modal */}
-        <div className="relative w-full max-w-md bg-gray-950 border border-gray-800 rounded-2xl shadow-2xl overflow-hidden">
-          {/* Top accent bar */}
-          <div className="h-1 w-full bg-gradient-to-r from-purple-600 via-purple-400 to-amber-400" />
+        {/* Added role="dialog", aria-modal and aria-labelledby for screen readers */}
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ai-limit-modal-title"
+            className="relative w-full max-w-md bg-gray-950 border border-gray-800 rounded-2xl shadow-2xl overflow-hidden"
+        >
 
           <div className="px-6 pt-5 pb-6">
-            {/* Close */}
+            {/* aria-label gives screen readers an accessible name for the close button */}
             <button
                 onClick={onClose}
+                aria-label="Close"
                 className="absolute top-4 right-4 text-gray-600 hover:text-gray-300 transition-colors"
             >
               <X size={18} />
@@ -43,7 +48,10 @@ export default function AiLimitModal({ used, limit, onClose }: Props) {
                 <Zap size={18} className="text-amber-400" />
               </div>
               <div>
-                <h2 className="text-white font-semibold text-lg leading-tight">AI request limit reached</h2>
+                {/* id matches aria-labelledby on the dialog container */}
+                <h2 id="ai-limit-modal-title" className="text-white font-semibold text-lg leading-tight">
+                  AI request limit reached
+                </h2>
                 {used !== undefined && limit !== undefined && (
                     <p className="text-gray-500 text-sm mt-0.5">
                       {used} / {limit} requests used this month
@@ -64,21 +72,21 @@ export default function AiLimitModal({ used, limit, onClose }: Props) {
               Upgrade your plan to continue using AI actors and task execution.
             </p>
 
-            {/* Plan options */}
+            {/* Plan limits pulled from PLAN_LABELS to stay in sync with CompanySettingsPage */}
             <div className="grid grid-cols-2 gap-3 mb-6">
               <div className="bg-gray-900 border border-purple-800/50 rounded-xl p-3">
                 <div className="flex items-center gap-1.5 mb-1 text-purple-300 font-semibold text-sm">
                   <Star size={13} /> Standard
                 </div>
                 <p className="text-white font-bold">$50<span className="text-gray-500 font-normal text-xs"> / mo</span></p>
-                <p className="text-gray-400 text-xs mt-1">2,000 AI requests</p>
+                <p className="text-gray-400 text-xs mt-1">{PLAN_LABELS.standard}</p>
               </div>
               <div className="bg-gray-900 border border-amber-700/50 rounded-xl p-3">
                 <div className="flex items-center gap-1.5 mb-1 text-amber-300 font-semibold text-sm">
                   <Rocket size={13} /> Pro
                 </div>
                 <p className="text-white font-bold">$100<span className="text-gray-500 font-normal text-xs"> / mo</span></p>
-                <p className="text-gray-400 text-xs mt-1">Unlimited requests</p>
+                <p className="text-gray-400 text-xs mt-1">{PLAN_LABELS.pro}</p>
               </div>
             </div>
 

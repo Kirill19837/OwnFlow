@@ -14,6 +14,7 @@ from app.services.github_service import create_pr_for_task, get_connection_for_p
 from app.config import get_settings
 import uuid
 from datetime import datetime, timezone
+from app.exceptions import AiLimitReachedError
 
 # Role → Docker image mapping for built-in agent types.
 # Resolution order: actor.docker_image (explicit) → role-based → "default" entry
@@ -113,7 +114,7 @@ async def _dispatch_external_agent(task: dict, actor: dict, project: dict, db) -
     from app.services.usage_guard import check_and_increment
     try:
         check_and_increment(project["id"])
-    except PermissionError as exc:
+    except AiLimitReachedError as exc:
         return {
             "type": "error",
             "message": str(exc),
@@ -252,7 +253,7 @@ async def _dispatch_docker_agent(task: dict, actor: dict, project: dict, db) -> 
     from app.services.usage_guard import check_and_increment
     try:
         check_and_increment(project["id"])
-    except PermissionError as exc:
+    except AiLimitReachedError as exc:
         return {
             "type": "error",
             "message": str(exc),
@@ -565,7 +566,7 @@ async def stream_task_execution(task_id: str, actor_id: str):
     from app.services.usage_guard import check_and_increment
     try:
         check_and_increment(project["id"])
-    except PermissionError as e:
+    except AiLimitReachedError as e:
         yield json.dumps({"type": "error", "message": str(e)})
         return
 

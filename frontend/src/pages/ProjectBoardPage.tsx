@@ -11,7 +11,7 @@ import type { Project, Assignment, TeamMember, Skill, CompanyAgent } from '../ty
 import { ExtraEnvEditor } from '../components/ExtraEnvEditor'
 import { envObjToPairs } from '../lib/envUtils'
 import type { EnvPair } from '../lib/envUtils'
-import { useAiLimitStore } from '../store/aiLimitStore'
+import { fetchWithAiLimitCheck } from '../lib/fetchWithAiLimitCheck'
 
 // Mirrors backend ROLE_IMAGE_MAP in actor_executor.py
 const ROLE_IMAGE_MAP: Record<string, string> = {
@@ -57,24 +57,6 @@ const COLUMNS = [
   { id: 'done', label: 'Done' },
   { id: 'rework', label: 'Rework' },
 ] as const
-
-async function fetchWithLimitCheck(input: RequestInfo, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init)
-  if (res.status === 402) {
-    try {
-      const body = await res.clone().json()
-      const detail: string = body?.detail ?? ''
-      const match = detail.match(/(\d+)\/(\d+)/)
-      useAiLimitStore.getState().open(
-          match ? { used: Number(match[1]), limit: Number(match[2]) } : {}
-      )
-    } catch {
-      useAiLimitStore.getState().open()
-    }
-    throw new Error('AI prompt limit reached')
-  }
-  return res
-}
 
 export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -400,7 +382,7 @@ export default function ProjectBoardPage() {
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetchWithLimitCheck(`${baseUrl}/projects/${projectId}/prompt/stream`, {
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/projects/${projectId}/prompt/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -452,7 +434,7 @@ export default function ProjectBoardPage() {
       setBoardChatHistory(finalHistory)
     } catch (err) {
       if (err instanceof Error && err.message === 'AI prompt limit reached') {
-        // Modal already opened by fetchWithLimitCheck
+        // Modal already opened by fetchWithAiLimitCheck
       }
       // stream error — silently stop
     }

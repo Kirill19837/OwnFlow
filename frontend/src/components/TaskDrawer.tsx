@@ -13,7 +13,7 @@ import { ConfirmationModal } from './ConfirmationModal'
 import { AiCommandsModal } from './AiCommandsModal'
 import { FileViewerModal } from './FileViewerModal'
 import RepoGateModal from './RepoGateModal'
-import { useAiLimitStore } from '../store/aiLimitStore'
+import { fetchWithAiLimitCheck } from '../lib/fetchWithAiLimitCheck'
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'review', 'done', 'rework'] as const
 
@@ -82,24 +82,6 @@ function parseDeliverableFiles(raw: unknown): StoredFile[] {
   } catch {
     return []
   }
-}
-
-async function fetchWithLimitCheck(input: RequestInfo, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init)
-  if (res.status === 402) {
-    try {
-      const body = await res.clone().json()
-      const detail: string = body?.detail ?? ''
-      const match = detail.match(/(\d+)\/(\d+)/)
-      useAiLimitStore.getState().open(
-          match ? { used: Number(match[1]), limit: Number(match[2]) } : {}
-      )
-    } catch {
-      useAiLimitStore.getState().open()
-    }
-    throw new Error('AI prompt limit reached')
-  }
-  return res
 }
 
 async function readSSE(
@@ -355,7 +337,7 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetchWithLimitCheck(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/tasks/${task.id}/prompt/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: msg, history: historyForBackend }),
@@ -434,7 +416,7 @@ export default function TaskDrawer({ task, actors, onClose, githubConnected, git
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const res = await fetchWithLimitCheck(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
+      const res = await fetchWithAiLimitCheck(`${baseUrl}/tasks/${task.id}/execute/stream`, { signal: ctrl.signal })
       if (!res.ok || !res.body) throw new Error('Execute stream unavailable')
       let planShown = false
       let deliverableContent = ''
